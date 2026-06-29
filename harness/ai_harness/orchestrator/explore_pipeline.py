@@ -8,6 +8,7 @@ from typing import Callable, Mapping, Protocol, Sequence
 from ..errors import HarnessError
 from ..phases import get_phase
 from .context import RunContext
+from .exploration_map import ExplorationMapBuilder
 
 
 class ExplorePipelineCallbacks(Protocol):
@@ -65,6 +66,18 @@ class ExplorePipelineService:
             "evidence_collection": evidence_collection,
             "ci_barrier": ci_barrier,
         })
+        exploration_map = ExplorationMapBuilder(
+            request_understanding=request_understanding,
+            triage=triage,
+            evidence_plan=evidence_plan,
+            evidence_collection=evidence_collection,
+            ci_barrier=ci_barrier,
+            evidence_normalization=evidence_normalization,
+            repository_observations=observations,
+            related_improvements=related,
+        ).build()
+        self._ctx.artifacts.write_json("explore/exploration_map.json", exploration_map)
+        self._ctx.state.record_artifact("explore/exploration_map.json", "EXPLORE")
         outcome_bundle = self._invoke_json("explore_outcome_synthesis", {
             "request": self._callbacks.request_brief(),
             "request_understanding": request_understanding,
@@ -74,7 +87,13 @@ class ExplorePipelineService:
             "evidence_collection": evidence_collection,
             "ci_barrier": ci_barrier,
             "evidence_normalization": evidence_normalization,
+            "exploration_map": exploration_map,
         })
+        if "exploration_map" not in outcome_bundle:
+            outcome_bundle["exploration_map"] = exploration_map
+            get_phase("explore_outcome_synthesis").validate(json.dumps(outcome_bundle))
+            self._ctx.artifacts.write_json("explore/outcome_bundle.json", outcome_bundle)
+            self._ctx.state.record_artifact("explore/outcome_bundle.json", "EXPLORE_OUTCOME_SYNTHESIS")
         review = self._invoke_text("explore_review", {
             "outcome_bundle": outcome_bundle,
             "request_understanding": request_understanding,

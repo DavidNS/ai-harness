@@ -26,6 +26,18 @@ _EVIDENCE_DEPTHS = frozenset({"light", "standard", "deep"})
 _GATHERERS = frozenset({"code", "git", "gitlab", "web", "knowledge", "ci"})
 _CI_REQUIREMENTS = frozenset({"required", "optional", "not_needed"})
 _CI_STATUSES = frozenset({"ready", "unavailable", "not_needed"})
+_SURFACE_KINDS = frozenset({
+    "implementation_surface", "test_surface", "documentation_surface", "ci_surface",
+    "repository_surface", "security_surface", "performance_surface", "data_surface",
+    "integration_surface",
+})
+_BEHAVIOR_STATUSES = frozenset({"observed", "not_observed", "partially_observed", "contradicted", "unresolved", "not_applicable"})
+_WORK_SHAPES = frozenset({
+    "direct_change", "change_with_extraction", "change_with_test_gap_closure",
+    "security_sensitive_change", "performance_baseline_then_change",
+    "migration_sensitive_change", "investigation_needed", "documentation_only",
+})
+_HANDOFF_PHASES = frozenset({"purpose", "design", "tasks"})
 
 
 def _validation_error(message: str, cause: Exception | None = None) -> PhaseValidationError:
@@ -139,6 +151,70 @@ def _validate_evidence_items(value: object, field: str, *, allow_empty: bool) ->
     return evidence
 
 
+def _validate_evidence_refs(value: object, field: str, evidence_ids: set[str]) -> None:
+    for evidence_ref in _optional_text_list(value, field):
+        if evidence_ids and evidence_ref not in evidence_ids:
+            raise _validation_error(f"{field} must reference evidence IDs")
+
+
+def _validate_exploration_map(value: object, evidence_ids: set[str]) -> None:
+    if value is None:
+        return
+    exploration_map = _mapping(value, "exploration_map")
+    if exploration_map.get("schema_version") != 1 or exploration_map.get("kind") != "exploration_map":
+        raise _validation_error("exploration_map version or kind is invalid")
+    for field in ("surfaces", "behaviors", "constraints", "risks", "unknowns", "candidate_work_shapes", "verification_surfaces"):
+        _object_list(exploration_map.get(field), f"exploration_map {field}")
+    for surface in _optional_object_list(exploration_map.get("surfaces"), "exploration_map surfaces"):
+        _text(surface.get("id"), "surface id")
+        _enum(surface.get("kind"), "surface kind", _SURFACE_KINDS)
+        _optional_text(surface.get("path"), "surface path")
+        _text(surface.get("why_relevant"), "surface why_relevant")
+        _validate_evidence_refs(surface.get("evidence_refs", []), "surface evidence_refs", evidence_ids)
+    for behavior in _optional_object_list(exploration_map.get("behaviors"), "exploration_map behaviors"):
+        _text(behavior.get("id"), "behavior id")
+        _enum(behavior.get("status"), "behavior status", _BEHAVIOR_STATUSES)
+        _text(behavior.get("text"), "behavior text")
+        _validate_evidence_refs(behavior.get("evidence_refs", []), "behavior evidence_refs", evidence_ids)
+    for item in _optional_object_list(exploration_map.get("constraints"), "exploration_map constraints"):
+        _text(item.get("id"), "constraint id")
+        _text(item.get("kind"), "constraint kind")
+        _text(item.get("text"), "constraint text")
+        _validate_evidence_refs(item.get("evidence_refs", []), "constraint evidence_refs", evidence_ids)
+    for item in _optional_object_list(exploration_map.get("risks"), "exploration_map risks"):
+        _text(item.get("id"), "risk id")
+        _text(item.get("kind"), "risk kind")
+        _text(item.get("text"), "risk text")
+        _optional_text(item.get("severity"), "risk severity")
+        _validate_evidence_refs(item.get("evidence_refs", []), "risk evidence_refs", evidence_ids)
+    for item in _optional_object_list(exploration_map.get("unknowns"), "exploration_map unknowns"):
+        _text(item.get("id"), "unknown id")
+        _text(item.get("text"), "unknown text")
+        phase = _optional_text(item.get("best_resolved_by"), "unknown best_resolved_by")
+        if phase is not None and phase not in _HANDOFF_PHASES:
+            raise _validation_error("unknown best_resolved_by is invalid")
+        _validate_evidence_refs(item.get("evidence_refs", []), "unknown evidence_refs", evidence_ids)
+    for item in _optional_object_list(exploration_map.get("candidate_work_shapes"), "exploration_map candidate_work_shapes"):
+        _text(item.get("id"), "work shape id")
+        _enum(item.get("shape"), "work shape", _WORK_SHAPES)
+        _text(item.get("description"), "work shape description")
+        _validate_evidence_refs(item.get("supporting_evidence_refs", []), "work shape supporting_evidence_refs", evidence_ids)
+        _validate_evidence_refs(item.get("counterevidence_refs", []), "work shape counterevidence_refs", evidence_ids)
+        phase = _optional_text(item.get("handoff_phase"), "work shape handoff_phase")
+        if phase is not None and phase not in _HANDOFF_PHASES:
+            raise _validation_error("work shape handoff_phase is invalid")
+    for item in _optional_object_list(exploration_map.get("verification_surfaces"), "exploration_map verification_surfaces"):
+        _text(item.get("id"), "verification id")
+        _text(item.get("kind"), "verification kind")
+        _text(item.get("text"), "verification text")
+        _optional_text(item.get("path"), "verification path")
+        _validate_evidence_refs(item.get("evidence_refs", []), "verification evidence_refs", evidence_ids)
+    handoff = _mapping(exploration_map.get("handoff_notes"), "exploration_map handoff_notes")
+    for phase in _HANDOFF_PHASES:
+        _text_list(handoff.get(phase), f"handoff_notes {phase}")
+
+
+
 def validate_explore_request_understanding(candidate: str) -> dict[str, Any]:
     value = _document(candidate)
     _require_stage(value, "explore_request_understanding")
@@ -233,6 +309,7 @@ def validate_explore_outcome_bundle(candidate: str) -> dict[str, Any]:
         _enum(triage.get("evidence_depth"), "triage evidence_depth", _EVIDENCE_DEPTHS)
     evidence = _validate_evidence_items(value.get("evidence", []), "evidence", allow_empty=True)
     evidence_ids = {str(item["id"]) for item in evidence}
+    _validate_exploration_map(value.get("exploration_map"), evidence_ids)
     entries = _object_list(value.get("entries", []), "entries")
     entry_ids: set[str] = set()
     for entry in entries:
