@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "items": {
+    "additionalProperties": false,
+    "properties": {
+      "acceptance_criteria": {"items": {"type": "string"}, "type": "array"},
+      "attempts": {"minimum": 0, "type": "integer"},
+      "depends_on": {"items": {"type": "string"}, "type": "array", "uniqueItems": true},
+      "id": {"minLength": 1, "type": "string"},
+      "status": {"enum": ["pending", "in_progress", "completed", "failed"]},
+      "test_commands": {"items": {"type": "string"}, "type": "array"},
+      "title": {"minLength": 1, "type": "string"}
+    },
+    "required": ["id", "title", "depends_on", "status", "acceptance_criteria", "test_commands", "attempts"],
+    "type": "object"
+  },
+  "type": "array"
+}

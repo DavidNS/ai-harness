@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "complexity": {"enum": ["LOW", "MEDIUM", "HIGH"]},
+    "confirmation_required": {"type": "boolean"},
+    "matched_signals": {"items": {"type": "string"}, "type": "array"},
+    "override_text": {"type": ["string", "null"]},
+    "overridden": {"type": "boolean"},
+    "prompted": {"type": "boolean"},
+    "reason": {"minLength": 1, "type": "string"},
+    "recommended_complexity": {"enum": ["LOW", "MEDIUM", "HIGH"]},
+    "recommended_strategy": {"enum": ["SDD", "EXPLORER", "NON_CODE_STUB"]},
+    "score": {"minimum": 0, "type": "integer"},
+    "selection_source": {"enum": ["automatic", "override", "prompt_accept", "prompt_override", "persisted"]},
+    "strategy": {"enum": ["SDD", "EXPLORER", "NON_CODE_STUB"]}
+  },
+  "required": [
+    "strategy",
+    "complexity",
+    "score",
+    "reason",
+    "matched_signals",
+    "recommended_strategy",
+    "recommended_complexity",
+    "confirmation_required",
+    "prompted",
+    "overridden",
+    "selection_source",
+    "override_text"
+  ],
+  "type": "object"
+}

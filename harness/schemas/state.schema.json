@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "artifacts": {"type": "object"}, "completed_phases": {"items": {"type": "string"}, "type": "array", "uniqueItems": true},
+    "complexity": {"enum": ["LOW", "MEDIUM", "HIGH"]}, "current_phase": {"type": "string"},
+    "errors": {"type": "array"}, "failed_phases": {"items": {"type": "string"}, "type": "array"},
+    "harness_version": {"type": "string"}, "intent": {"type": "string"}, "mode": {"enum": ["code", "non_code"]},
+    "pending_decision": {"type": ["object", "null"]}, "run_id": {"minLength": 1, "type": "string"}, "schema_version": {"const": 1},
+    "selected_model": {"type": "string"}, "selected_provider": {"enum": ["claude", "codex", "local", "unknown"]},
+    "selected_provider_command": {"items": {"type": "string"}, "type": "array"},
+    "status": {"enum": ["active", "waiting_for_user", "failed", "completed", "impossible"]},
+    "strategy": {"enum": ["SDD", "EXPLORER", "NON_CODE_STUB"]},
+    "tasks": {"type": "array"}, "timestamps": {"type": "object"}, "user_input": {"minLength": 1, "type": "string"}
+  },
+  "required": ["schema_version", "harness_version", "run_id", "user_input", "mode", "intent", "strategy", "complexity", "current_phase", "completed_phases", "failed_phases", "artifacts", "tasks", "selected_provider", "status", "errors", "timestamps"],
+  "type": "object"
+}

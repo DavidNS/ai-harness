@@ -1,0 +1,343 @@
+from __future__ import annotations
+
+import json
+import subprocess
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+from ai_harness.ci_support import (
+    ci_observations_from_artifact,
+    ci_preflight,
+    ci_status,
+    detected_ci_providers,
+    github_ci_signals,
+    gitlab_ci_signals,
+    infer_github_project,
+    infer_gitlab_project,
+    install_ci_templates,
+    maybe_create_run_branch,
+    merged_ci_signals,
+    record_ci_and_git_artifacts,
+    repository_runtime_context,
+)
+from ai_harness.models import Complexity, Mode, RunState, Strategy
+from ai_harness.stores.artifact import ArtifactStore
+from ai_harness.stores.state import StateStore
+
+
+class _Response:
+    def __init__(self, payload: object) -> None:
+        self._payload = payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        return None
+
+    def read(self) -> bytes:
+        if isinstance(self._payload, bytes):
+            return self._payload
+        return json.dumps(self._payload).encode("utf-8")
+
+
+class CiSupportTests(unittest.TestCase):
+
+
+    def test_infer_github_project_from_common_remote_urls(self) -> None:
+        https = infer_github_project("https://github.com/owner/repo.git")
+        ssh = infer_github_project("git@github.com:owner/repo.git")
+
+        self.assertIsNotNone(https)
+        self.assertEqual("owner/repo", https["project_path"])
+        self.assertIsNotNone(ssh)
+        self.assertEqual("owner", ssh["owner"])
+        self.assertEqual("repo", ssh["repo"])
+
+    def test_detected_ci_providers_can_include_both(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            workflows = repository / ".github" / "workflows"
+            workflows.mkdir(parents=True)
+            (workflows / "ci.yml").write_text("name: ci\n", encoding="utf-8")
+            (repository / ".gitlab-ci.yml").write_text("stages: []\n", encoding="utf-8")
+
+            self.assertEqual(("github", "gitlab"), detected_ci_providers(repository))
+
+    def test_github_ci_signals_reports_missing_gh_as_problem_gathering_info(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            workflows = repository / ".github" / "workflows"
+            workflows.mkdir(parents=True)
+            (workflows / "ci.yml").write_text("name: ci\n", encoding="utf-8")
+
+            signals = github_ci_signals(repository, which=lambda _cmd: None)
+
+            self.assertEqual("problem_gathering_info", signals["status"])
+            self.assertIn("gh", signals["reason"])
+
+    def test_github_ci_signals_fetches_latest_main_artifact_when_available(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            subprocess.run(["git", "init"], cwd=repository, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(["git", "remote", "add", "origin", "https://github.com/owner/repo.git"], cwd=repository, check=True)
+            payload = {
+                "schema_version": 1,
+                "kind": "ai_harness_ci_signals",
+                "summary": {"status": "passed"},
+                "path_index": [{"path": "harness/run.py", "signal_count": 1}],
+                "signals": [{"tool": "pytest", "status": "passed", "path": "tests/test_run.py"}],
+            }
+
+            def runner(args, **_kwargs):
+                if args[:3] == ["gh", "auth", "status"]:
+                    return subprocess.CompletedProcess(args, 0, "", "")
+                if args[:3] == ["gh", "run", "list"]:
+                    return subprocess.CompletedProcess(args, 0, json.dumps([{
+                        "databaseId": 11,
+                        "headSha": "abc123",
+                        "conclusion": "success",
+                        "status": "completed",
+                        "workflowName": "AI Harness CI",
+                        "url": "https://github.com/owner/repo/actions/runs/11",
+                        "event": "push",
+                        "createdAt": "2026-06-29T00:00:00Z",
+                    }]), "")
+                if args[:3] == ["gh", "run", "download"]:
+                    target = Path(args[args.index("--dir") + 1]) / "signals"
+                    target.mkdir(parents=True)
+                    (target / "ai-harness-signals.json").write_text(json.dumps(payload), encoding="utf-8")
+                    return subprocess.CompletedProcess(args, 0, "", "")
+                raise AssertionError(args)
+
+            signals = github_ci_signals(repository, runner=runner, which=lambda _cmd: "/usr/bin/gh")
+
+            self.assertEqual("ready", signals["status"])
+            self.assertEqual("github", signals["provider"])
+            self.assertEqual(11, signals["source"]["run_id"])
+            self.assertEqual(1, len(signals["signals"]))
+
+    def test_github_ci_signals_returns_partial_when_artifact_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            subprocess.run(["git", "init"], cwd=repository, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(["git", "remote", "add", "origin", "https://github.com/owner/repo.git"], cwd=repository, check=True)
+
+            def runner(args, **_kwargs):
+                if args[:3] == ["gh", "auth", "status"]:
+                    return subprocess.CompletedProcess(args, 0, "", "")
+                if args[:3] == ["gh", "run", "list"]:
+                    return subprocess.CompletedProcess(args, 0, json.dumps([{"databaseId": 12, "headSha": "abc123"}]), "")
+                if args[:3] == ["gh", "run", "download"]:
+                    return subprocess.CompletedProcess(args, 1, "", "artifact not found")
+                raise AssertionError(args)
+
+            signals = github_ci_signals(repository, runner=runner, which=lambda _cmd: "/usr/bin/gh")
+
+            self.assertEqual("partial", signals["status"])
+            self.assertEqual(12, signals["source"]["run_id"])
+
+    def test_merged_ci_signals_prefers_ready_provider(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            subprocess.run(["git", "init"], cwd=repository, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(["git", "remote", "add", "origin", "https://github.com/owner/repo.git"], cwd=repository, check=True)
+            workflows = repository / ".github" / "workflows"
+            workflows.mkdir(parents=True)
+            (workflows / "ci.yml").write_text("name: ci\n", encoding="utf-8")
+
+            with patch("ai_harness.ci_support.github_ci_signals", return_value={
+                "status": "ready", "warnings": [], "summary": {"signal_count": 1},
+                "path_index": [{"path": "a.py"}], "signals": [{"path": "a.py"}], "source": {"run_id": 1},
+            }):
+                signals = merged_ci_signals(repository)
+
+            self.assertEqual("ready", signals["status"])
+            self.assertIn("github", signals["providers"])
+            self.assertEqual(1, signals["summary"]["signal_count"])
+
+    def test_repository_runtime_context_compacts_recorded_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            artifacts = ArtifactStore(repository)
+            artifacts.write_json("git-run.json", {"is_git_repository": True, "current_branch": "main", "head": "abc", "dirty": False})
+            artifacts.write_json("ci-status.json", {"providers": [{"provider": "github", "path": ".github/workflows/ci.yml"}], "warnings": []})
+            artifacts.write_json("ci-signals.json", {"status": "partial", "providers": {"github": {"status": "partial"}}, "signals": [{"path": "a.py"}]})
+
+            context = repository_runtime_context(artifacts)
+
+            self.assertEqual("main", context["git"]["current_branch"])
+            self.assertEqual("partial", context["ci_signals"]["status"])
+            self.assertIn("github", context["ci_signals"]["providers"])
+
+    def test_infer_gitlab_project_from_common_remote_urls(self) -> None:
+        https = infer_gitlab_project("https://gitlab.com/group/sub/project.git")
+        ssh = infer_gitlab_project("git@gitlab.example.com:group/project.git")
+
+        self.assertIsNotNone(https)
+        self.assertEqual("https://gitlab.com/api/v4", https["api_url"])
+        self.assertEqual("group/sub/project", https["project_path"])
+        self.assertEqual("group%2Fsub%2Fproject", https["project_id"])
+        self.assertIsNotNone(ssh)
+        self.assertEqual("https://gitlab.example.com/api/v4", ssh["api_url"])
+        self.assertEqual("group/project", ssh["project_path"])
+
+    def test_gitlab_ci_signals_fetches_latest_main_harness_quality_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            subprocess.run(["git", "init"], cwd=repository, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(["git", "remote", "add", "origin", "https://gitlab.com/group/project.git"], cwd=repository, check=True)
+            payload = {
+                "schema_version": 1,
+                "kind": "ai_harness_ci_signals",
+                "commit": "abc123",
+                "summary": {"status": "passed", "signal_count": 0},
+                "path_index": [],
+                "signals": [],
+            }
+            responses = [
+                _Response([{"id": 7, "sha": "abc123"}]),
+                _Response([{"id": 8, "name": "harness_quality"}]),
+                _Response(json.dumps(payload).encode("utf-8")),
+            ]
+
+            with patch("urllib.request.urlopen", side_effect=responses):
+                signals = gitlab_ci_signals(repository, environment={"AI_HARNESS_GITLAB_TOKEN": "token"})
+
+            self.assertEqual("ready", signals["status"])
+            self.assertEqual("gitlab", signals["provider"])
+            self.assertEqual(7, signals["source"]["pipeline_id"])
+            self.assertEqual(8, signals["source"]["job_id"])
+            self.assertEqual([], signals["signals"])
+
+    def test_gitlab_ci_signals_reports_unavailable_without_token(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            subprocess.run(["git", "init"], cwd=repository, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(["git", "remote", "add", "origin", "https://gitlab.com/group/project.git"], cwd=repository, check=True)
+
+            signals = gitlab_ci_signals(repository, environment={})
+
+            self.assertEqual("problem_gathering_info", signals["status"])
+            self.assertIn("AI_HARNESS_GITLAB_TOKEN", signals["reason"])
+
+    def test_install_github_template_and_detects_managed_sync(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+
+            result = install_ci_templates(repository, "github")
+            status = ci_status(repository)
+
+            self.assertEqual((".github/workflows/ai-harness-ci.yml",), result.installed)
+            self.assertEqual([], status["warnings"])
+            self.assertEqual("github", status["providers"][0]["provider"])
+            self.assertTrue(status["providers"][0]["managed"])
+            self.assertTrue(status["providers"][0]["in_sync"])
+
+    def test_existing_unmanaged_ci_is_not_overwritten_without_force(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            workflow = repository / ".github" / "workflows" / "ai-harness-ci.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text("name: custom\n", encoding="utf-8")
+
+            result = install_ci_templates(repository, "github")
+            status = ci_status(repository)
+
+            self.assertEqual((), result.installed)
+            self.assertEqual((".github/workflows/ai-harness-ci.yml",), result.skipped)
+            self.assertIn("not managed", result.warnings[0])
+            self.assertEqual("name: custom\n", workflow.read_text(encoding="utf-8"))
+            self.assertIn("no sync status", status["warnings"][0])
+
+    def test_ci_preflight_reports_missing_ci_before_signal_checks(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            preflight = ci_preflight(Path(directory))
+
+            self.assertFalse(preflight.ci_ok)
+            self.assertEqual("skipped", preflight.signal_status)
+            self.assertIn("No CI pipeline", preflight.ci_warnings[0])
+
+    def test_ci_preflight_accepts_managed_ci_and_ready_signals(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            install_ci_templates(repository, "github")
+            with patch("ai_harness.ci_support.merged_ci_signals", return_value={
+                "status": "ready",
+                "warnings": [],
+                "summary": {"signal_count": 0},
+                "path_index": [],
+                "signals": [],
+            }):
+                preflight = ci_preflight(repository)
+
+            self.assertTrue(preflight.ci_ok)
+            self.assertTrue(preflight.signal_ok)
+
+    def test_no_ci_status_yields_warning_and_observation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            artifacts = ArtifactStore(repository)
+            artifacts.write_json("ci-status.json", ci_status(repository))
+
+            observations = ci_observations_from_artifact(artifacts)
+
+            self.assertIn("No CI pipeline", artifacts.read_json("ci-status.json")["warnings"][0])
+            self.assertEqual("ci", observations[0]["kind"])
+            self.assertEqual("none", observations[0]["provider"])
+
+    def test_branch_creation_is_opt_in_and_skips_dirty_worktree(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            subprocess.run(["git", "init"], cwd=repository, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(["git", "-c", "user.email=a@example.com", "-c", "user.name=A", "commit", "--allow-empty", "-m", "init"], cwd=repository, check=True, stdout=subprocess.DEVNULL)
+            (repository / "dirty.txt").write_text("dirty\n", encoding="utf-8")
+
+            metadata = maybe_create_run_branch(repository, "abcdef123456", "Fix tests", "create")
+
+            self.assertIsNone(metadata["created_branch"])
+            self.assertTrue(metadata["dirty"])
+            self.assertIn("skipped", metadata["warnings"][-1])
+
+    def test_branch_creation_ignores_harness_runtime_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            subprocess.run(["git", "init"], cwd=repository, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(["git", "-c", "user.email=a@example.com", "-c", "user.name=A", "commit", "--allow-empty", "-m", "init"], cwd=repository, check=True, stdout=subprocess.DEVNULL)
+            (repository / ".ai-harness" / "artifacts").mkdir(parents=True)
+
+            metadata = maybe_create_run_branch(repository, "abcdef123456", "Fix tests", "create")
+
+            self.assertEqual("aih/abcdef12/fix-tests", metadata["created_branch"])
+            self.assertFalse(metadata["dirty"])
+
+    def test_recorded_ci_artifact_can_be_state_tracked(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            artifacts = ArtifactStore(repository)
+            state = StateStore(repository, artifacts)
+            state.save(RunState(
+                "run", "request", "INITIALIZING", Strategy.NON_CODE_STUB, Mode.NON_CODE,
+                "ideation", Complexity.LOW, "local",
+            ))
+            warnings: list[str] = []
+            record_ci_and_git_artifacts(
+                repository,
+                artifacts,
+                state,
+                run_id="run",
+                request="request",
+                branch_mode="off",
+                warnings=warnings,
+            )
+
+            self.assertIn("ci-status.json", state.load().artifacts)
+            self.assertIn("git-run.json", state.load().artifacts)
+            self.assertIn("ci-signals.json", state.load().artifacts)
+            self.assertIn(artifacts.read_json("ci-signals.json")["status"], {"unavailable", "problem_gathering_info"})
+
+
+if __name__ == "__main__":
+    unittest.main()

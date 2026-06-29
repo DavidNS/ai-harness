@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "confidence": {"maximum": 1, "minimum": 0, "type": "number"},
+    "intent": {"enum": ["build_software", "modify_code", "debug_issue", "explorer_request", "ideation", "market_analysis", "research", "unknown"]},
+    "mode": {"enum": ["code", "non_code"]}
+  },
+  "required": ["mode", "intent", "confidence"],
+  "type": "object"
+}

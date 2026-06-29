@@ -1,0 +1,20 @@
+# Python-generated caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Test and coverage caches
+.coverage
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local harness runtime state
+.ai-harness/
+
+# Local initiative execution traces
+.orchestration/
+
+# Temporary refactor lifecycle control state
+refactor/control/state.json
+refactor/control/session.local.json

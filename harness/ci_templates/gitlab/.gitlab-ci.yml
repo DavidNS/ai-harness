@@ -1,0 +1,19 @@
+stages:
+  - quality
+
+harness_quality:
+  stage: quality
+  image: python:3.12
+  before_script:
+    - pip install ruff mypy pytest semgrep
+  script:
+    - python3 -B scripts/ci_signal_report.py
+  artifacts:
+    when: always
+    paths:
+      - signals/ai-harness-signals.json
+      - signals/raw/
+    expire_in: 14 days
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'

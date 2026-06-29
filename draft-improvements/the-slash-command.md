@@ -1,0 +1,1 @@
+I want to change the behaviours of the comands in the UI. I want when you type the '/' at the begining, with empty text in console, then changes the color of the letters and sugest selectable list of commands. List have to chage when typing and order by the closest match.

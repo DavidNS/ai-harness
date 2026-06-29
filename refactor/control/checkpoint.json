@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "checkpoint_id": "2026-06-28-refactor-single-root",
+  "objective": "Coordinate the temporary refactor process from one tracked lifecycle checkpoint with no startup doc expansion.",
+  "phase": "discovery",
+  "active_boundary": null,
+  "required_validations": [],
+  "next_action": "Follow lifecycle_contract to choose and complete one product refactor boundary.",
+  "lifecycle_contract": {
+    "role": "orchestrator",
+    "startup_context": [
+      "refactor/control/checkpoint.json"
+    ],
+    "session_overlay": "refactor/control/session.local.json",
+    "worker_policy": "mandatory_scoped_evidence",
+    "worker_requirements": {
+      "minimum_reports_before_active_boundary": 1,
+      "required_report_statuses": [
+        "completed"
+      ]
+    },
+    "archive_policy": "lazy_product_evidence_only",
+    "required_actions": [
+      "inspect_state",
+      "select_one_boundary",
+      "record_boundary_scope",
+      "collect_worker_reports_before_boundary_selection",
+      "implement_inside_scope",
+      "record_validations",
+      "commit_or_record_blocker",
+      "run_closeout_check"
+    ],
+    "closeout_command": "python3 refactor/control/control.py check-closeout"
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "phase": "test",
+  "paths": [
+    {
+      "pattern": "**",
+      "mode": "read"
+    }
+  ],
+  "commands": [
+    {
+      "argv": [
+        "python3",
+        "-B",
+        "-m",
+        "unittest"
+      ],
+      "run_by": "controller"
+    }
+  ],
+  "skills": [
+    "test-playbook"
+  ],
+  "mcp_tools": [],
+  "required_evidence": [
+    "phase_output"
+  ],
+  "postconditions": [],
+  "limits": {
+    "timeout_seconds": 120,
+    "output_bytes": 1000000,
+    "retries": 1
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "groups": [
+    {
+      "id": "quality-core",
+      "label": "Quality core",
+      "required": true,
+      "pip": ["ruff", "mypy", "pytest"],
+      "description": "Baseline lint, type-check, and test tooling used by harness CI signals."
+    },
+    {
+      "id": "security",
+      "label": "Security scan",
+      "required": false,
+      "pip": ["semgrep"],
+      "description": "Static security analysis for richer CI evidence."
+    },
+    {
+      "id": "github",
+      "label": "GitHub integration",
+      "required": false,
+      "pip": [],
+      "commands": ["gh"],
+      "description": "GitHub Actions and artifact lookup support. The gh CLI must be installed separately."
+    },
+    {
+      "id": "gitlab",
+      "label": "GitLab integration",
+      "required": false,
+      "pip": [],
+      "environment": ["AI_HARNESS_GITLAB_TOKEN"],
+      "description": "GitLab pipeline artifact lookup support when GitLab is configured."
+    }
+  ]
+}

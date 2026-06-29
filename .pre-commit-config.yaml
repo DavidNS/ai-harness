@@ -1,0 +1,24 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.20
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+        args: [--check]
+
+  - repo: local
+    hooks:
+      - id: architecture-check
+        name: architecture check
+        entry: python3 -B scripts/check_architecture.py
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: pytest-fast
+        name: pytest (unit only)
+        entry: python3 -m pytest tests/unit -q --tb=short
+        language: system
+        pass_filenames: false
+        always_run: true

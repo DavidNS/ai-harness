@@ -1,0 +1,32 @@
+name: AI Harness CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  harness-quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install analysis tools
+        run: pip install ruff mypy pytest semgrep
+
+      - name: Generate AI Harness signals
+        run: python3 -B scripts/ci_signal_report.py
+
+      - name: Upload AI Harness signals
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-harness-signals
+          path: |
+            signals/ai-harness-signals.json
+            signals/raw/
