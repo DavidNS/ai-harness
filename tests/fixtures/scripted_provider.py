@@ -117,6 +117,36 @@ def explore_outcome_bundle() -> str:
     }, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
 
 
+
+
+def explorer_discovery_output(payload: dict[str, object]) -> str:
+    claims = payload.get("claims", [])
+    claim_id = "C1"
+    if isinstance(claims, list) and claims and isinstance(claims[0], dict):
+        claim_id = str(claims[0].get("id", "C1"))
+    payload.setdefault("evidence_trace", [{
+        "id": "T1",
+        "claim_id": claim_id,
+        "source": "fixture",
+        "path": "harness/ai_harness/orchestrator.py",
+        "line_start": 1,
+        "line_end": 1,
+        "symbol": "Orchestrator",
+        "excerpt": "Fixture repository evidence for staged explorer tests.",
+        "confidence": "medium",
+    }])
+    payload.setdefault("duplicate_search", {
+        "searched_terms": ["fixture"],
+        "searched_surfaces": ["source"],
+        "matches": [],
+        "no_match_claims": [{
+            "claim_id": claim_id,
+            "searched_for": "Duplicate fixture implementation",
+            "confidence": "medium",
+        }],
+    })
+    return json.dumps(payload)
+
 def synthesized_explorer_output(inputs: dict[str, object]) -> str:
     run = inputs.get("run", {}) if isinstance(inputs.get("run"), dict) else {}
     context = inputs.get("context", {}) if isinstance(inputs.get("context"), dict) else {}
@@ -395,13 +425,13 @@ class ScriptedProvider:
                 "synthesis_notes": [],
             })
         elif phase == "explorer_discovery":
-            output = json.dumps({
+            output = explorer_discovery_output({
                 "schema_version": 1,
                 "phase": "explorer_discovery",
                 "claims": [{
                     "id": "C1",
                     "status": "resolved",
-                    "evidence": ["Controller supplied repository observations and related improvements."],
+                    "evidence": ["Controller supplied fixture context and related improvements."],
                 }],
                 "candidate_directions": [{
                     "id": "D1",
@@ -411,9 +441,9 @@ class ScriptedProvider:
                     "confidence": "High because the fixture path is deterministic.",
                     "cost": "Low because no new controller behavior is needed.",
                     "reversibility": "High because it is an artifact-only decision.",
-                    "evidence_strength": "Medium based on supplied fixture observations.",
+                    "evidence_strength": "Medium based on supplied fixture context.",
                     "behavioral_delta": "A future implementation flow can consume the published artifact.",
-                    "evidence": ["Controller supplied repository observations and related improvements."],
+                    "evidence": ["Controller supplied fixture context and related improvements."],
                 }],
                 "critic_findings": [{
                     "direction_id": "D1",

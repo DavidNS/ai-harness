@@ -105,6 +105,9 @@ class EvidenceExtractor:
         except Exception:
             discovery = {}
         if isinstance(discovery, Mapping):
+            for trace in discovery.get("evidence_trace", []) if isinstance(discovery.get("evidence_trace"), list) else []:
+                if isinstance(trace, Mapping):
+                    candidates.append(("evidence_trace", trace))
             claims = discovery.get("claims", [])
             if isinstance(claims, list):
                 for claim in claims:

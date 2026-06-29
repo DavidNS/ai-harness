@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "harness"))
 
 from ai_harness.providers.base import ProviderResult
-from tests.fixtures.scripted_provider import ScriptedProvider
+from tests.fixtures.scripted_provider import ScriptedProvider, explorer_discovery_output
 
 
 ANALYSIS = "# Improvement Analysis v1\n## Problem\nInvestigate routing.\n## Context\nA draft improvement exists.\n## Findings\nThe idea is viable.\n## Options\nCreate a future implementation flow.\n## Risks\nScope may expand.\n## Recommendation\nProceed.\n## Outcome\nimprovement\n## Open Questions\nNone.\n"
@@ -150,7 +150,7 @@ class FindingStyleObservationProvider(ExplorerProvider):
             self.discovery_prompts.append(prompt)
             self.calls.append("explorer_discovery")
             self.counts["explorer_discovery"] += 1
-            return ProviderResult(json.dumps({
+            return ProviderResult(explorer_discovery_output({
                 "schema_version": 1,
                 "phase": "explorer_discovery",
                 "claims": [{"id": "C1", "status": "resolved", "evidence": ["The request is a straightforward implementation-only change."]}],
@@ -214,7 +214,7 @@ class ReviewGapObservationProvider(ExplorerProvider):
         if "# Explorer Discovery Worker v1" in prompt:
             self.calls.append("explorer_discovery")
             self.counts["explorer_discovery"] += 1
-            return ProviderResult(json.dumps({
+            return ProviderResult(explorer_discovery_output({
                 "schema_version": 1,
                 "phase": "explorer_discovery",
                 "claims": [{"id": "C1", "status": "unresolved", "unresolved_reason": "Repository observations did not identify the implementation surface."}],
@@ -249,7 +249,7 @@ class StructuredEvidenceProvider(ExplorerProvider):
         if "# Explorer Discovery Worker v1" in prompt:
             self.calls.append("explorer_discovery")
             self.counts["explorer_discovery"] += 1
-            return ProviderResult(json.dumps({
+            return ProviderResult(explorer_discovery_output({
                 "schema_version": 1,
                 "phase": "explorer_discovery",
                 "claims": [{"id": "C1", "status": "resolved", "evidence": [self.discovery_evidence]}],
@@ -357,7 +357,7 @@ class DiscoveryRepairProvider(ExplorerProvider):
                 "related_improvements": [],
                 "repository_observations": [],
             }),
-            json.dumps({
+            explorer_discovery_output({
                 "schema_version": 1,
                 "phase": "explorer_discovery",
                 "claims": [{"id": "C1", "status": "resolved", "evidence": ["tests cover it."]}],

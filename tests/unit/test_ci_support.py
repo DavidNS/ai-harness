@@ -21,6 +21,7 @@ from ai_harness.ci_support import (
     install_ci_templates,
     maybe_create_run_branch,
     merged_ci_signals,
+    normalize_ci_signal_paths,
     record_branch_ci_artifacts,
     record_ci_and_git_artifacts,
     repository_runtime_context,
@@ -214,6 +215,32 @@ class CiSupportTests(unittest.TestCase):
             self.assertEqual("ready", signals["status"])
             self.assertIn("github", signals["providers"])
             self.assertEqual(1, signals["summary"]["signal_count"])
+
+    def test_normalize_ci_signal_paths_relativizes_runner_paths_and_drops_unsafe(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory) / "ai-harness"
+            repository.mkdir()
+            (repository / "harness" / "cli").mkdir(parents=True)
+            (repository / "harness" / "cli" / "commands.py").write_text("# cli\n", encoding="utf-8")
+            payload = {
+                "path_index": [
+                    {"path": "/home/runner/work/ai-harness/ai-harness/harness/cli/commands.py", "signal_count": 1},
+                    {"path": "/tmp/outside.py", "signal_count": 1},
+                ],
+                "signals": [{
+                    "path": "/home/runner/work/ai-harness/ai-harness/harness/cli/commands.py",
+                    "evidence": "/home/runner/work/ai-harness/ai-harness/harness/cli/commands.py:3",
+                    "agent_hint": "Inspect /home/runner/work/ai-harness/ai-harness/harness/cli/commands.py",
+                }],
+            }
+
+            normalized = normalize_ci_signal_paths(repository, payload)
+
+            self.assertEqual(["harness/cli/commands.py"], [item["path"] for item in normalized["path_index"]])
+            self.assertEqual("harness/cli/commands.py", normalized["signals"][0]["path"])
+            self.assertEqual("harness/cli/commands.py:3", normalized["signals"][0]["evidence"])
+            self.assertIn("harness/cli/commands.py", normalized["signals"][0]["agent_hint"])
+            self.assertIn("raw_path", normalized["signals"][0])
 
     def test_repository_runtime_context_compacts_recorded_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -20,7 +20,7 @@ Return either a decision_request control JSON when a product decision is require
   "minimum_verification": "Smallest verification that proves the behavioral delta exists.",
   "target": {"path": "docs/explorer/improvements/example/improvement.md", "checksum": "..."}
 }
-Outcome must be one of new_improvement, split_bundle, update_existing, duplicate_noop, existing_functionality, limitation, not_worth_it, needs_user_decision, escalate_discovery. Do not ask factual questions discovery can answer.
+Outcome must be one of new_improvement, split_bundle, update_existing, duplicate_noop, existing_functionality, limitation, not_worth_it, needs_user_decision, escalate_discovery. Do not ask factual questions discovery can answer. Prefer concrete evidence_trace IDs and duplicate_search findings from discovery over broad prose references when explaining evidence, counterevidence, falsifying conditions, and minimum verification.
 
 The value fields are optional for backward compatibility with existing staged documents. Include them whenever discovery produced candidate directions or critic findings. Metadata-only or prose-only decisions are acceptable only when they feed an explicit downstream behavior, gate, route, review, or user workflow. Use `not_worth_it`, `limitation`, `duplicate_noop`, `update_existing`, or `existing_functionality` when the value case is weaker than an existing or lower-cost route.
 

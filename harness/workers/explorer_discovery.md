@@ -17,6 +17,15 @@ Return JSON only with this shape:
   "claims": [
     {"id": "C1", "status": "resolved", "evidence": ["path:line or related artifact evidence"]}
   ],
+  "evidence_trace": [
+    {"id": "T1", "claim_id": "C1", "source": "repository_observation", "path": "relative/path.py", "line_start": 10, "line_end": 10, "symbol": "optional_symbol", "excerpt": "Exact short repository excerpt.", "confidence": "high"}
+  ],
+  "duplicate_search": {
+    "searched_terms": ["autocomplete", "fuzzy", "palette"],
+    "searched_surfaces": ["source", "tests"],
+    "matches": [],
+    "no_match_claims": [{"claim_id": "C1", "searched_for": "Existing duplicate implementation", "confidence": "medium"}]
+  },
   "candidate_directions": [
     {
       "id": "D1",
@@ -37,7 +46,7 @@ Return JSON only with this shape:
   "related_improvements": [],
   "repository_observations": []
 }
-Use unresolved only when evidence cannot be accessed; include unresolved_reason then. `candidate_directions` and `critic_findings` are optional for backward compatibility.
+Use unresolved only when evidence cannot be accessed; include unresolved_reason then. `evidence_trace` is required for every repository-backed resolved claim and must use repository-relative paths, short excerpts, and confidence. `duplicate_search` is required and must record searched terms/surfaces, matches, and no-match claims for duplicate-check work. If you cite repository observations, preserve the relevant repository_observations instead of returning an empty list. `candidate_directions` and `critic_findings` are optional for backward compatibility.
 
 ## Completion Boundary
 Stop after producing the single required output. The controller owns validation, persistence, publication, pausing, phase advancement, and snapshots.

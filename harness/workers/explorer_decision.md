@@ -28,7 +28,7 @@ Return either a decision_request control JSON when a product decision is require
   "minimum_verification": "Smallest verification that proves the behavioral delta exists.",
   "target": {"path": "docs/explorer/improvements/example/improvement.md", "checksum": "..."}
 }
-Outcome must be one of new_improvement, split_bundle, update_existing, duplicate_noop, existing_functionality, limitation, not_worth_it, needs_user_decision, escalate_discovery. Do not ask factual questions discovery can answer. The value fields are optional for backward compatibility but should be present for strategic discoveries.
+Outcome must be one of new_improvement, split_bundle, update_existing, duplicate_noop, existing_functionality, limitation, not_worth_it, needs_user_decision, escalate_discovery. Do not ask factual questions discovery can answer. Prefer concrete evidence_trace IDs and duplicate_search findings from discovery over broad prose references when explaining evidence, counterevidence, falsifying conditions, and minimum verification. The value fields are optional for backward compatibility but should be present for strategic discoveries.
 
 ## Completion Boundary
 Stop after producing the single required output. The controller owns validation, persistence, publication, pausing, phase advancement, and snapshots.

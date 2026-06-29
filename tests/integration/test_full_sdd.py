@@ -321,6 +321,49 @@ class FullSddIntegrationTests(unittest.TestCase):
             self.assertEqual(second, scope["primary_artifact"])
             self.assertEqual([second, first], [item["path"] for item in scope["artifacts"]])
 
+    def test_full_sdd_uses_manifest_handoff_virtual_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            virtual_path = "docs/explorer/improvements/virtual/slash/improvement.md"
+            content = "# Improvement: Virtual Slash Command\n## Status\nProposed\n## Problem\nVirtual scope is not materialized.\n## Evidence\nharness/cli/commands.py records the CLI surface.\n## Desired Behavior\nImplement virtual scope.\n## Implementation Notes\nUse the handoff content.\n## Acceptance Criteria\n- Virtual scope is consumed.\n"
+            published = repository / "published"
+            published.mkdir()
+            (published / "explorer-handoff.json").write_text(json.dumps({
+                "schema_version": 1,
+                "kind": "explorer_handoff",
+                "primary_entry": "single",
+                "entries": [{
+                    "entry_id": "single",
+                    "kind": "improvement",
+                    "suggested_path": virtual_path,
+                    "title": "Virtual Slash Command",
+                    "content": content,
+                }],
+                "evidence_trace": [{"id": "T1", "claim_id": "C1", "source": "test", "path": "harness/cli/commands.py", "excerpt": "CLI surface", "confidence": "high"}],
+                "duplicate_search": {"searched_terms": ["slash"], "searched_surfaces": ["source"], "matches": [], "no_match_claims": []},
+                "unknowns": [],
+                "risks": [],
+                "candidate_work_shapes": [],
+                "verification_surfaces": [],
+            }), encoding="utf-8")
+            (published / "explorer.json").write_text(json.dumps({
+                "manifest_version": 1,
+                "primary_artifact": virtual_path,
+                "handoff_artifact": "published/explorer-handoff.json",
+                "artifacts": [{"kind": "improvement", "suggested_path": virtual_path}],
+            }), encoding="utf-8")
+            provider = ScopedTaskProvider()
+            result = run_with_flow(
+                Orchestrator(repository, HarnessConfig(provider="local"), provider),
+                "Implement published/explorer.json",
+                "sdd_high",
+            )
+
+            scope = json.loads((result.snapshot_path / "explorer_scope.json").read_text(encoding="utf-8"))
+            self.assertEqual([virtual_path], [item["path"] for item in scope["artifacts"]])
+            self.assertEqual(content, scope["artifacts"][0]["content"])
+            self.assertEqual("explorer_handoff", scope["explorer_handoff"]["kind"])
+
     def test_full_sdd_rejects_uncovered_scope_before_tdd(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             repository = Path(directory)

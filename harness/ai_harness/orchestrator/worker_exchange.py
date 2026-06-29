@@ -21,6 +21,15 @@ _REPOSITORY_OBSERVATION_BYTES = 12_000
 _REPOSITORY_OBSERVATION_SCAN_LIMIT = 600
 _REPOSITORY_OBSERVATION_FILE_BYTES = 120_000
 _REPOSITORY_OBSERVATION_SUFFIXES = frozenset({".md", ".py", ".json", ".toml", ".yaml", ".yml"})
+_SHORT_REPOSITORY_TERMS = frozenset({"ci", "cli", "ui", "ux"})
+_REPOSITORY_OBSERVATION_STOP_TERMS = frozenset({
+    "about", "after", "again", "analysis", "analyze", "artifact", "artifacts", "because",
+    "before", "beginning", "behavior", "change", "changes", "code", "could", "create",
+    "current", "does", "docs", "evidence", "explorer", "file", "from", "have",
+    "implementation", "improvement", "improvements", "investigate", "line", "list",
+    "repository", "should", "source", "that", "then", "there", "this", "type",
+    "when", "with",
+})
 
 
 class WorkerExchange:
@@ -96,7 +105,10 @@ class WorkerExchange:
     def _repository_observation_terms_from_text(value: object) -> set[str]:
         if not isinstance(value, str):
             return set()
-        return set(re.findall(r"[a-z0-9]{4,}", value.casefold()))
+        text = value.casefold()
+        terms = set(re.findall(r"[a-z0-9]{4,}", text))
+        terms.update(term for term in _SHORT_REPOSITORY_TERMS if re.search(rf"\b{re.escape(term)}\b", text))
+        return terms
 
     def _repository_observation_terms(
         self,
@@ -108,11 +120,6 @@ class WorkerExchange:
         for item in related_improvements:
             values.append(str(item.get("path", "")))
             values.append(str(item.get("summary", "")))
-        stop = {
-            "about", "analysis", "analyze", "artifact", "artifacts", "behavior", "create", "docs",
-            "implementation", "improvement", "improvements", "investigate", "explorer", "repository",
-            "should", "that", "this", "with",
-        }
         terms: set[str] = set()
         for value in values:
             terms.update(self._repository_observation_terms_from_text(value))
@@ -133,7 +140,7 @@ class WorkerExchange:
                         source_terms.update(claim_terms)
                     if "tests" in targets:
                         test_terms.update(claim_terms)
-        normalized = {term for term in terms if term not in stop}
+        normalized = {term for term in terms if term not in _REPOSITORY_OBSERVATION_STOP_TERMS}
         return normalized, normalized & source_terms, normalized & test_terms
 
     def _candidate_observation_paths(self) -> list[Path]:
@@ -155,6 +162,51 @@ class WorkerExchange:
                 continue
             paths.append(path)
         return paths
+
+    @staticmethod
+    def _path_segments(relative: str) -> set[str]:
+        return set(re.findall(r"[a-z0-9]+", relative.casefold()))
+
+    @staticmethod
+    def _symbols_from_content(content: str) -> list[str]:
+        return re.findall(r"^\s*(?:async\s+def|def|class)\s+([A-Za-z_][A-Za-z0-9_]*)", content, re.MULTILINE)[:12]
+
+    @staticmethod
+    def _line_matches(content: str, matched_terms: Sequence[str]) -> list[str]:
+        matches: list[str] = []
+        seen_lines: set[int] = set()
+        lines = content.splitlines()
+        ranked_lines: list[tuple[int, int, str]] = []
+        for line_number, raw_line in enumerate(lines, start=1):
+            line = raw_line.strip()
+            if not line:
+                continue
+            lowered = line.casefold()
+            line_terms = [term for term in matched_terms if term in lowered]
+            if not line_terms:
+                continue
+            score = len(line_terms)
+            if re.match(r"(?:async\s+def|def|class)\s+[A-Za-z_][A-Za-z0-9_]*", line):
+                score += 6
+            if re.match(r"(?:from|import)\s+", line):
+                score -= 4
+            ranked_lines.append((score, line_number, line))
+        for _, line_number, line in sorted(ranked_lines, key=lambda item: (-item[0], item[1])):
+            context_line = None
+            for context_index in range(line_number - 2, 0, -1):
+                candidate = lines[context_index - 1].strip()
+                if re.match(r"(?:async\s+def|def|class)\s+[A-Za-z_][A-Za-z0-9_]*", candidate):
+                    context_line = (context_index, candidate)
+                    break
+            if context_line is not None and context_line[0] not in seen_lines:
+                seen_lines.add(context_line[0])
+                matches.append(f"L{context_line[0]}: {context_line[1][:180]}")
+            if line_number not in seen_lines:
+                seen_lines.add(line_number)
+                matches.append(f"L{line_number}: {line[:180]}")
+            if len(matches) >= 4:
+                break
+        return matches
 
     def _gather_repository_observations(
         self,
@@ -178,6 +230,9 @@ class WorkerExchange:
                 continue
             score = sum(3 for term in matched_terms if term in path_text)
             score += sum(1 for term in matched_terms if term in content_text)
+            path_terms = self._path_segments(relative)
+            path_term_hits = sorted(term for term in matched_terms if term in path_terms)
+            score += 4 * len(path_term_hits)
             kind = self._repository_observation_kind(relative)
             if kind in {"test", "prompt", "worker", "analysis_doc"}:
                 score += 1
@@ -185,22 +240,20 @@ class WorkerExchange:
                 score += sum(3 for term in matched_terms if term in source_terms)
             if kind == "test":
                 score += sum(3 for term in matched_terms if term in test_terms)
-            matches: list[str] = []
-            for line_number, raw_line in enumerate(content.splitlines(), start=1):
-                line = raw_line.strip()
-                if not line:
-                    continue
-                lowered = line.casefold()
-                if any(term in lowered for term in matched_terms):
-                    matches.append(f"L{line_number}: {line[:180]}")
-                if len(matches) >= 3:
-                    break
+            symbols = self._symbols_from_content(content)
+            symbol_hits = [symbol for symbol in symbols if any(term in symbol.casefold() for term in matched_terms)]
+            score += 5 * len(symbol_hits)
+            matches = self._line_matches(content, matched_terms)
             item: dict[str, object] = {
                 "kind": kind,
                 "path": relative,
                 "score": score,
                 "matched_terms": matched_terms[:8],
             }
+            if path_term_hits:
+                item["path_term_hits"] = path_term_hits[:8]
+            if symbols:
+                item["symbols"] = symbols
             if matches:
                 item["matches"] = matches
             candidates.append((score, relative, item))

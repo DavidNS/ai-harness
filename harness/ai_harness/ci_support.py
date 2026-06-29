@@ -13,6 +13,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, Callable, Literal
 
@@ -933,6 +934,7 @@ def record_ci_and_git_artifacts(
     ci = ci_status(repository)
     git = maybe_create_run_branch(repository, run_id, request, branch_mode)
     signals = _ci_unavailable("github", "GitHub baseline CI collection is disabled", scope="trunk_baseline") if github_ci_mode == "off" else merged_ci_signals(repository)
+    signals = normalize_ci_signal_paths(repository, signals)
     artifacts.write_json("ci-status.json", ci)
     state.record_artifact("ci-status.json", "INITIALIZING")
     artifacts.write_json("git-run.json", git)
@@ -976,6 +978,34 @@ def ci_observations_from_artifact(artifacts: ArtifactStore) -> list[dict[str, ob
             "in_sync": False,
             "matches": ["No CI pipeline is installed for this repository."],
         })
+    signals = _safe_artifact_json(artifacts, "ci-signals.json")
+    for item in signals.get("path_index", []) if isinstance(signals.get("path_index"), list) else []:
+        if not isinstance(item, dict):
+            continue
+        raw_path = _text(item.get("path"))
+        if not raw_path or Path(raw_path).is_absolute():
+            continue
+        observations.append({
+            "kind": "ci_signal",
+            "path": raw_path,
+            "max_severity": _text(item.get("max_severity")) or "warning",
+            "signal_count": item.get("signal_count", 0),
+        })
+    for item in signals.get("signals", []) if isinstance(signals.get("signals"), list) else []:
+        if not isinstance(item, dict):
+            continue
+        raw_path = _text(item.get("path"))
+        if not raw_path or Path(raw_path).is_absolute():
+            continue
+        observations.append({
+            "kind": "ci_signal",
+            "path": raw_path,
+            "tool": _text(item.get("tool")),
+            "category": _text(item.get("category")),
+            "severity": _text(item.get("severity")) or "warning",
+            "status": _text(item.get("status")) or "unknown",
+            "matches": [value for value in (_text(item.get("summary")), _text(item.get("evidence")), _text(item.get("agent_hint"))) if value],
+        })
     return observations
 
 
@@ -988,6 +1018,73 @@ def _safe_artifact_json(artifacts: ArtifactStore, name: str) -> dict[str, object
     except Exception:
         return {}
     return value if isinstance(value, dict) else {}
+
+
+def _repo_relative_ci_path(repository: Path, value: object) -> str | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    path_text = value.strip().replace("\\", "/")
+    path = Path(path_text)
+    if not path.is_absolute():
+        if ".." in Path(path_text).parts:
+            return None
+        return path_text
+    try:
+        return path.resolve().relative_to(repository.resolve()).as_posix()
+    except (OSError, ValueError):
+        pass
+    parts = [part for part in path_text.split("/") if part]
+    repo_name = repository.name
+    for index in range(len(parts) - 1, -1, -1):
+        if parts[index] != repo_name:
+            continue
+        candidate = "/".join(parts[index + 1:])
+        if candidate and ".." not in Path(candidate).parts:
+            return candidate
+    return None
+
+
+def _normalize_ci_evidence_text(repository: Path, value: object) -> object:
+    if not isinstance(value, str):
+        return value
+    raw_path = value.split(":", 1)[0]
+    normalized = _repo_relative_ci_path(repository, raw_path)
+    if normalized is None:
+        return value
+    suffix = ""
+    if ":" in value:
+        suffix = ":" + value.split(":", 1)[1]
+    return normalized + suffix
+
+
+def normalize_ci_signal_paths(repository: Path, payload: dict[str, object]) -> dict[str, object]:
+    """Return CI signals with repository-relative paths where possible."""
+    if not isinstance(payload, dict):
+        return payload
+    normalized_payload = deepcopy(payload)
+    for section in ("path_index", "signals"):
+        items = normalized_payload.get(section)
+        if not isinstance(items, list):
+            continue
+        kept: list[object] = []
+        for item in items:
+            if not isinstance(item, dict):
+                kept.append(item)
+                continue
+            raw_path = _text(item.get("path"))
+            normalized_path = _repo_relative_ci_path(repository, raw_path)
+            if raw_path and normalized_path is None:
+                continue
+            if raw_path and normalized_path != raw_path:
+                item["raw_path"] = raw_path
+                item["path"] = normalized_path
+            if "evidence" in item:
+                item["evidence"] = _normalize_ci_evidence_text(repository, item.get("evidence"))
+            if "agent_hint" in item and isinstance(item.get("agent_hint"), str) and raw_path and normalized_path:
+                item["agent_hint"] = str(item["agent_hint"]).replace(raw_path, normalized_path)
+            kept.append(item)
+        normalized_payload[section] = kept
+    return normalized_payload
 
 
 def repository_runtime_context(artifacts: ArtifactStore) -> dict[str, object]:

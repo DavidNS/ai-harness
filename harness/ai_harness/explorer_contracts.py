@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import re
+from pathlib import PurePath
 from typing import Any, Mapping
 
 _CLAIM_CLASSES = frozenset({
@@ -33,6 +35,8 @@ _VALUE_DIMENSIONS = (
 )
 _CRITIC_SEVERITIES = frozenset({"blocker", "warning", "note"})
 _CRITIC_SEVERITY_ALIASES = {"info": "note"}
+_TRACE_CONFIDENCES = frozenset({"low", "medium", "high", "critical"})
+
 
 def _validation_error(message: str, cause: Exception | None = None) -> Exception:
     from .phases.base import PhaseValidationError
@@ -156,6 +160,87 @@ def _validate_critic_findings(value: object) -> None:
         _text(finding.get("recommendation"), "critic_findings recommendation")
 
 
+def _mapping(value: object, field: str) -> Mapping[str, object]:
+    if not isinstance(value, dict):
+        raise _validation_error(f"{field} must be an object")
+    return value
+
+
+def _object_list(value: object, field: str, *, allow_empty: bool = True) -> list[Mapping[str, object]]:
+    items = _list(value, field)
+    if not allow_empty and not items:
+        raise _validation_error(f"{field} must not be empty")
+    result: list[Mapping[str, object]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            raise _validation_error(f"{field} entries must be objects")
+        result.append(item)
+    return result
+
+
+def _safe_relative_path(value: object, field: str) -> str:
+    text = _text(value, field).replace("\\", "/")
+    path = PurePath(text)
+    if path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts):
+        raise _validation_error(f"{field} must be a safe repository-relative path")
+    return text
+
+
+def _validate_evidence_trace(value: object, claim_ids: set[str]) -> None:
+    trace = _object_list(value, "evidence_trace")
+    seen: set[str] = set()
+    for item in trace:
+        trace_id = _text(item.get("id"), "evidence_trace id")
+        if trace_id in seen:
+            raise _validation_error("evidence_trace IDs must be unique")
+        seen.add(trace_id)
+        claim_id = _text(item.get("claim_id"), "evidence_trace claim_id")
+        if claim_id not in claim_ids:
+            raise _validation_error("evidence_trace claim_id must reference a discovery claim")
+        _text(item.get("source"), "evidence_trace source")
+        _safe_relative_path(item.get("path"), "evidence_trace path")
+        if item.get("line_start") is not None and not isinstance(item.get("line_start"), int):
+            raise _validation_error("evidence_trace line_start must be an integer")
+        if item.get("line_end") is not None and not isinstance(item.get("line_end"), int):
+            raise _validation_error("evidence_trace line_end must be an integer")
+        _optional_text(item.get("symbol"), "evidence_trace symbol")
+        _text(item.get("excerpt"), "evidence_trace excerpt")
+        confidence = _text(item.get("confidence"), "evidence_trace confidence")
+        if confidence not in _TRACE_CONFIDENCES:
+            raise _validation_error("evidence_trace confidence is invalid")
+
+
+def _validate_duplicate_search(value: object, claim_ids: set[str]) -> None:
+    duplicate_search = _mapping(value, "duplicate_search")
+    _text_list(duplicate_search.get("searched_terms"), "duplicate_search searched_terms")
+    _text_list(duplicate_search.get("searched_surfaces"), "duplicate_search searched_surfaces")
+    for item in _object_list(duplicate_search.get("matches"), "duplicate_search matches"):
+        _optional_text(item.get("claim_id"), "duplicate_search match claim_id")
+        if item.get("claim_id") is not None and item.get("claim_id") not in claim_ids:
+            raise _validation_error("duplicate_search match claim_id must reference a discovery claim")
+        _safe_relative_path(item.get("path"), "duplicate_search match path")
+        _optional_text(item.get("symbol"), "duplicate_search match symbol")
+        _optional_text(item.get("excerpt"), "duplicate_search match excerpt")
+        _optional_text(item.get("confidence"), "duplicate_search match confidence")
+    for item in _object_list(duplicate_search.get("no_match_claims"), "duplicate_search no_match_claims"):
+        claim_id = _text(item.get("claim_id"), "duplicate_search no_match_claim claim_id")
+        if claim_id not in claim_ids:
+            raise _validation_error("duplicate_search no_match_claim claim_id must reference a discovery claim")
+        _text(item.get("searched_for"), "duplicate_search no_match_claim searched_for")
+        _text(item.get("confidence"), "duplicate_search no_match_claim confidence")
+
+
+def _mentions_repository_observations(value: object) -> bool:
+    if isinstance(value, str):
+        normalized = re.sub(r"[\s_-]+", " ", value.casefold())
+        return "repository observation" in normalized or "supplied observation" in normalized
+    if isinstance(value, list):
+        return any(_mentions_repository_observations(item) for item in value)
+    if isinstance(value, dict):
+        return any(_mentions_repository_observations(item) for item in value.values())
+    return False
+
+
 def _validate_rejected_alternatives(value: object) -> None:
     alternatives = _optional_object_list(value, "rejected_alternatives")
     seen: set[str] = set()
@@ -216,8 +301,17 @@ def validate_explorer_discovery(candidate: str) -> dict[str, Any]:
             raise _validation_error("resolved claims require evidence")
         if status == "unresolved" and unresolved_reason is None:
             raise _validation_error("unresolved claims require unresolved_reason")
-    _list(value.get("related_improvements", []), "related_improvements")
-    _list(value.get("repository_observations", []), "repository_observations")
+    related_improvements = _list(value.get("related_improvements", []), "related_improvements")
+    repository_observations = _list(value.get("repository_observations", []), "repository_observations")
+    del related_improvements
+    _validate_evidence_trace(value.get("evidence_trace"), seen)
+    _validate_duplicate_search(value.get("duplicate_search"), seen)
+    if not repository_observations and _mentions_repository_observations({
+        "claims": value.get("claims", []),
+        "candidate_directions": value.get("candidate_directions", []),
+        "critic_findings": value.get("critic_findings", []),
+    }):
+        raise _validation_error("discovery cites repository observations but repository_observations is empty")
     return value
 
 
