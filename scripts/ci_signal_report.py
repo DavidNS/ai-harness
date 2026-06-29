@@ -158,7 +158,7 @@ def _collect_architecture(signals: list[dict[str, object]]) -> int:
     return int(result["returncode"])
 
 
-def _collect_pytest(signals: list[dict[str, object]]) -> int:
+def _collect_pytest(signals: list[dict[str, object]], *, scope: str) -> int:
     result = _run(
         ["python", "-m", "pytest", "-q", "--tb=short", "--junitxml", "signals/raw/pytest-junit.xml"],
         raw_name="pytest",
@@ -166,16 +166,17 @@ def _collect_pytest(signals: list[dict[str, object]]) -> int:
     if result["returncode"] != 0:
         lines = [line for line in str(result["stdout"]).splitlines() if line.strip()]
         excerpt = "\n".join(lines[-20:])
+        summary = "Pytest failed on trunk baseline." if scope == "trunk_baseline" else "Pytest failed for this CI run."
         _signal(
             signals,
             tool="pytest",
             category="tests",
             severity="error",
             path="",
-            summary="Pytest failed on baseline main.",
+            summary=summary,
             evidence=excerpt or str(result["stderr"]),
             confidence="high",
-            agent_hint="Use failing baseline tests as constraints before blaming new implementation work.",
+            agent_hint="Use baseline failures as constraints; treat branch-only failures as implementation risk.",
         )
     return int(result["returncode"])
 
@@ -209,26 +210,75 @@ def _collect_semgrep(signals: list[dict[str, object]]) -> int:
     return 0 if code == 1 else code
 
 
+def _github_run_url() -> str:
+    server = os.environ.get("GITHUB_SERVER_URL", "https://github.com")
+    repository = os.environ.get("GITHUB_REPOSITORY", "")
+    run_id = os.environ.get("GITHUB_RUN_ID", "")
+    if not repository or not run_id:
+        return ""
+    return f"{server.rstrip('/')}/{repository}/actions/runs/{run_id}"
+
+
+def _scope(branch: str, base_ref: str) -> str:
+    if branch == "main" and not base_ref:
+        return "trunk_baseline"
+    if base_ref:
+        return "pull_request"
+    return "run_branch"
+
+
+def _path_index(signals: list[dict[str, object]]) -> list[dict[str, object]]:
+    order = {"error": 4, "critical": 4, "high": 3, "warning": 2, "medium": 2, "low": 1, "info": 0}
+    entries: dict[str, dict[str, object]] = {}
+    for signal in signals:
+        path = str(signal.get("path", ""))
+        if not path:
+            continue
+        entry = entries.setdefault(path, {"path": path, "signal_count": 0, "max_severity": ""})
+        entry["signal_count"] = int(entry["signal_count"]) + 1
+        severity = str(signal.get("severity", ""))
+        if order.get(severity, 0) > order.get(str(entry.get("max_severity", "")), 0):
+            entry["max_severity"] = severity
+    return [entries[path] for path in sorted(entries)]
+
+
 def main() -> int:
     SIGNALS.mkdir(parents=True, exist_ok=True)
     RAW.mkdir(parents=True, exist_ok=True)
+    head_ref = os.environ.get("GITHUB_HEAD_REF") or os.environ.get("GITHUB_REF_NAME") or _git(["branch", "--show-current"])
+    base_ref = os.environ.get("GITHUB_BASE_REF", "")
+    scope = _scope(head_ref, base_ref)
     signals: list[dict[str, object]] = []
     statuses = {
         "ruff": _collect_ruff(signals),
         "mypy": _collect_mypy(signals),
         "architecture": _collect_architecture(signals),
-        "pytest": _collect_pytest(signals),
+        "pytest": _collect_pytest(signals, scope=scope),
         "semgrep": _collect_semgrep(signals),
     }
     report = {
-        "schema_version": 1,
+        "schema_version": 2,
         "kind": "ai_harness_ci_signals",
-        "commit": _git(["rev-parse", "HEAD"]),
-        "branch": _git(["branch", "--show-current"]),
+        "provider": "github" if os.environ.get("GITHUB_ACTIONS") else "local",
+        "scope": scope,
+        "base_ref": base_ref,
+        "base_sha": "",
+        "head_ref": head_ref,
+        "head_sha": os.environ.get("GITHUB_SHA") or _git(["rev-parse", "HEAD"]),
+        "commit": os.environ.get("GITHUB_SHA") or _git(["rev-parse", "HEAD"]),
+        "branch": head_ref,
+        "run": {
+            "run_id": os.environ.get("GITHUB_RUN_ID", ""),
+            "run_attempt": os.environ.get("GITHUB_RUN_ATTEMPT", ""),
+            "workflow_name": os.environ.get("GITHUB_WORKFLOW", ""),
+            "url": _github_run_url(),
+            "event": os.environ.get("GITHUB_EVENT_NAME", ""),
+            "created_at": "",
+        },
         "pipeline": {
-            "id": os.environ.get("CI_PIPELINE_ID", ""),
-            "url": os.environ.get("CI_PIPELINE_URL", ""),
-            "source": os.environ.get("CI_PIPELINE_SOURCE", ""),
+            "id": os.environ.get("CI_PIPELINE_ID", "") or os.environ.get("GITHUB_RUN_ID", ""),
+            "url": os.environ.get("CI_PIPELINE_URL", "") or _github_run_url(),
+            "source": os.environ.get("CI_PIPELINE_SOURCE", "") or os.environ.get("GITHUB_EVENT_NAME", ""),
         },
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "summary": {
@@ -236,7 +286,7 @@ def main() -> int:
             "signal_count": len(signals),
             "tool_status": statuses,
         },
-        "path_index": sorted({str(signal.get("path", "")) for signal in signals if signal.get("path")}),
+        "path_index": _path_index(signals),
         "signals": signals[:200],
         "raw_artifacts": [
             "signals/raw/ruff.json",

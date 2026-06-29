@@ -47,6 +47,7 @@ class HarnessConfig:
     timeout_seconds: float = 120.0
     max_attempts: int = CONTROLLER_DEFAULT_ATTEMPTS
     git_branch_mode: str = "off"
+    github_ci_mode: str = "baseline"
 
     def __post_init__(self) -> None:
         if sys.version_info < MINIMUM_PYTHON:
@@ -63,6 +64,8 @@ class HarnessConfig:
             raise ConfigurationError("max attempts must be between one and ten")
         if self.git_branch_mode not in {"off", "create"}:
             raise ConfigurationError("git branch mode must be off or create")
+        if self.github_ci_mode not in {"off", "baseline", "branch"}:
+            raise ConfigurationError("GitHub CI mode must be off, baseline, or branch")
 
 
 def load_config(values: Mapping[str, str] | None = None) -> HarnessConfig:

@@ -102,12 +102,20 @@ class TaskPlanExecution:
             if self._ctx.artifacts.exists("spec.md")
             else self._callbacks.request_brief()
         )
-        return self._invoke_with_repair(
-            "review",
-            {
-                "spec.md": spec,
-                "task": self._ctx.task_documents[task.id],
-                "diff": outcome.repository_diff,
-                "test_evidence": [item.to_dict() for item in evidence],
-            },
+        inputs: dict[str, object] = {
+            "spec.md": spec,
+            "task": self._ctx.task_documents[task.id],
+            "diff": outcome.repository_diff,
+            "test_evidence": [item.to_dict() for item in evidence],
+        }
+        inputs["ci/run-branch-signals.json"] = (
+            self._ctx.artifacts.read_json("ci/run-branch-signals.json")
+            if self._ctx.artifacts.exists("ci/run-branch-signals.json")
+            else {}
         )
+        inputs["ci/comparison.json"] = (
+            self._ctx.artifacts.read_json("ci/comparison.json")
+            if self._ctx.artifacts.exists("ci/comparison.json")
+            else {}
+        )
+        return self._invoke_with_repair("review", inputs)

@@ -108,5 +108,6 @@ class RunInitializer:
             request=request,
             branch_mode=self._config.git_branch_mode,
             warnings=self._warnings,
+            github_ci_mode=self._config.github_ci_mode,
         )
         return InitResult(route, strategy, explorer_gate, self._artifacts, self._state, run_state)

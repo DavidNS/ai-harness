@@ -19,6 +19,7 @@ from ..stores.runtime import RunLock
 from ..stores.state import StateStore
 from ..strategy import StrategyDecision
 from .analysis_quality import AnalysisSupportService
+from .ci_finalization import CiFinalization
 from .context import RunContext
 from .failure_recorder import FailureRecorder as _FailureRecorder
 from .explorer_flow import ExplorerFlowService
@@ -68,6 +69,14 @@ class Orchestrator:
             self._invoke,
             self._invoke_with_repair,
         )
+        self._ci_finalization = CiFinalization(
+            self._ctx.target,
+            self._ctx.config,
+            self._ctx.artifacts,
+            self._ctx.state,
+            self._ctx.warnings,
+            self._results,
+        )
         self._pex = PhaseExecution(self._ctx, PhaseExecutionCallbacks(
             load_knowledge=self._aqm._load_knowledge,
             persist_route=self._persist_route,
@@ -78,7 +87,7 @@ class Orchestrator:
             explorer_decision=self._ifl._explorer_decision,
             explorer_artifact=self._ifl._explorer_artifact,
             explorer_review=self._ifl._explorer_review,
-            finalize=self._results.finalize,
+            finalize=self._ci_finalization.finalize,
             explorer_scope=self._aqm._explorer_scope,
             related_improvements=self._wex._related_improvements,
             repository_observations=self._wex._repository_observations,

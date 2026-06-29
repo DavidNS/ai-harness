@@ -66,7 +66,7 @@ PHASE_DEFINITIONS = {
     "explorer_review": _definition("explorer_review", "explorer/review.md", ("request", "runtime_context", "intake", "discovery", "decision", "artifact_candidate", "related_improvements", "repository_observations"), "Review", ("Verdict", "Findings"), validate_explorer_review),
     "implement": _definition("implement", "implementation.md", ("design.md", "task", "repository", "prior_failures"), "Implementation", ("Changes", "Evidence")),
     "test": _definition("test", "tests.md", ("spec.md", "design.md", "task", "changes", "command_evidence"), "Tests", ("Commands", "Results")),
-    "review": _definition("review", "review.md", ("spec.md", "task", "diff", "test_evidence"), "Review", ("Verdict", "Findings"), validate_review),
+    "review": _definition("review", "review.md", ("spec.md", "task", "diff", "test_evidence", "ci/run-branch-signals.json", "ci/comparison.json"), "Review", ("Verdict", "Findings"), validate_review),
     "learning": _definition("learning", "learning.json", ("final_artifacts", "state", "learning_context"), "Learning", (), validate_learning),
     "knowledge_synthesis": _definition("knowledge_synthesis", "knowledge/synthesis.json", ("source", "run", "source_artifacts", "repository_snapshot", "accepted_evidence", "rejected_evidence", "context", "repair"), "Knowledge Synthesis", (), validate_learning),
     "knowledge_review": _definition("knowledge_review", "knowledge/review.json", ("proposal", "source", "context", "repository_snapshot", "accepted_evidence", "rejected_evidence"), "Knowledge Review", (), validate_knowledge_review),

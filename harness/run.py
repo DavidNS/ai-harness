@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 from ai_harness.config import load_config
@@ -36,6 +37,7 @@ def _parser() -> argparse.ArgumentParser:
     recovery.add_argument("--install-ci", action="store_true")
     recovery.add_argument("--install-packages", action="store_true")
     parser.add_argument("--ci-target", choices=("github", "gitlab", "both"))
+    parser.add_argument("--github-ci-mode", choices=("off", "baseline", "branch"), help="GitHub CI evidence mode for harness runs")
     parser.add_argument("--package", action="append", default=[], help="optional recommended package group to include")
     parser.add_argument("--all-packages", action="store_true", help="include every optional recommended package group")
     parser.add_argument("--dry-install", action="store_true", help="print package installation command without running pip")
@@ -70,6 +72,13 @@ def _apply_cli_environment(args: argparse.Namespace, values: dict[str, str]) -> 
         values["AI_HARNESS_CLAUDE_MODEL"] = args.model
     if args.reasoning_effort:
         values["AI_HARNESS_CODEX_REASONING_EFFORT"] = args.reasoning_effort
+
+
+def _config_from_args(args: argparse.Namespace, values: dict[str, str]):
+    config = load_config(values)
+    if args.github_ci_mode is not None:
+        config = replace(config, github_ci_mode=args.github_ci_mode)
+    return config
 
 
 def _decision_answer(args: argparse.Namespace, artifacts: ArtifactStore, unfinished) -> str | None:
@@ -123,7 +132,7 @@ def main(argv: list[str] | None = None) -> int:
             print(render_show_runs(repository), end="")
             return 0
 
-        config = load_config(values)
+        config = _config_from_args(args, values)
         provider = provider_from_config(config, values)
         artifacts = ArtifactStore(repository, create=False)
         unfinished = None
@@ -150,7 +159,7 @@ def main(argv: list[str] | None = None) -> int:
                 explicit_provider=args.provider is not None,
                 explicit_model=getattr(args, "model", None) is not None,
             )
-            config = load_config(values)
+            config = _config_from_args(args, values)
             provider = provider_from_config(config, values)
             if provider is None and (unfinished.status is RunStatus.ACTIVE or decision_answer is not None):
                 print(

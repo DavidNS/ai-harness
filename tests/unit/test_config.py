@@ -47,9 +47,16 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual("off", load_config({}).git_branch_mode)
         self.assertEqual("create", load_config({"AI_HARNESS_GIT_BRANCH_MODE": "create"}).git_branch_mode)
 
+    def test_github_ci_mode_defaults_baseline(self):
+        self.assertEqual("baseline", load_config({}).github_ci_mode)
+
     def test_rejects_unknown_git_branch_mode(self):
         with self.assertRaisesRegex(ConfigurationError, "git branch mode"):
             load_config({"AI_HARNESS_GIT_BRANCH_MODE": "always"})
+
+    def test_rejects_unknown_github_ci_mode(self):
+        with self.assertRaisesRegex(ConfigurationError, "GitHub CI mode"):
+            HarnessConfig(github_ci_mode="always")
 
     def test_resources_are_harness_relative_and_contained(self):
         self.assertEqual(resource_path("schemas").name, "schemas")

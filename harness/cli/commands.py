@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from ai_harness.ci_support import ci_preflight
 from ai_harness.recommended_packages import load_recommended_package_groups
 
-from .bootstrap import ACTIONS, RUNNER, _default_provider, _parser, _prompt_for_model, _prompt_for_reasoning_effort
+from .bootstrap import ACTIONS, GITHUB_CI_MODES, RUNNER, _default_provider, _parser, _prompt_for_model, _prompt_for_reasoning_effort
 from .runtime import (
     _decision_request,
     _find_run,
@@ -125,6 +125,7 @@ _CONSOLE_ACTIONS = (
     _ConsoleAction("archive", "Archive run", "a"),
     _ConsoleAction("start", "Start request", "n", ("new",)),
     _ConsoleAction("model", "Select model", "m"),
+    _ConsoleAction("ci-mode", "Select GitHub CI mode", "g", ("ci", "github-ci")),
     _ConsoleAction("install-ci", "Install CI", "c"),
     _ConsoleAction("install-packages", "Install packages", "p", ("packages",)),
     _ConsoleAction("help", "Show help", "h"),
@@ -159,6 +160,32 @@ def _package_install_args(args: list[str]) -> tuple[list[str], bool, bool]:
         else:
             optionals.append(arg)
     return optionals, all_optional, dry_install
+
+
+def _select_github_ci_mode(namespace: argparse.Namespace, args: list[str]) -> int:
+    if len(args) > 1:
+        print("error: ci-mode accepts at most one mode", file=sys.stderr)
+        return 2
+    current = getattr(namespace, "github_ci_mode", None) or "baseline"
+    if args:
+        selected = args[0].strip().lower()
+        if selected not in GITHUB_CI_MODES:
+            print("error: GitHub CI mode must be off, baseline, or branch", file=sys.stderr)
+            return 2
+    else:
+        selected = _menu_prompt(
+            ["GitHub CI mode", f"Current: {current}"],
+            [
+                _MenuItem("o", "Off", "off", ("off",)),
+                _MenuItem("b", "Baseline", "baseline", ("baseline",)),
+                _MenuItem("r", "Branch", "branch", ("branch",)),
+            ],
+            help_kind="console",
+            default_index=GITHUB_CI_MODES.index(current),
+        ).value
+    setattr(namespace, "github_ci_mode", selected)
+    print(f"Selected GitHub CI mode: {selected}", file=sys.stderr)
+    return 0
 
 
 def _startup_ci_preflight(namespace: argparse.Namespace) -> None:
@@ -258,6 +285,8 @@ def _dispatch_console_action(namespace: argparse.Namespace, command: str, args: 
             print("error: request is empty", file=sys.stderr)
             return 2
         return _start(namespace, [], request_override=request)
+    if command == "ci-mode":
+        return _select_github_ci_mode(namespace, args)
     if command == "install-ci":
         force = "--force" in args
         targets = [item for item in args if item != "--force"]
@@ -371,6 +400,9 @@ def _start(namespace: argparse.Namespace, prompt_args: list[str], *, request_ove
     reasoning_effort = getattr(namespace, "reasoning_effort", None)
     if reasoning_effort:
         backend.extend(["--reasoning-effort", reasoning_effort])
+    github_ci_mode = getattr(namespace, "github_ci_mode", None)
+    if github_ci_mode:
+        backend.extend(["--github-ci-mode", github_ci_mode])
     request: str | None = request_override
     if namespace.prompt_file is not None:
         if prompt_args or request_override is not None:
@@ -413,6 +445,9 @@ def _resume(namespace: argparse.Namespace, run_id: str | None, *, follow_decisio
     reasoning_effort = getattr(namespace, "reasoning_effort", None)
     if reasoning_effort:
         backend.extend(["--reasoning-effort", reasoning_effort])
+    github_ci_mode = getattr(namespace, "github_ci_mode", None)
+    if github_ci_mode:
+        backend.extend(["--github-ci-mode", github_ci_mode])
     if state.get("status") == "waiting_for_user" and sys.stdin.isatty():
         request = _decision_request(current, state)
         if request is not None:

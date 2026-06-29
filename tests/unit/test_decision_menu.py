@@ -334,6 +334,18 @@ class DecisionMenuTests(unittest.TestCase):
         self.assertEqual("gpt-5", namespace.model)
         self.assertIn("Selected model: gpt-5", stderr.getvalue())
 
+    def test_console_ci_mode_command_stores_selected_mode(self) -> None:
+        launcher = load_launcher()
+        namespace = launcher.argparse.Namespace(cwd=Path("/repo"), provider="local", verbose=False, dry_run=False)
+        stderr = io.StringIO()
+
+        with contextlib.redirect_stderr(stderr):
+            code = launcher._console_command(namespace, "/ci-mode branch")
+
+        self.assertEqual(0, code)
+        self.assertEqual("branch", namespace.github_ci_mode)
+        self.assertIn("Selected GitHub CI mode: branch", stderr.getvalue())
+
     def test_console_slash_status_dispatches_action(self) -> None:
         launcher = load_launcher()
         namespace = launcher.argparse.Namespace(cwd=Path("/repo"), provider="local", verbose=False, dry_run=False)
@@ -435,6 +447,18 @@ class DecisionMenuTests(unittest.TestCase):
         self.assertIn("--reasoning-effort", backend)
         self.assertIn("xhigh", backend)
 
+    def test_start_forwards_selected_github_ci_mode(self) -> None:
+        launcher = load_launcher()
+        namespace = launcher.argparse.Namespace(cwd=Path("/repo"), provider="local", verbose=False, dry_run=False, prompt_file=None, github_ci_mode="branch")
+        with mock.patch.object(launcher.sys.stdin, "isatty", return_value=False), \
+            mock.patch.object(launcher, "_run_and_follow_decisions", return_value=0) as run:
+            code = launcher._start(namespace, ["Fix tests"])
+
+        self.assertEqual(0, code)
+        backend = run.call_args.args[1]
+        self.assertIn("--github-ci-mode", backend)
+        self.assertIn("branch", backend)
+
     def test_run_and_follow_decisions_resumes_single_waiting_run(self) -> None:
         launcher = load_launcher()
         namespace = launcher.argparse.Namespace(cwd=Path("/repo"), provider="local", verbose=False, dry_run=False)
@@ -457,6 +481,21 @@ class DecisionMenuTests(unittest.TestCase):
         self.assertIn("run-1", resumed_args)
         self.assertIn("--selected-option", resumed_args)
         self.assertIn("preserve", resumed_args)
+
+    def test_resume_forwards_selected_github_ci_mode(self) -> None:
+        launcher = load_launcher()
+        namespace = launcher.argparse.Namespace(cwd=Path("/repo"), provider="local", verbose=False, dry_run=False, github_ci_mode="branch")
+        current = Path("/tmp/current-run")
+        state = {"run_id": "run-1", "status": "active", "current_phase": "IMPLEMENT"}
+
+        with mock.patch.object(launcher, "_find_run", return_value=(current, state)), \
+            mock.patch.object(launcher, "_run", return_value=0) as run:
+            code = launcher._resume(namespace, "run-1", follow_decisions=False)
+
+        self.assertEqual(0, code)
+        backend = run.call_args.args[0]
+        self.assertIn("--github-ci-mode", backend)
+        self.assertIn("branch", backend)
 
     def test_discovers_improvement_candidates_with_titles(self) -> None:
         launcher = load_launcher()

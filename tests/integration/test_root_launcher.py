@@ -143,6 +143,18 @@ class RootLauncherIntegrationTests(unittest.TestCase):
             self.assertIn("--provider local", completed.stderr)
 
 
+    def test_github_ci_mode_flag_delegates_to_backend(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            completed = run_launcher(
+                "--dry-run", "--cwd", str(repository), "--provider", "local",
+                "--github-ci-mode", "branch", "Fix tests", cwd=repository,
+            )
+
+            self.assertEqual(0, completed.returncode, completed.stderr)
+            self.assertIn("--github-ci-mode branch", completed.stderr)
+
+
     def test_positional_exit_is_normal_request_not_launcher_command(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             repository = Path(directory)

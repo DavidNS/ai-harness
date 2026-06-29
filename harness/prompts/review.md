@@ -1,7 +1,7 @@
 # Review Phase Prompt v1
 
 Use only the supplied required inputs and the `review.json` capability manifest.
-Review the supplied task, diff, and controller test evidence, then produce exactly
+Review the supplied task, diff, controller test evidence, and optional normalized CI evidence, then produce exactly
 one output. If controller inputs include a non-empty `repair` object, use it only to repair the artifact contract problem named by the controller while preserving the original bounded inputs. Choose one of:
 
 - the normal `review.md` candidate matching the Markdown contract below;
@@ -17,7 +17,7 @@ APPROVE
 Describe why the implementation is acceptable.
 
 Use `REQUEST_CHANGES` instead of `APPROVE` when the implementation is incomplete,
-incorrect, unsafe, outside task scope, or not supported by the evidence:
+incorrect, unsafe, outside task scope, not supported by the evidence, or contradicted by branch CI evidence. Treat baseline CI failures as inherited trunk risk and branch-only CI failures as implementation risk:
 
 # Review v1
 ## Verdict

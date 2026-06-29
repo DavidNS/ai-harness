@@ -11,7 +11,9 @@ from ai_harness.ci_support import (
     ci_observations_from_artifact,
     ci_preflight,
     ci_status,
+    compare_ci_signals,
     detected_ci_providers,
+    github_branch_ci_signals,
     github_ci_signals,
     gitlab_ci_signals,
     infer_github_project,
@@ -19,6 +21,7 @@ from ai_harness.ci_support import (
     install_ci_templates,
     maybe_create_run_branch,
     merged_ci_signals,
+    record_branch_ci_artifacts,
     record_ci_and_git_artifacts,
     repository_runtime_context,
 )
@@ -138,6 +141,60 @@ class CiSupportTests(unittest.TestCase):
 
             self.assertEqual("partial", signals["status"])
             self.assertEqual(12, signals["source"]["run_id"])
+
+
+    def test_github_branch_ci_signals_fetches_matching_head_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            subprocess.run(["git", "init"], cwd=repository, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(["git", "remote", "add", "origin", "https://github.com/owner/repo.git"], cwd=repository, check=True)
+            payload = {
+                "schema_version": 2,
+                "kind": "ai_harness_ci_signals",
+                "summary": {"status": "passed"},
+                "path_index": [],
+                "signals": [],
+            }
+
+            def runner(args, **_kwargs):
+                if args[:3] == ["gh", "auth", "status"]:
+                    return subprocess.CompletedProcess(args, 0, "", "")
+                if args[:3] == ["gh", "run", "list"]:
+                    return subprocess.CompletedProcess(args, 0, json.dumps([
+                        {"databaseId": 21, "headSha": "old", "conclusion": "success", "status": "completed"},
+                        {"databaseId": 22, "headSha": "abc123", "conclusion": "success", "status": "completed", "workflowName": "AI Harness CI"},
+                    ]), "")
+                if args[:3] == ["gh", "run", "download"]:
+                    self.assertEqual("22", str(args[3]))
+                    target = Path(args[args.index("--dir") + 1]) / "signals"
+                    target.mkdir(parents=True)
+                    (target / "ai-harness-signals.json").write_text(json.dumps(payload), encoding="utf-8")
+                    return subprocess.CompletedProcess(args, 0, "", "")
+                raise AssertionError(args)
+
+            signals = github_branch_ci_signals(repository, "aih/run/feature", expected_head_sha="abc123", runner=runner, which=lambda _cmd: "/usr/bin/gh")
+
+            self.assertEqual("ready", signals["status"])
+            self.assertEqual("run_branch", signals["scope"])
+            self.assertEqual("abc123", signals["head_sha"])
+            self.assertEqual(22, signals["source"]["run_id"])
+
+    def test_compare_ci_signals_classifies_new_existing_and_resolved(self) -> None:
+        baseline = {"signals": [
+            {"tool": "pytest", "category": "tests", "path": "a.py", "summary": "A", "severity": "error"},
+            {"tool": "ruff", "category": "lint", "path": "b.py", "summary": "B", "severity": "warning"},
+        ]}
+        branch = {"status": "ready", "run": {"conclusion": "success"}, "signals": [
+            {"tool": "pytest", "category": "tests", "path": "a.py", "summary": "A", "severity": "error"},
+            {"tool": "mypy", "category": "typing", "path": "c.py", "summary": "C", "severity": "warning"},
+        ]}
+
+        comparison = compare_ci_signals(baseline, branch)
+
+        self.assertEqual(1, comparison["summary"]["new_signal_count"])
+        self.assertEqual(1, comparison["summary"]["existing_signal_count"])
+        self.assertEqual(1, comparison["summary"]["resolved_signal_count"])
+        self.assertTrue(comparison["summary"]["branch_passed"])
 
     def test_merged_ci_signals_prefers_ready_provider(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -312,6 +369,39 @@ class CiSupportTests(unittest.TestCase):
 
             self.assertEqual("aih/abcdef12/fix-tests", metadata["created_branch"])
             self.assertFalse(metadata["dirty"])
+
+
+    def test_record_branch_ci_artifacts_records_comparison_and_passes_when_branch_ci_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            subprocess.run(["git", "init"], cwd=repository, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(["git", "-c", "user.email=a@example.com", "-c", "user.name=A", "commit", "--allow-empty", "-m", "init"], cwd=repository, check=True, stdout=subprocess.DEVNULL)
+            head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repository, text=True).strip()
+            artifacts = ArtifactStore(repository)
+            state = StateStore(repository, artifacts)
+            state.save(RunState(
+                "run", "request", "FINALIZING", Strategy.NON_CODE_STUB, Mode.NON_CODE,
+                "ideation", Complexity.LOW, "local",
+            ))
+            artifacts.write_json("git-run.json", {"created_branch": "aih/run/request", "head": head})
+            state.record_artifact("git-run.json", "INITIALIZING")
+            artifacts.write_json("ci-signals.json", {"status": "ready", "signals": [], "summary": {"status": "passed"}})
+            state.record_artifact("ci-signals.json", "INITIALIZING")
+            branch_payload = {
+                "status": "ready",
+                "scope": "run_branch",
+                "head_sha": head,
+                "run": {"conclusion": "success"},
+                "summary": {"status": "passed"},
+                "signals": [],
+                "warnings": [],
+            }
+            with patch("ai_harness.ci_support.github_branch_ci_signals", return_value=branch_payload):
+                result = record_branch_ci_artifacts(repository, artifacts, state, github_ci_mode="branch", warnings=[])
+
+            self.assertEqual("passed", result["status"])
+            self.assertIn("ci/run-branch-signals.json", state.load().artifacts)
+            self.assertIn("ci/comparison.json", state.load().artifacts)
 
     def test_recorded_ci_artifact_can_be_state_tracked(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

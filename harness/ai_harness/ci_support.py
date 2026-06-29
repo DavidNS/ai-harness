@@ -184,13 +184,27 @@ def detected_ci_providers(repository: Path) -> tuple[str, ...]:
     return tuple(dict.fromkeys(detected))
 
 
-def _ci_unavailable(provider: str, reason: str, *, status: str = "unavailable", warnings: list[str] | None = None) -> dict[str, object]:
+def _ci_unavailable(
+    provider: str,
+    reason: str,
+    *,
+    status: str = "unavailable",
+    warnings: list[str] | None = None,
+    scope: str = "unknown",
+) -> dict[str, object]:
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "kind": "ai_harness_ci_signals",
         "provider": provider,
+        "scope": scope,
         "status": status,
         "reason": reason,
+        "base_ref": "",
+        "base_sha": "",
+        "head_ref": "",
+        "head_sha": "",
+        "run": {},
+        "source": {},
         "warnings": list(warnings or []),
         "summary": {"status": status, "signal_count": 0},
         "path_index": [],
@@ -216,20 +230,194 @@ def _json_from_command(args: list[str], *, runner: Callable[..., Any] = subproce
         return None, f"command returned malformed JSON: {exc}"
 
 
-def _normalize_signal_payload(provider: str, payload: dict[str, object], *, source: dict[str, object]) -> dict[str, object]:
-    payload = dict(payload)
-    payload.setdefault("schema_version", 1)
-    payload.setdefault("kind", "ai_harness_ci_signals")
-    payload["provider"] = provider
-    payload["status"] = "ready"
-    payload["source"] = source
-    payload.setdefault("warnings", [])
-    payload.setdefault("path_index", [])
-    payload.setdefault("signals", [])
+def _text(value: object) -> str:
+    return value if isinstance(value, str) else ""
+
+
+def _run_payload(source: dict[str, object]) -> dict[str, object]:
+    return {
+        "run_id": source.get("run_id"),
+        "run_attempt": source.get("run_attempt"),
+        "workflow_name": source.get("workflow_name"),
+        "url": source.get("run_url"),
+        "event": source.get("event"),
+        "created_at": source.get("created_at"),
+        "conclusion": source.get("conclusion"),
+        "status": source.get("status"),
+        "pr_number": source.get("pr_number"),
+    }
+
+
+def _normalize_signal(item: object) -> dict[str, object] | None:
+    if not isinstance(item, dict):
+        return None
+    return {
+        "id": _text(item.get("id")),
+        "tool": _text(item.get("tool")),
+        "category": _text(item.get("category")),
+        "severity": _text(item.get("severity")) or "warning",
+        "status": _text(item.get("status")) or "unknown",
+        "path": _text(item.get("path")),
+        "summary": _text(item.get("summary")),
+        "evidence": _text(item.get("evidence")),
+        "confidence": _text(item.get("confidence")) or "medium",
+        "agent_hint": _text(item.get("agent_hint")),
+    }
+
+
+def _signal_key(item: object) -> tuple[str, str, str, str]:
+    if not isinstance(item, dict):
+        return ("", "", "", "")
+    return (
+        _text(item.get("tool")),
+        _text(item.get("category")),
+        _text(item.get("path")),
+        _text(item.get("summary")),
+    )
+
+
+def _normalize_path_index(path_index: object, signals: list[dict[str, object]]) -> list[dict[str, object]]:
+    severities = {"error": 4, "critical": 4, "high": 3, "warning": 2, "medium": 2, "low": 1, "info": 0, "": 0}
+    if isinstance(path_index, list) and all(isinstance(item, dict) for item in path_index):
+        result: list[dict[str, object]] = []
+        for item in path_index:
+            path = _text(item.get("path"))
+            if not path:
+                continue
+            result.append({
+                "path": path,
+                "signal_count": int(item.get("signal_count", 0)) if isinstance(item.get("signal_count"), int) else 0,
+                "max_severity": _text(item.get("max_severity")) or "unknown",
+            })
+        return result
+    counts: dict[str, dict[str, object]] = {}
+    for signal in signals:
+        path = _text(signal.get("path"))
+        if not path:
+            continue
+        entry = counts.setdefault(path, {"path": path, "signal_count": 0, "max_severity": ""})
+        entry["signal_count"] = int(entry["signal_count"]) + 1
+        severity = _text(signal.get("severity"))
+        if severities.get(severity, 0) > severities.get(_text(entry.get("max_severity")), 0):
+            entry["max_severity"] = severity
+    if counts:
+        return [counts[path] for path in sorted(counts)]
+    if isinstance(path_index, list):
+        return [{"path": item, "signal_count": 0, "max_severity": "unknown"} for item in path_index if isinstance(item, str) and item]
+    return []
+
+
+def _normalize_signal_payload(
+    provider: str,
+    payload: dict[str, object],
+    *,
+    source: dict[str, object],
+    scope: str = "trunk_baseline",
+) -> dict[str, object]:
+    raw_signals = payload.get("signals", []) if isinstance(payload.get("signals"), list) else []
+    signals = [signal for item in raw_signals if (signal := _normalize_signal(item)) is not None]
     summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
-    signal_count = len(payload.get("signals", [])) if isinstance(payload.get("signals"), list) else 0
-    payload["summary"] = {**summary, "status": "ready", "signal_count": signal_count}
-    return payload
+    ci_status = _text(summary.get("status")) or _text(payload.get("status")) or "unknown"
+    base_ref = _text(payload.get("base_ref")) or _text(source.get("base_ref"))
+    head_ref = _text(payload.get("head_ref")) or _text(source.get("head_ref")) or _text(source.get("ref"))
+    head_sha = _text(payload.get("head_sha")) or _text(payload.get("commit")) or _text(source.get("head_sha")) or _text(source.get("run_sha"))
+    base_sha = _text(payload.get("base_sha")) or _text(source.get("base_sha"))
+    return {
+        "schema_version": 2,
+        "kind": "ai_harness_ci_signals",
+        "provider": provider,
+        "scope": scope,
+        "status": "ready",
+        "base_ref": base_ref,
+        "base_sha": base_sha,
+        "head_ref": head_ref,
+        "head_sha": head_sha,
+        "run": _run_payload(source),
+        "source": source,
+        "warnings": list(payload.get("warnings", [])) if isinstance(payload.get("warnings"), list) else [],
+        "summary": {**summary, "status": ci_status, "signal_count": len(signals)},
+        "path_index": _normalize_path_index(payload.get("path_index", []), signals),
+        "signals": signals,
+        "raw_artifacts": payload.get("raw_artifacts", []),
+    }
+
+
+def _github_auth_problem(
+    repository: Path,
+    *,
+    runner: Callable[..., Any],
+    which: Callable[[str], str | None],
+    scope: str,
+) -> dict[str, object] | None:
+    project = infer_github_project(origin_url(repository))
+    if project is None and not (repository / ".github" / "workflows").is_dir():
+        return _ci_unavailable("github", "no GitHub remote or workflow directory was detected", scope=scope)
+    if which("gh") is None:
+        return _ci_unavailable("github", "gh is not installed", status="problem_gathering_info", scope=scope)
+    try:
+        auth = _run_plain_command(["gh", "auth", "status"], timeout=8.0, runner=runner)
+    except Exception as exc:
+        return _ci_unavailable("github", f"gh auth status could not be checked: {exc}", status="problem_gathering_info", scope=scope)
+    if auth.returncode != 0:
+        detail = (auth.stderr or auth.stdout or "gh is not authenticated").strip()
+        return _ci_unavailable("github", detail, status="problem_gathering_info", scope=scope)
+    return None
+
+
+def _github_project_path(repository: Path) -> str:
+    project = infer_github_project(origin_url(repository))
+    return project.get("project_path", "") if project else ""
+
+
+def _github_run_source(repository: Path, run: dict[str, object], *, ref: str, scope: str) -> dict[str, object]:
+    head_sha = run.get("headSha") or run.get("head_sha")
+    return {
+        "project_path": _github_project_path(repository),
+        "scope": scope,
+        "ref": ref,
+        "base_ref": "main" if scope != "trunk_baseline" else "",
+        "base_sha": _run_git(repository, ["rev-parse", "--verify", "origin/main"]) or "",
+        "head_ref": ref,
+        "head_sha": head_sha,
+        "run_id": run.get("databaseId"),
+        "run_url": run.get("url"),
+        "workflow_name": run.get("workflowName"),
+        "run_sha": head_sha,
+        "conclusion": run.get("conclusion"),
+        "status": run.get("status"),
+        "event": run.get("event"),
+        "created_at": run.get("createdAt"),
+    }
+
+
+def _download_github_signal_payload(
+    run_id: object,
+    *,
+    runner: Callable[..., Any],
+) -> tuple[dict[str, object] | None, str]:
+    if run_id is None:
+        return None, "GitHub Actions run did not include an id"
+    with tempfile.TemporaryDirectory(prefix="ai-harness-gh-") as directory:
+        try:
+            download = _run_plain_command([
+                "gh", "run", "download", str(run_id), "--name", "ai-harness-signals", "--dir", directory,
+            ], timeout=20.0, runner=runner)
+        except Exception as exc:
+            download = subprocess.CompletedProcess([], 1, "", str(exc))
+        if download.returncode != 0:
+            return None, (download.stderr or download.stdout or "ai-harness-signals artifact was not found").strip()
+        root = Path(directory)
+        candidates = [root / "signals" / "ai-harness-signals.json", root / "ai-harness-signals.json"]
+        candidates.extend(root.rglob("ai-harness-signals.json"))
+        for candidate in candidates:
+            if candidate.is_file():
+                try:
+                    payload = json.loads(candidate.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    continue
+                if isinstance(payload, dict):
+                    return payload, ""
+        return None, "ai-harness-signals artifact did not contain signals/ai-harness-signals.json"
 
 
 def github_ci_signals(
@@ -239,83 +427,88 @@ def github_ci_signals(
     which: Callable[[str], str | None] = shutil.which,
 ) -> dict[str, object]:
     """Fetch latest main ai-harness CI signals from GitHub Actions when gh is configured."""
-    project = infer_github_project(origin_url(repository))
-    if project is None and not (repository / ".github" / "workflows").is_dir():
-        return _ci_unavailable("github", "no GitHub remote or workflow directory was detected")
-    if which("gh") is None:
-        return _ci_unavailable("github", "gh is not installed", status="problem_gathering_info")
-    try:
-        auth = _run_plain_command(["gh", "auth", "status"], timeout=8.0, runner=runner)
-    except Exception as exc:
-        return _ci_unavailable("github", f"gh auth status could not be checked: {exc}", status="problem_gathering_info")
-    if auth.returncode != 0:
-        detail = (auth.stderr or auth.stdout or "gh is not authenticated").strip()
-        return _ci_unavailable("github", detail, status="problem_gathering_info")
+    unavailable = _github_auth_problem(repository, runner=runner, which=which, scope="trunk_baseline")
+    if unavailable is not None:
+        return unavailable
     run_fields = "databaseId,headSha,conclusion,status,workflowName,url,event,createdAt"
     runs, error = _json_from_command([
         "gh", "run", "list", "--branch", "main", "--status", "success", "--limit", "1", "--json", run_fields,
     ], runner=runner, timeout=12.0)
     if error:
-        return _ci_unavailable("github", f"GitHub run list could not be fetched: {error}", status="problem_gathering_info")
+        return _ci_unavailable("github", f"GitHub run list could not be fetched: {error}", status="problem_gathering_info", scope="trunk_baseline")
     if not isinstance(runs, list) or not runs:
-        return _ci_unavailable("github", "no successful main GitHub Actions run was found")
+        return _ci_unavailable("github", "no successful main GitHub Actions run was found", scope="trunk_baseline")
     run = runs[0]
     if not isinstance(run, dict):
-        return _ci_unavailable("github", "latest GitHub Actions run response was malformed", status="problem_gathering_info")
-    run_id = run.get("databaseId")
-    source = {
-        "project_path": project.get("project_path", "") if project else "",
-        "ref": "main",
-        "run_id": run_id,
-        "run_url": run.get("url"),
-        "workflow_name": run.get("workflowName"),
-        "run_sha": run.get("headSha"),
-        "conclusion": run.get("conclusion"),
-        "status": run.get("status"),
-        "event": run.get("event"),
-        "created_at": run.get("createdAt"),
-    }
-    if run_id is None:
-        return _ci_unavailable("github", "latest GitHub Actions run did not include an id", status="problem_gathering_info")
-    with tempfile.TemporaryDirectory(prefix="ai-harness-gh-") as directory:
-        try:
-            download = _run_plain_command([
-                "gh", "run", "download", str(run_id), "--name", "ai-harness-signals", "--dir", directory,
-            ], timeout=20.0, runner=runner)
-        except Exception as exc:
-            download = subprocess.CompletedProcess([], 1, "", str(exc))
-        if download.returncode == 0:
-            root = Path(directory)
-            candidates = [root / "signals" / "ai-harness-signals.json", root / "ai-harness-signals.json"]
-            candidates.extend(root.rglob("ai-harness-signals.json"))
-            for candidate in candidates:
-                if candidate.is_file():
-                    try:
-                        payload = json.loads(candidate.read_text(encoding="utf-8"))
-                    except (OSError, json.JSONDecodeError):
-                        continue
-                    if isinstance(payload, dict):
-                        normalized = _normalize_signal_payload("github", payload, source=source)
-                        origin_main = _run_git(repository, ["rev-parse", "--verify", "origin/main"])
-                        warnings = list(normalized.get("warnings", [])) if isinstance(normalized.get("warnings", []), list) else []
-                        run_sha = str(run.get("headSha") or "")
-                        if origin_main and run_sha and origin_main != run_sha:
-                            warnings.append("Latest successful GitHub main workflow SHA does not match local origin/main.")
-                        normalized["warnings"] = warnings
-                        return normalized
-        reason = (download.stderr or download.stdout or "ai-harness-signals artifact was not found").strip()
+        return _ci_unavailable("github", "latest GitHub Actions run response was malformed", status="problem_gathering_info", scope="trunk_baseline")
+    source = _github_run_source(repository, run, ref="main", scope="trunk_baseline")
+    payload, reason = _download_github_signal_payload(run.get("databaseId"), runner=runner)
+    if payload is None:
         return {
-            "schema_version": 1,
-            "kind": "ai_harness_ci_signals",
-            "provider": "github",
-            "status": "partial",
-            "reason": reason,
-            "warnings": [],
-            "summary": {"status": "partial", "signal_count": 0},
+            **_ci_unavailable("github", reason, status="partial", scope="trunk_baseline"),
             "source": source,
-            "path_index": [],
-            "signals": [],
+            "run": _run_payload(source),
+            "head_ref": "main",
+            "head_sha": _text(source.get("head_sha")),
         }
+    normalized = _normalize_signal_payload("github", payload, source=source, scope="trunk_baseline")
+    origin_main = _run_git(repository, ["rev-parse", "--verify", "origin/main"])
+    warnings = list(normalized.get("warnings", [])) if isinstance(normalized.get("warnings", []), list) else []
+    run_sha = _text(source.get("head_sha"))
+    if origin_main and run_sha and origin_main != run_sha:
+        warnings.append("Latest successful GitHub main workflow SHA does not match local origin/main.")
+    normalized["warnings"] = warnings
+    return normalized
+
+
+def github_branch_ci_signals(
+    repository: Path,
+    branch: str,
+    *,
+    expected_head_sha: str = "",
+    runner: Callable[..., Any] = subprocess.run,
+    which: Callable[[str], str | None] = shutil.which,
+) -> dict[str, object]:
+    """Fetch the latest ai-harness CI artifact for a run branch or PR branch."""
+    branch = branch.strip()
+    if not branch:
+        return _ci_unavailable("github", "run branch is unknown", scope="run_branch")
+    unavailable = _github_auth_problem(repository, runner=runner, which=which, scope="run_branch")
+    if unavailable is not None:
+        return unavailable
+    run_fields = "databaseId,headSha,conclusion,status,workflowName,url,event,createdAt,headBranch"
+    runs, error = _json_from_command([
+        "gh", "run", "list", "--branch", branch, "--limit", "10", "--json", run_fields,
+    ], runner=runner, timeout=12.0)
+    if error:
+        return _ci_unavailable("github", f"GitHub branch run list could not be fetched: {error}", status="problem_gathering_info", scope="run_branch")
+    if not isinstance(runs, list) or not runs:
+        return _ci_unavailable("github", f"no GitHub Actions run was found for branch {branch}", scope="run_branch")
+    candidates = [run for run in runs if isinstance(run, dict)]
+    if expected_head_sha:
+        exact = [run for run in candidates if _text(run.get("headSha")) == expected_head_sha]
+        if exact:
+            candidates = exact
+    if not candidates:
+        return _ci_unavailable("github", f"no GitHub Actions run matched branch {branch}", scope="run_branch")
+    run = candidates[0]
+    source = _github_run_source(repository, run, ref=branch, scope="run_branch")
+    payload, reason = _download_github_signal_payload(run.get("databaseId"), runner=runner)
+    if payload is None:
+        return {
+            **_ci_unavailable("github", reason, status="partial", scope="run_branch"),
+            "source": source,
+            "run": _run_payload(source),
+            "head_ref": branch,
+            "head_sha": _text(source.get("head_sha")),
+        }
+    normalized = _normalize_signal_payload("github", payload, source=source, scope="run_branch")
+    warnings = list(normalized.get("warnings", [])) if isinstance(normalized.get("warnings", []), list) else []
+    actual_head = _text(normalized.get("head_sha"))
+    if expected_head_sha and actual_head and actual_head != expected_head_sha:
+        warnings.append("GitHub branch workflow SHA does not match the local run branch HEAD.")
+    normalized["warnings"] = warnings
+    return normalized
 
 def infer_gitlab_project(origin: str | None) -> dict[str, str] | None:
     """Infer GitLab API base URL and project path from a git remote URL."""
@@ -395,25 +588,25 @@ def gitlab_ci_signals(repository: Path, *, environment: dict[str, str] | None = 
         payload = json.loads(_gitlab_bytes(artifact_url, token).decode("utf-8"))
         if not isinstance(payload, dict):
             return _gitlab_unavailable("ai-harness-signals artifact was malformed")
-        payload.setdefault("schema_version", 1)
-        payload.setdefault("kind", "ai_harness_ci_signals")
-        payload["provider"] = "gitlab"
-        payload["status"] = "ready"
-        payload["source"] = {
+        source = {
             "api_url": api_url,
             "project_path": project["project_path"],
             "ref": "main",
+            "head_ref": "main",
+            "head_sha": pipeline_sha,
+            "run_id": pipeline_id,
             "pipeline_id": pipeline_id,
             "pipeline_sha": pipeline_sha,
             "job_id": job.get("id"),
             "job_name": job.get("name"),
         }
+        normalized = _normalize_signal_payload("gitlab", payload, source=source, scope="trunk_baseline")
         origin_main = _run_git(repository, ["rev-parse", "--verify", "origin/main"])
-        warnings = list(payload.get("warnings", [])) if isinstance(payload.get("warnings", []), list) else []
+        warnings = list(normalized.get("warnings", [])) if isinstance(normalized.get("warnings", []), list) else []
         if origin_main and pipeline_sha and origin_main != pipeline_sha:
             warnings.append("Latest successful GitLab main pipeline SHA does not match local origin/main.")
-        payload["warnings"] = warnings
-        return payload
+        normalized["warnings"] = warnings
+        return normalized
     except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
         return _gitlab_unavailable(f"GitLab CI signals could not be fetched: {exc}", status="problem_gathering_info")
 
@@ -433,7 +626,7 @@ def merged_ci_signals(repository: Path, *, environment: dict[str, str] | None = 
     detected = detected_ci_providers(repository)
     if not detected:
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "kind": "ai_harness_ci_signals",
             "status": "unavailable",
             "reason": "no CI provider was detected",
@@ -471,7 +664,7 @@ def merged_ci_signals(repository: Path, *, environment: dict[str, str] | None = 
     else:
         status = "unavailable"
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "kind": "ai_harness_ci_signals",
         "status": status,
         "providers": provider_statuses,
@@ -618,6 +811,104 @@ def maybe_create_run_branch(repository: Path, run_id: str, request: str, mode: B
     return metadata
 
 
+def _ci_status_passed(payload: dict[str, object]) -> bool:
+    run = payload.get("run") if isinstance(payload.get("run"), dict) else {}
+    conclusion = _text(run.get("conclusion"))
+    if conclusion:
+        return conclusion == "success"
+    summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+    status = _text(summary.get("status"))
+    return status in {"passed", "success"}
+
+
+def compare_ci_signals(baseline: dict[str, object], branch: dict[str, object]) -> dict[str, object]:
+    baseline_signals = baseline.get("signals", []) if isinstance(baseline.get("signals"), list) else []
+    branch_signals = branch.get("signals", []) if isinstance(branch.get("signals"), list) else []
+    baseline_by_key = {_signal_key(item): item for item in baseline_signals if _signal_key(item) != ("", "", "", "")}
+    branch_by_key = {_signal_key(item): item for item in branch_signals if _signal_key(item) != ("", "", "", "")}
+    classified: list[dict[str, object]] = []
+    for key, signal in branch_by_key.items():
+        if isinstance(signal, dict):
+            classified.append({**signal, "status": "existing" if key in baseline_by_key else "new"})
+    for key, signal in baseline_by_key.items():
+        if key not in branch_by_key and isinstance(signal, dict):
+            classified.append({**signal, "status": "resolved"})
+    new_signals = [item for item in classified if item.get("status") == "new"]
+    resolved_signals = [item for item in classified if item.get("status") == "resolved"]
+    existing_signals = [item for item in classified if item.get("status") == "existing"]
+    return {
+        "schema_version": 1,
+        "kind": "ai_harness_ci_comparison",
+        "baseline": {
+            "status": baseline.get("status"),
+            "summary": baseline.get("summary", {}),
+            "head_ref": baseline.get("head_ref"),
+            "head_sha": baseline.get("head_sha"),
+            "run": baseline.get("run", {}),
+        },
+        "branch": {
+            "status": branch.get("status"),
+            "summary": branch.get("summary", {}),
+            "head_ref": branch.get("head_ref"),
+            "head_sha": branch.get("head_sha"),
+            "run": branch.get("run", {}),
+        },
+        "summary": {
+            "new_signal_count": len(new_signals),
+            "existing_signal_count": len(existing_signals),
+            "resolved_signal_count": len(resolved_signals),
+            "branch_passed": _ci_status_passed(branch),
+        },
+        "signals": classified,
+    }
+
+
+def record_branch_ci_artifacts(
+    repository: Path,
+    artifacts: ArtifactStore,
+    state: StateStore,
+    *,
+    github_ci_mode: str,
+    warnings: list[str],
+) -> dict[str, object]:
+    if github_ci_mode != "branch":
+        return {"status": "skipped", "blockers": []}
+    git = _safe_artifact_json(artifacts, "git-run.json")
+    branch = _text(git.get("created_branch")) or _text(git.get("current_branch"))
+    head = _run_git(repository, ["rev-parse", "HEAD"]) or _text(git.get("head"))
+    blockers: list[str] = []
+    if not branch:
+        blockers.append("GitHub branch CI is required, but no run branch was created or detected.")
+        branch_signals = _ci_unavailable("github", blockers[-1], scope="run_branch")
+    else:
+        branch_signals = github_branch_ci_signals(repository, branch, expected_head_sha=head)
+    artifacts.write_json("ci/run-branch-signals.json", branch_signals)
+    state.record_artifact("ci/run-branch-signals.json", "FINALIZING")
+    baseline = _safe_artifact_json(artifacts, "ci-signals.json")
+    comparison = compare_ci_signals(baseline, branch_signals)
+    artifacts.write_json("ci/comparison.json", comparison)
+    state.record_artifact("ci/comparison.json", "FINALIZING")
+    for warning in branch_signals.get("warnings", []) if isinstance(branch_signals.get("warnings"), list) else []:
+        if isinstance(warning, str):
+            warnings.append(warning)
+    status = _text(branch_signals.get("status"))
+    if status != "ready":
+        blockers.append(f"GitHub branch CI signals are {status or 'unavailable'}.")
+    actual_head = _text(branch_signals.get("head_sha"))
+    if head and actual_head and head != actual_head:
+        blockers.append("GitHub branch CI artifact is stale for the local run branch HEAD.")
+    if status == "ready" and not _ci_status_passed(branch_signals):
+        blockers.append("GitHub branch CI did not pass.")
+    return {
+        "status": "blocked" if blockers else "passed",
+        "blockers": blockers,
+        "branch": branch,
+        "head": head,
+        "artifact": "ci/run-branch-signals.json",
+        "comparison_artifact": "ci/comparison.json",
+    }
+
+
 def record_ci_and_git_artifacts(
     repository: Path,
     artifacts: ArtifactStore,
@@ -627,10 +918,11 @@ def record_ci_and_git_artifacts(
     request: str,
     branch_mode: BranchMode,
     warnings: list[str],
+    github_ci_mode: str = "baseline",
 ) -> None:
     ci = ci_status(repository)
     git = maybe_create_run_branch(repository, run_id, request, branch_mode)
-    signals = merged_ci_signals(repository)
+    signals = _ci_unavailable("github", "GitHub baseline CI collection is disabled", scope="trunk_baseline") if github_ci_mode == "off" else merged_ci_signals(repository)
     artifacts.write_json("ci-status.json", ci)
     state.record_artifact("ci-status.json", "INITIALIZING")
     artifacts.write_json("git-run.json", git)
