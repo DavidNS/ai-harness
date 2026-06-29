@@ -801,9 +801,19 @@ def maybe_create_run_branch(repository: Path, run_id: str, request: str, mode: B
         metadata["warnings"] = warnings
         return metadata
     branch = f"aih/{run_id[:8]}/{_slug(request)}"
-    created = _run_git(repository, ["checkout", "-b", branch])
-    if created is None:
-        warnings.append(f"Per-run git branch {branch} could not be created.")
+    pushed = _run_git(repository, ["push", "origin", f"HEAD:refs/heads/{branch}"])
+    if pushed is None:
+        warnings.append(f"Per-run remote branch {branch} could not be created on origin.")
+        metadata["warnings"] = warnings
+        return metadata
+    fetched = _run_git(repository, ["fetch", "origin", branch])
+    if fetched is None:
+        warnings.append(f"Per-run remote branch {branch} could not be fetched from origin.")
+        metadata["warnings"] = warnings
+        return metadata
+    checked_out = _run_git(repository, ["checkout", "--track", "-b", branch, f"origin/{branch}"])
+    if checked_out is None:
+        warnings.append(f"Per-run branch {branch} could not be checked out from origin.")
     else:
         metadata["created_branch"] = branch
         metadata["current_branch"] = branch
