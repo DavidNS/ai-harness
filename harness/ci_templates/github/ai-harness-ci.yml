@@ -20,6 +20,7 @@ jobs:
         run: pip install ruff mypy pytest semgrep
 
       - name: Generate AI Harness signals
+        continue-on-error: true
         run: python3 -B scripts/ci_signal_report.py
 
       - name: Upload AI Harness signals
