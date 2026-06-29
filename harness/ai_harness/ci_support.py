@@ -976,6 +976,34 @@ def ci_observations_from_artifact(artifacts: ArtifactStore) -> list[dict[str, ob
             "in_sync": False,
             "matches": ["No CI pipeline is installed for this repository."],
         })
+    signals = _safe_artifact_json(artifacts, "ci-signals.json")
+    for item in signals.get("path_index", []) if isinstance(signals.get("path_index"), list) else []:
+        if not isinstance(item, dict):
+            continue
+        raw_path = _text(item.get("path"))
+        if not raw_path or Path(raw_path).is_absolute():
+            continue
+        observations.append({
+            "kind": "ci_signal",
+            "path": raw_path,
+            "max_severity": _text(item.get("max_severity")) or "warning",
+            "signal_count": item.get("signal_count", 0),
+        })
+    for item in signals.get("signals", []) if isinstance(signals.get("signals"), list) else []:
+        if not isinstance(item, dict):
+            continue
+        raw_path = _text(item.get("path"))
+        if not raw_path or Path(raw_path).is_absolute():
+            continue
+        observations.append({
+            "kind": "ci_signal",
+            "path": raw_path,
+            "tool": _text(item.get("tool")),
+            "category": _text(item.get("category")),
+            "severity": _text(item.get("severity")) or "warning",
+            "status": _text(item.get("status")) or "unknown",
+            "matches": [value for value in (_text(item.get("summary")), _text(item.get("evidence")), _text(item.get("agent_hint"))) if value],
+        })
     return observations
 
 

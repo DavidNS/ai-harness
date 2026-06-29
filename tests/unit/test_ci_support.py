@@ -345,6 +345,35 @@ class CiSupportTests(unittest.TestCase):
             self.assertEqual("ci", observations[0]["kind"])
             self.assertEqual("none", observations[0]["provider"])
 
+    def test_ci_signal_paths_are_repository_observations(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            artifacts = ArtifactStore(repository)
+            artifacts.write_json("ci-status.json", {"providers": [{"provider": "github", "path": ".github/workflows/ci.yml", "managed": True, "in_sync": True}]})
+            artifacts.write_json("ci-signals.json", {
+                "path_index": [
+                    {"path": "harness/cli/commands.py", "max_severity": "warning", "signal_count": 2},
+                    {"path": "/runner/work/project/harness/cli/ui.py", "max_severity": "warning", "signal_count": 1},
+                ],
+                "signals": [{
+                    "path": "harness/cli/commands.py",
+                    "tool": "ruff",
+                    "category": "lint",
+                    "severity": "warning",
+                    "status": "unknown",
+                    "summary": "I001 import block is unsorted",
+                    "evidence": "harness/cli/commands.py:3",
+                    "agent_hint": "Inspect the launcher command module.",
+                }],
+            })
+
+            observations = ci_observations_from_artifact(artifacts)
+
+            ci_signal_paths = [item.get("path") for item in observations if item.get("kind") == "ci_signal"]
+            self.assertEqual(["harness/cli/commands.py", "harness/cli/commands.py"], ci_signal_paths)
+            self.assertEqual("warning", observations[1]["max_severity"])
+            self.assertIn("I001 import block", observations[2]["matches"][0])
+
     def test_branch_creation_is_opt_in_and_skips_dirty_worktree(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             repository = Path(directory)
