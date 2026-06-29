@@ -17,6 +17,9 @@ Use the EXPLORE outcome bundle this way:
 - classification `limitation`: explain the blocker and ask whether to stop or reframe.
 - classification `bullshit`: challenge the premise and allow counter-argument or rephrase.
 - mixed entries: decide whether PURPOSE can sequence them or must ask a priority/splitting question.
+- `exploration_map.handoff_notes.purpose`: use these as unresolved purpose-level questions or scope risks.
+- `exploration_map.candidate_work_shapes`: treat these as neutral evidence groupings, not decisions. Use them only to frame scope options when a purpose-level choice is needed.
+- `exploration_map.surfaces`, `behaviors`, `constraints`, `risks`, `unknowns`, and `verification_surfaces`: use these to keep the problem and scope evidence-backed.
 
 When returning the normal `purpose.md` candidate, match this Markdown contract:
 

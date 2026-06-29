@@ -19,3 +19,4 @@ Return JSON only with this shape:
 }
 
 Allowed evidence statuses: supported, contradicted, partially_supported, unresolved, not_applicable, blocked. Use blockers only for operational failures collecting planned evidence.
+Collect evidence that helps later phases understand what exists before deciding what to do: relevant implementation/test/documentation/CI surfaces, observed behaviors, hard constraints, risk signals, unresolved unknowns, and likely verification surfaces. Keep claims factual and repository-backed; do not recommend a solution.
