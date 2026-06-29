@@ -52,6 +52,7 @@ class ExplorerScopeResolver:
         self.target = Path(target)
         self.artifacts = artifacts
         self.canonical = canonical
+        self._explorer_handoff: dict[str, object] | None = None
 
     def repository_relative_path(self, relative: str) -> Path:
         try:
@@ -61,6 +62,43 @@ class ExplorerScopeResolver:
             if "symlink" in message:
                 raise HarnessError("explorer scope target symlink escapes repository") from exc
             raise HarnessError("explorer scope target escapes repository") from exc
+
+    def _read_json_artifact_or_file(self, relative: str) -> Mapping[str, object] | None:
+        normalized = _normalize_relative_path(relative)
+        if self.artifacts.exists(normalized):
+            data = self.artifacts.read_json(normalized)
+        else:
+            path = self.repository_relative_path(normalized)
+            if not path.is_file():
+                return None
+            data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else None
+
+    def _load_manifest_handoff(self, manifest: Mapping[str, object]) -> None:
+        raw = manifest.get("handoff_artifact")
+        if not isinstance(raw, str) or not raw.strip():
+            return
+        try:
+            handoff = self._read_json_artifact_or_file(raw)
+        except Exception:
+            return
+        if handoff is not None and handoff.get("kind") == "explorer_handoff":
+            self._explorer_handoff = dict(handoff)
+
+    def _handoff_entry_for_path(self, normalized: str) -> Mapping[str, object] | None:
+        handoff = self._explorer_handoff
+        if not isinstance(handoff, dict):
+            return None
+        entries = handoff.get("entries")
+        if not isinstance(entries, list):
+            return None
+        for entry in entries:
+            if not isinstance(entry, Mapping):
+                continue
+            raw_path = entry.get("path") or entry.get("suggested_path")
+            if isinstance(raw_path, str) and _normalize_relative_path(raw_path) == normalized:
+                return entry
+        return None
 
     def manifest_json(self, relative: str) -> Mapping[str, object]:
         normalized = _normalize_relative_path(relative)
@@ -76,6 +114,7 @@ class ExplorerScopeResolver:
                 raise HarnessError(f"explorer manifest is not readable JSON: {normalized}") from exc
         if not isinstance(data, dict):
             raise HarnessError("explorer manifest must be a JSON object")
+        self._load_manifest_handoff(data)
         return data
 
     def paths_from_manifest(self, relative: str) -> tuple[list[str], str | None]:
@@ -91,14 +130,14 @@ class ExplorerScopeResolver:
             if normalized not in paths:
                 paths.append(normalized)
 
-        add_path(manifest.get("path"), manifest.get("kind"))
+        add_path(manifest.get("path") or manifest.get("suggested_path"), manifest.get("kind"))
         raw_artifacts = manifest.get("artifacts", [])
         if not isinstance(raw_artifacts, list):
             raise HarnessError("explorer manifest artifacts must be a list")
         for artifact in raw_artifacts:
             if not isinstance(artifact, Mapping):
                 raise HarnessError("explorer manifest artifacts must be objects")
-            add_path(artifact.get("path"), artifact.get("kind"))
+            add_path(artifact.get("path") or artifact.get("suggested_path"), artifact.get("kind"))
         if primary is not None and primary in paths:
             paths.remove(primary)
             paths.insert(0, primary)
@@ -148,12 +187,16 @@ class ExplorerScopeResolver:
         except Exception as exc:
             raise HarnessError(f"explorer scope item is not an improvement artifact: {normalized}") from exc
         path = self.repository_relative_path(normalized)
-        if not path.is_file():
-            raise HarnessError(f"explorer scope artifact does not exist: {normalized}")
-        try:
-            content = path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError) as exc:
-            raise HarnessError(f"explorer scope artifact is not readable: {normalized}") from exc
+        if path.is_file():
+            try:
+                content = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError) as exc:
+                raise HarnessError(f"explorer scope artifact is not readable: {normalized}") from exc
+        else:
+            handoff_entry = self._handoff_entry_for_path(normalized)
+            content = str(handoff_entry.get("content", "")) if handoff_entry is not None else ""
+            if not content:
+                raise HarnessError(f"explorer scope artifact does not exist: {normalized}")
         size = len(content.encode("utf-8"))
         if size > _ANALYSIS_SCOPE_ARTIFACT_BYTES:
             raise HarnessError(f"explorer scope artifact exceeds {_ANALYSIS_SCOPE_ARTIFACT_BYTES} bytes: {normalized}")
@@ -198,7 +241,7 @@ class ExplorerScopeResolver:
                 raise HarnessError(f"explorer scope exceeds {_ANALYSIS_SCOPE_TOTAL_BYTES} total bytes")
             artifact["primary"] = primary == artifact["path"]
             artifacts.append(artifact)
-        return {
+        result: dict[str, object] = {
             "schema_version": 1,
             "kind": "explorer_scope",
             "input_targets": list(targets),
@@ -210,3 +253,6 @@ class ExplorerScopeResolver:
                 "max_total_bytes": _ANALYSIS_SCOPE_TOTAL_BYTES,
             },
         }
+        if self._explorer_handoff is not None:
+            result["explorer_handoff"] = self._explorer_handoff
+        return result

@@ -22,6 +22,7 @@ from .explorer_context import (
     ExplorerContext,
     ExplorerExtractionContext,
 )
+from .explorer_handoff import build_explorer_handoff, sanitize_manifest_title
 from .learning_service import LearningService
 from .phase_learning_extractor import PhaseLearningExtractor
 from .quality import ImprovementQualityGate
@@ -62,7 +63,7 @@ def analysis_manifest_record(
     split_rationale: str | None = None,
     knowledge_proposal: str | None = None,
 ) -> dict[str, object]:
-    payload: dict[str, object] = {"entry_id": entry.entry_id, "title": entry.title, **dict(record)}
+    payload: dict[str, object] = {"entry_id": entry.entry_id, "title": sanitize_manifest_title(entry.title, content=entry.content), **dict(record)}
     if entry.reason is not None:
         payload["reason"] = entry.reason
     if split_rationale is not None:
@@ -263,6 +264,7 @@ class ExplorerPublisher:
         primary_entry: str | None,
         target_phase: str,
         split_bundle_rationale: str | None = None,
+        handoff_artifact: str | None = None,
     ) -> None:
         primary = None
         if primary_entry is not None:
@@ -278,6 +280,8 @@ class ExplorerPublisher:
         }
         if split_bundle_rationale is not None:
             manifest["split_bundle_rationale"] = split_bundle_rationale
+        if handoff_artifact is not None:
+            manifest["handoff_artifact"] = handoff_artifact
         if primary is not None:
             for key in ("kind", "path", "suggested_path", "checksum"):
                 if key in primary:
@@ -296,7 +300,7 @@ class ExplorerPublisher:
         learning_service = self._learning_service()
         learning = entry.content if entry.content.startswith("# Learning v2") else learning_service.explorer_learning(entry.content, kind=artifact_kind)
         accepted, rejected, sources_checked = self._make_evidence_extractor().extract(entry)
-        rejected = [item for item in rejected if item.get("reason") != "missing_path"]
+        rejected = [item for item in rejected if item.get("reason") not in {"missing_path", "path_missing"}]
         mapped_claim_type = self.claim_type_for_explorer_kind(artifact_kind)
         claim_status = "active" if accepted else "unverified"
         state = self._state.load()
@@ -397,6 +401,26 @@ class ExplorerPublisher:
             knowledge_proposal=proposal_path,
         )
 
+    def publish_handoff(
+        self,
+        bundle: ExplorerBundle,
+        records: list[dict[str, object]],
+        *,
+        pre_distilled_content: Mapping[str, str] | None,
+        target_phase: str,
+    ) -> str:
+        handoff = build_explorer_handoff(
+            bundle=bundle,
+            records=records,
+            discovery=self._safe_stage_json("explorer_discovery"),
+            decision=self._safe_stage_json("explorer_decision"),
+            pre_distilled_content=pre_distilled_content,
+        )
+        artifact = "published/explorer-handoff.json"
+        self._artifacts.write_json(artifact, handoff)
+        self._state.record_artifact(artifact, target_phase)
+        return artifact
+
     def publish_extraction_telemetry(self, target_phase: str) -> None:
         if not self._extraction_records:
             return
@@ -457,10 +481,17 @@ class ExplorerPublisher:
                 split_rationale=split_bundle_rationale,
                 knowledge_proposal=proposal_path,
             ))
+        handoff_artifact = self.publish_handoff(
+            bundle,
+            records,
+            pre_distilled_content=pre_distilled_content,
+            target_phase=target_phase,
+        )
         self.publish_analysis_manifest(
             records,
             primary_entry=bundle.primary_entry,
             target_phase=target_phase,
             split_bundle_rationale=split_bundle_rationale,
+            handoff_artifact=handoff_artifact,
         )
         self.publish_extraction_telemetry(target_phase)

@@ -24,10 +24,11 @@ _REPOSITORY_OBSERVATION_SUFFIXES = frozenset({".md", ".py", ".json", ".toml", ".
 _SHORT_REPOSITORY_TERMS = frozenset({"ci", "cli", "ui", "ux"})
 _REPOSITORY_OBSERVATION_STOP_TERMS = frozenset({
     "about", "after", "again", "analysis", "analyze", "artifact", "artifacts", "because",
-    "before", "beginning", "change", "changes", "code", "could", "create", "current",
-    "does", "docs", "evidence", "file", "from", "have", "implementation", "improvement",
-    "improvements", "investigate", "line", "list", "repository", "should", "source",
-    "that", "then", "there", "this", "type", "when", "with",
+    "before", "beginning", "behavior", "change", "changes", "code", "could", "create",
+    "current", "does", "docs", "evidence", "explorer", "file", "from", "have",
+    "implementation", "improvement", "improvements", "investigate", "line", "list",
+    "repository", "should", "source", "that", "then", "there", "this", "type",
+    "when", "with",
 })
 
 
@@ -240,10 +241,7 @@ class WorkerExchange:
             if kind == "test":
                 score += sum(3 for term in matched_terms if term in test_terms)
             symbols = self._symbols_from_content(content)
-            symbol_hits = [
-                symbol for symbol in symbols
-                if any(term in symbol.casefold() for term in matched_terms)
-            ]
+            symbol_hits = [symbol for symbol in symbols if any(term in symbol.casefold() for term in matched_terms)]
             score += 5 * len(symbol_hits)
             matches = self._line_matches(content, matched_terms)
             item: dict[str, object] = {

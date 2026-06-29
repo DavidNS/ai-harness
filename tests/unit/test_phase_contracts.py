@@ -120,11 +120,23 @@ class PhaseContractTests(unittest.TestCase):
 
 
     def test_explorer_discovery_normalizes_info_critic_severity(self) -> None:
-        discovery = {"schema_version": 1, "phase": "explorer_discovery", "claims": [{"id": "C1", "status": "resolved", "evidence": ["tests/test_a.py covers it."]}], "candidate_directions": [{"id": "D1", "title": "Gate decision value", "mechanism": "Validate decision fields before artifact synthesis.", "impact": "High", "confidence": "Medium", "cost": "Medium", "reversibility": "High", "evidence_strength": "Strong", "behavioral_delta": "Low-value decisions stop before artifact synthesis.", "evidence": ["harness/ai_harness/explorer_contracts.py"]}], "critic_findings": [{"direction_id": "D1", "severity": "info", "finding": "This is advisory.", "recommendation": "Treat it as a note."}], "related_improvements": [], "repository_observations": []}
+        discovery = {"schema_version": 1, "phase": "explorer_discovery", "claims": [{"id": "C1", "status": "resolved", "evidence": ["tests/test_a.py covers it."]}], "evidence_trace": [{"id": "T1", "claim_id": "C1", "source": "test", "path": "tests/test_a.py", "line_start": 1, "line_end": 1, "excerpt": "def test_a(): pass", "confidence": "high"}], "duplicate_search": {"searched_terms": ["gate"], "searched_surfaces": ["tests"], "matches": [], "no_match_claims": [{"claim_id": "C1", "searched_for": "duplicate gate", "confidence": "medium"}]}, "candidate_directions": [{"id": "D1", "title": "Gate decision value", "mechanism": "Validate decision fields before artifact synthesis.", "impact": "High", "confidence": "Medium", "cost": "Medium", "reversibility": "High", "evidence_strength": "Strong", "behavioral_delta": "Low-value decisions stop before artifact synthesis.", "evidence": ["harness/ai_harness/explorer_contracts.py"]}], "critic_findings": [{"direction_id": "D1", "severity": "info", "finding": "This is advisory.", "recommendation": "Treat it as a note."}], "related_improvements": [], "repository_observations": []}
 
         validated = get_phase("explorer_discovery").validate(json.dumps(discovery))
 
         self.assertEqual("note", validated["critic_findings"][0]["severity"])
+
+    def test_explorer_discovery_requires_trace_and_preserved_observations(self) -> None:
+        discovery = {"schema_version": 1, "phase": "explorer_discovery", "claims": [{"id": "C1", "status": "resolved", "evidence": ["Repository observations show tests/test_a.py covers it."]}], "evidence_trace": [{"id": "T1", "claim_id": "C1", "source": "test", "path": "tests/test_a.py", "excerpt": "def test_a(): pass", "confidence": "high"}], "duplicate_search": {"searched_terms": ["gate"], "searched_surfaces": ["tests"], "matches": [], "no_match_claims": [{"claim_id": "C1", "searched_for": "duplicate gate", "confidence": "medium"}]}, "candidate_directions": [], "critic_findings": [], "related_improvements": [], "repository_observations": []}
+        with self.assertRaises(PhaseValidationError):
+            get_phase("explorer_discovery").validate(json.dumps(discovery))
+
+        discovery["repository_observations"] = [{"path": "tests/test_a.py"}]
+        self.assertEqual(discovery, get_phase("explorer_discovery").validate(json.dumps(discovery)))
+
+        discovery["evidence_trace"][0]["claim_id"] = "missing"
+        with self.assertRaises(PhaseValidationError):
+            get_phase("explorer_discovery").validate(json.dumps(discovery))
 
     def test_staged_explorer_value_fields_reject_malformed_outputs(self) -> None:
         bad_intake = {"schema_version": 1, "phase": "explorer_intake", "strategic_framing": {"mode": "unclear"}, "claims": [{"id": "C1", "class": "repository-factual", "text": "Check behavior."}], "synthesis_notes": []}
