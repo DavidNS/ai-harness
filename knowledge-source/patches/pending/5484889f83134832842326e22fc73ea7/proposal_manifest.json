@@ -1,0 +1,28 @@
+{
+  "claims_count": 2,
+  "claims_file": "proposed_claims.jsonl",
+  "proposal_id": "proposal.cli-ui.001",
+  "relations_count": 0,
+  "review": {
+    "changed_claims": [
+      {
+        "claim_id": "claim.cli-ui.001",
+        "decision": "downgrade",
+        "reason": "The claim records a bounded evidence gap and review/process limitation rather than a durable repository fact about implemented behavior. The supplied evidence supports that harness/cli/commands.py is relevant to command handling, but not a stable fact about whether slash-command styling, suggestions, filtering, or ranking exist."
+      },
+      {
+        "claim_id": "claim.tests.001",
+        "decision": "downgrade",
+        "reason": "The claim describes lack of verification in the supplied evidence rather than a durable repository fact about tests. The accepted evidence only references tests/unit/test_decision_menu.py and does not establish a stable repository fact about slash-command test coverage."
+      }
+    ],
+    "phase": "knowledge_review"
+  },
+  "run_id": "5484889f83134832842326e22fc73ea7",
+  "schema_version": 1,
+  "source_artifacts": [
+    "explorer_artifact",
+    "explorer_decision"
+  ],
+  "summary": "Bounded repository knowledge about slash-command suggestion evidence and current verification gaps."
+}

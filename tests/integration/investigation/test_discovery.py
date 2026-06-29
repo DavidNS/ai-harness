@@ -113,10 +113,22 @@ class ExplorerDiscoveryTests(unittest.TestCase):
             repository = Path(directory)
             source = repository / "ui/console_input.py"
             source.parent.mkdir(parents=True)
-            source.write_text("def slash_command_mode():\n    return 'console input suggestions'\n", encoding="utf-8")
+            source.write_text(
+                "from console_helpers import shared\n\n"
+                "def slash_command_mode():\n"
+                "    return 'console input suggestions'\n",
+                encoding="utf-8",
+            )
             test_path = repository / "tests/test_console_input.py"
             test_path.parent.mkdir(parents=True)
             test_path.write_text("def test_slash_command_mode():\n    assert True\n", encoding="utf-8")
+            distractor = repository / "docs/notes/console-input-suggestions.md"
+            distractor.parent.mkdir(parents=True)
+            distractor.write_text(
+                "# Console Input Suggestions\n\n"
+                "This note repeats console input command suggestions terms but is not source or test evidence.\n",
+                encoding="utf-8",
+            )
             provider = IntakeDrivenObservationProvider(bundle_output([{
                 "id": "observed",
                 "action": "no-op",
@@ -135,7 +147,12 @@ class ExplorerDiscoveryTests(unittest.TestCase):
             prompt = provider.discovery_prompts[0]
             self.assertIn("ui/console_input.py", prompt)
             self.assertIn("tests/test_console_input.py", prompt)
+            self.assertIn("docs/notes/console-input-suggestions.md", prompt)
+            self.assertLess(prompt.index("ui/console_input.py"), prompt.index("docs/notes/console-input-suggestions.md"))
+            self.assertLess(prompt.index("tests/test_console_input.py"), prompt.index("docs/notes/console-input-suggestions.md"))
+            self.assertIn('"symbols"', prompt)
             self.assertIn("slash_command_mode", prompt)
+            self.assertIn("L3: def slash_command_mode():", prompt)
 
     def test_repository_observations_with_finding_shape_are_accepted(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

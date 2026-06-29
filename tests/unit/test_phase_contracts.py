@@ -9,7 +9,7 @@ PACKAGE = Path(__file__).resolve().parents[2] / "harness"
 sys.path.insert(0, str(PACKAGE))
 
 from ai_harness.phases import PHASE_DEFINITIONS, PhaseValidationError, get_phase
-from tests.fixtures.scripted_provider import learning_output
+from tests.fixtures.scripted_provider import explore_outcome_bundle, learning_output
 
 
 class PhaseContractTests(unittest.TestCase):
@@ -31,6 +31,25 @@ class PhaseContractTests(unittest.TestCase):
             phase.build_input({"request": "r", "explore/outcome_bundle.json": {"kind": "explore_outcome_bundle"}})
         with self.assertRaises(PhaseValidationError):
             phase.build_input({"request": "r", "explore/outcome_bundle.json": {"kind": "explore_outcome_bundle"}, "explorer_scope": {}, "state": {}})
+
+    def test_explore_outcome_bundle_accepts_exploration_map(self) -> None:
+        document = json.loads(explore_outcome_bundle())
+
+        validated = get_phase("explore_outcome_synthesis").validate(json.dumps(document))
+
+        self.assertEqual("exploration_map", validated["exploration_map"]["kind"])
+        self.assertEqual("direct_change", validated["exploration_map"]["candidate_work_shapes"][0]["shape"])
+
+    def test_explore_outcome_bundle_rejects_invalid_exploration_map(self) -> None:
+        invalid_shape = json.loads(explore_outcome_bundle())
+        invalid_shape["exploration_map"]["candidate_work_shapes"][0]["shape"] = "refactor_required"
+        with self.assertRaises(PhaseValidationError):
+            get_phase("explore_outcome_synthesis").validate(json.dumps(invalid_shape))
+
+        invalid_ref = json.loads(explore_outcome_bundle())
+        invalid_ref["exploration_map"]["behaviors"][0]["evidence_refs"] = ["missing"]
+        with self.assertRaises(PhaseValidationError):
+            get_phase("explore_outcome_synthesis").validate(json.dumps(invalid_ref))
 
     def test_implement_prompt_names_required_markdown_contract(self) -> None:
         prompt = (self.harness / "prompts" / "implement.md").read_text(encoding="utf-8")

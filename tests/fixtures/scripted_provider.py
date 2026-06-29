@@ -105,6 +105,30 @@ def explore_outcome_bundle() -> str:
             "confidence": "high",
             "sources": [{"type": "knowledge", "description": "Scripted provider fixture evidence."}],
         }],
+        "exploration_map": {
+            "schema_version": 1,
+            "kind": "exploration_map",
+            "surfaces": [],
+            "behaviors": [{
+                "id": "B1",
+                "status": "observed",
+                "text": "The deterministic fixture request is bounded enough for PURPOSE.",
+                "evidence_refs": ["E1"],
+            }],
+            "constraints": [],
+            "risks": [],
+            "unknowns": [],
+            "candidate_work_shapes": [{
+                "id": "W1",
+                "shape": "direct_change",
+                "description": "A bounded direct change may be enough if DESIGN chooses it.",
+                "supporting_evidence_refs": ["E1"],
+                "counterevidence_refs": [],
+                "handoff_phase": "design",
+            }],
+            "verification_surfaces": [],
+            "handoff_notes": {"purpose": [], "design": [], "tasks": []},
+        },
         "entries": [{
             "id": "entry-1",
             "classification": "improvement",
@@ -368,7 +392,10 @@ class ScriptedProvider:
                 }],
             })
         elif phase == "explore_outcome_synthesis":
-            output = explore_outcome_bundle()
+            document = json.loads(explore_outcome_bundle())
+            if isinstance(inputs.get("exploration_map"), dict):
+                document["exploration_map"] = inputs["exploration_map"]
+            output = json.dumps(document, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
         elif phase == "explore_review":
             output = "# Review v1\n## Verdict\nAPPROVE\n## Findings\nThe deterministic outcome bundle is evidence-backed.\n"
         elif phase == "knowledge_synthesis":

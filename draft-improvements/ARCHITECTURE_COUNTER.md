@@ -1,12 +1,8 @@
 # Architecture
 
-This repository is an AI coding harness. It is both a Python project and an
-operating environment for agents that inspect code, choose a strategy, run
-bounded phases, persist artifacts, recover from interruption, and produce
-evidence for humans.
+This repository is an AI coding harness. Has to be readable for both humans and machines.
 
-Architecture is good here when it makes the harness easier to operate safely by
-both humans and machines. A smaller file is only better when it clarifies
+A smaller file is only better when it clarifies
 ownership, reduces context load, and makes validation more local.
 
 ## Purpose
