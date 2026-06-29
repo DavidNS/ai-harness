@@ -83,5 +83,5 @@ def load_config(values: Mapping[str, str] | None = None) -> HarnessConfig:
         attempts = int(env.get("AI_HARNESS_MAX_ATTEMPTS", str(CONTROLLER_DEFAULT_ATTEMPTS)))
     except ValueError as exc:
         raise ConfigurationError("timeout and max attempts must be numeric") from exc
-    branch_mode = env.get("AI_HARNESS_GIT_BRANCH_MODE", "off").strip().lower()
+    branch_mode = env.get("AI_HARNESS_GIT_BRANCH_MODE", "create").strip().lower()
     return HarnessConfig(provider, _command(raw_command) if raw_command else (), model, timeout, attempts, branch_mode)
