@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Callable, Mapping, Sequence
 
 from ..canonical import slugify
-from ..ci_support import ci_observations_from_artifact
 from ..phases import get_phase
 from ..repository_policy import load_repository_policy
 from ..text.markdown import markdown_section as _markdown_section_fn
@@ -278,12 +277,11 @@ class WorkerExchange:
         related_improvements: Sequence[Mapping[str, object]],
         intake: Mapping[str, object] | None = None,
     ) -> list[dict[str, object]]:
-        ci_observations = ci_observations_from_artifact(self._ctx.artifacts)
         try:
-            return [*ci_observations, *self._gather_repository_observations(related_improvements, intake)]
+            return self._gather_repository_observations(related_improvements, intake)
         except Exception:
             self._ctx.warnings.append("Repository observation gathering failed; explorer continued without it")
-            return ci_observations
+            return []
 
     def _referenced_markdown_documents(self, request: str) -> dict[str, str]:
         documents: dict[str, str] = {}

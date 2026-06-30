@@ -9,7 +9,7 @@ from typing import Callable
 from ..control_outputs import EvidenceRequest
 from ..phases import get_phase
 from .context import RunContext
-from .explore_evidence import ci_evidence_from_artifacts, context_pack, evidence_from_digest, merge_evidence
+from .explore_evidence import ci_evidence_from_artifacts, compact_context_pack, context_pack, evidence_from_digest, merge_evidence
 
 
 class ExploreDeltaService:
@@ -49,7 +49,7 @@ class ExploreDeltaService:
         controller_evidence = ci_evidence_from_artifacts(self._ctx.artifacts, relevant_paths=relevant_paths)
         output = self._invoke_with_repair("explore_delta", {
             "evidence_request": request.to_dict() | {"request_id": request_id},
-            "context_pack": pack,
+            "context_pack": compact_context_pack(pack),
             "controller_evidence": controller_evidence,
         }, parse_control=False)
         value = json.loads(output)

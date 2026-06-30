@@ -18,6 +18,14 @@ _WORK_SHAPES = {
     "documentation_only",
 }
 
+_SURFACE_LIMIT = 16
+_BEHAVIOR_LIMIT = 20
+_RISK_LIMIT = 12
+_VERIFICATION_LIMIT = 12
+_SIGNAL_LIMIT = 8
+_HANDOFF_LIMIT = 8
+
+
 
 def _text(value: object) -> str:
     return value.strip() if isinstance(value, str) else ""
@@ -68,8 +76,6 @@ def _surface_kind(observation: Mapping[str, object]) -> str:
     path = _text(observation.get("path")).casefold()
     if kind == "test" or "/test" in path or path.startswith("tests/"):
         return "test_surface"
-    if kind in {"ci", "ci_signal"}:
-        return "ci_surface"
     if kind in {"analysis_doc", "documentation", "prompt", "worker"} or path.endswith(".md"):
         return "documentation_surface"
     if kind == "source" or path.endswith((".py", ".js", ".ts", ".tsx", ".jsx")):
@@ -140,15 +146,15 @@ class ExplorationMapBuilder:
     def build(self) -> dict[str, object]:
         evidence = _object_list(self._evidence_normalization.get("evidence", []))
         paths_by_evidence = _source_paths(evidence)
-        surfaces = self._surfaces(paths_by_evidence)
-        behaviors = self._behaviors(evidence)
+        surfaces = self._surfaces(paths_by_evidence)[:_SURFACE_LIMIT]
+        behaviors = self._behaviors(evidence)[:_BEHAVIOR_LIMIT]
         constraints = self._constraints()
-        risks = self._risks(surfaces, evidence)
+        risks = self._risks(surfaces, evidence)[:_RISK_LIMIT]
         unknowns = self._unknowns(evidence)
-        verification = self._verification_surfaces(surfaces, risks)
+        verification = self._verification_surfaces(surfaces, risks)[:_VERIFICATION_LIMIT]
         work_shapes = self._candidate_work_shapes(risks, unknowns, surfaces)
-        structural_signals = self._signals_by_kind(risks, "coupling")
-        security_signals = self._signals_by_kind(risks, "security")
+        structural_signals = self._signals_by_kind(risks, "coupling")[:_SIGNAL_LIMIT]
+        security_signals = self._signals_by_kind(risks, "security")[:_SIGNAL_LIMIT]
         return {
             "schema_version": 1,
             "kind": "exploration_map",
@@ -171,6 +177,8 @@ class ExplorationMapBuilder:
         seen_paths: set[str] = set()
         counter = 1
         for observation in self._repository_observations:
+            if _text(observation.get("kind")).casefold() in {"ci", "ci_signal"}:
+                continue
             path = _text(observation.get("path"))
             if not path or Path(path).is_absolute() or path in seen_paths:
                 continue
@@ -184,12 +192,6 @@ class ExplorationMapBuilder:
                 "evidence_refs": [],
                 "confidence": "high" if isinstance(observation.get("score"), int) and int(observation["score"]) >= 20 else "medium",
             }
-            if observation.get("kind") == "ci_signal":
-                item["ci"] = {
-                    "severity": _text(observation.get("severity")) or _text(observation.get("max_severity")) or "warning",
-                    "signal_count": observation.get("signal_count", 1),
-                    "tool": _text(observation.get("tool")),
-                }
             surfaces.append(item)
             counter += 1
         for evidence_id, paths in paths_by_evidence.items():
@@ -217,8 +219,6 @@ class ExplorationMapBuilder:
         terms = _strings(observation.get("matched_terms"))
         if terms:
             return "Matched request/evidence terms: " + ", ".join(terms[:6])
-        if observation.get("kind") == "ci_signal":
-            return "CI signal references this repository path."
         return "Repository observation selected this path."
 
     @staticmethod
@@ -279,19 +279,6 @@ class ExplorationMapBuilder:
     @staticmethod
     def _risks(surfaces: Sequence[Mapping[str, object]], evidence: Sequence[Mapping[str, object]]) -> list[dict[str, object]]:
         risks: list[dict[str, object]] = []
-        for surface in surfaces:
-            path = _text(surface.get("path"))
-            text = " ".join([path, _text(surface.get("why_relevant")), str(surface.get("ci", ""))])
-            kind = _risk_kind(text)
-            if kind is not None:
-                _append_unique(risks, {
-                    "id": f"K{len(risks) + 1}",
-                    "kind": kind,
-                    "path": path,
-                    "text": f"{kind} signal observed for {path}.",
-                    "severity": _confidence(surface.get("confidence")),
-                    "evidence_refs": _strings(surface.get("evidence_refs")),
-                })
         for item in evidence:
             claim = _text(item.get("claim"))
             kind = _risk_kind(claim)
@@ -387,10 +374,10 @@ class ExplorationMapBuilder:
         verification: Sequence[Mapping[str, object]],
     ) -> dict[str, list[str]]:
         return {
-            "purpose": [_text(item.get("text")) for item in unknowns if _text(item.get("best_resolved_by")) == "purpose"],
+            "purpose": [_text(item.get("text")) for item in unknowns if _text(item.get("best_resolved_by")) == "purpose"][:_HANDOFF_LIMIT],
             "design": [
                 *[_text(item.get("text")) for item in unknowns if _text(item.get("best_resolved_by")) == "design"],
                 *[_text(item.get("text")) for item in risks],
-            ],
-            "tasks": [_text(item.get("text")) for item in verification],
+            ][:_HANDOFF_LIMIT],
+            "tasks": [_text(item.get("text")) for item in verification][:_HANDOFF_LIMIT],
         }

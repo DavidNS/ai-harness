@@ -9,7 +9,7 @@ from typing import Callable, Protocol
 from ..phases import get_phase
 from .context import RunContext
 from .exploration_map import ExplorationMapBuilder
-from .explore_evidence import ci_evidence_from_artifacts, context_pack, evidence_from_digest, merge_evidence
+from .explore_evidence import ci_evidence_from_artifacts, compact_context_pack, context_pack, evidence_from_digest, merge_evidence
 
 
 class ExplorePipelineCallbacks(Protocol):
@@ -51,9 +51,10 @@ class ExplorePipelineService:
         ci_digest = pack.get("ci_digest", {}) if isinstance(pack.get("ci_digest"), dict) else {}
         relevant_paths = set(ci_digest.get("relevant_paths", [])) if isinstance(ci_digest.get("relevant_paths"), list) else set()
         controller_evidence = ci_evidence_from_artifacts(self._ctx.artifacts, relevant_paths=relevant_paths)
+        prompt_pack = compact_context_pack(pack)
         digest = self._invoke_json("explore_evidence_digest", {
             "request_profile": profile,
-            "context_pack": pack,
+            "context_pack": prompt_pack,
             "controller_evidence": controller_evidence,
         })
         evidence = merge_evidence(controller_evidence, evidence_from_digest(digest))
@@ -75,7 +76,7 @@ class ExplorePipelineService:
         outcome_bundle = self._invoke_json("explore_outcome_synthesis", {
             "request": self._callbacks.request_brief(),
             "request_profile": profile,
-            "context_pack": pack,
+            "context_pack": prompt_pack,
             "evidence": evidence,
             "exploration_map": exploration_map,
         })
