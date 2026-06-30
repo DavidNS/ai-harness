@@ -11,6 +11,7 @@ from ..contracts.enums import PhaseName
 from ..control_outputs import (
     ControlFlowSignal,
     ControlOutput,
+    EvidenceRequest,
 )
 from ..models import KnowledgeEntry
 from ..pipeline.state_machine import graph_for
@@ -21,6 +22,8 @@ from ..stores.state import StateStore
 from .context import RunContext
 from .control_output_handler import ControlOutputHandler
 from .explorer_context import ExplorerContext
+from .explore_bundle_view import ExploreBundleView
+from .explore_delta_service import ExploreDeltaService
 from .explore_pipeline import ExplorePipelineService
 from .phase_executor import PhaseExecutor
 from .phase_repair import PhaseRepairRunner
@@ -174,7 +177,7 @@ class PhaseExecution:
 
     def _proposal_bundle(self) -> None:
         self._purpose()
-        self._publish_handoff("proposal", {"artifacts": ["purpose.md"], "next_bundle": "SPEC_BUNDLE"})
+        self._publish_handoff("proposal", {"artifacts": ["purpose/bundle.json"], "next_bundle": "SPEC_BUNDLE"})
 
     def _spec_bundle(self) -> None:
         self._spec()
@@ -199,15 +202,24 @@ class PhaseExecution:
     def _purpose(self) -> None:
         self._callbacks.worker("purpose", {
             "request": self._callbacks.request_brief(),
-            "explore/outcome_bundle.json": self.artifacts.read_json("explore/outcome_bundle.json"),
+            "explore_bundle_view": ExploreBundleView(self.artifacts).build(),
             "explorer_scope": self._callbacks.explorer_scope(),
         })
 
     def _spec(self) -> None:
-        self._callbacks.worker("spec", self._callbacks.full_sdd_inputs("explore/outcome_bundle.json", "purpose.md"))
+        self._callbacks.worker("spec", {
+            "explore_bundle_view": ExploreBundleView(self.artifacts).build(),
+            "purpose/bundle.json": self.artifacts.read_json("purpose/bundle.json"),
+            "explorer_scope": self._callbacks.explorer_scope(),
+        })
 
     def _design(self) -> None:
-        self._callbacks.worker("design", self._callbacks.full_sdd_inputs("explore/outcome_bundle.json", "spec.md"))
+        self._callbacks.worker("design", {
+            "explore_bundle_view": ExploreBundleView(self.artifacts).build(),
+            "purpose/bundle.json": self.artifacts.read_json("purpose/bundle.json"),
+            "spec.md": self.artifacts.read("spec.md"),
+            "explorer_scope": self._callbacks.explorer_scope(),
+        })
 
     def _invoke_with_repair(self, name: str, inputs: Mapping[str, object], *, parse_control: bool = True) -> str:
         return PhaseRepairRunner(
@@ -219,5 +231,31 @@ class PhaseExecution:
         ).invoke(name, inputs, parse_control=parse_control)
 
     def _handle_control_output(self, output: ControlOutput, *, target_phase: str) -> RunResult | None:
+        if isinstance(output, EvidenceRequest):
+            request_id = self._next_evidence_request_id()
+            self.artifacts.write_json(f"evidence_requests/{request_id}/request.json", output.to_dict() | {"request_id": request_id})
+            self.state.record_artifact(f"evidence_requests/{request_id}/request.json", "CONTROL")
+            ExploreDeltaService(
+                self._ctx,
+                request_brief=self._callbacks.request_brief,
+                explorer_scope=self._callbacks.explorer_scope,
+                related_improvements=self._callbacks.related_improvements,
+                repository_observations=self._callbacks.repository_observations,
+                invoke_with_repair=self._invoke_with_repair,
+            ).run(request_id, output)
+            self.progress(f"Recorded EXPLORE evidence delta for {output.origin_phase}: {request_id}")
+            return None
         return self._control_output_handler.handle(output, target_phase=target_phase)
+
+    def _next_evidence_request_id(self) -> str:
+        used = {
+            parts[1]
+            for item in self.artifacts.list()
+            for parts in [item.split("/")]
+            if len(parts) >= 3 and parts[0] == "evidence_requests" and parts[1].startswith("ER")
+        }
+        index = 1
+        while f"ER{index}" in used:
+            index += 1
+        return f"ER{index}"
 

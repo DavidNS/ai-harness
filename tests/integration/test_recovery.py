@@ -41,7 +41,7 @@ def write_active_state(repository: Path, run_id: str):
         RunState(
             run_id,
             f"Request for {run_id}",
-            "INITIALIZING",
+            "EXPLORE_BUNDLE",
             Strategy.SDD,
             Mode.CODE,
             "modify_code",
@@ -103,7 +103,7 @@ class InterruptOnExplore:
         self.delegate = ScriptedProvider()
 
     def run_prompt(self, prompt: str, *, cwd: Path, permissions=None, progress=None):
-        if "# Explore Request Understanding Worker v1" in prompt:
+        if "# Explore Request Profile Worker v1" in prompt:
             raise KeyboardInterrupt("simulated process interruption")
         return self.delegate.run_prompt(prompt, cwd=cwd, permissions=permissions, progress=progress)
 
@@ -125,7 +125,7 @@ class RecoveryIntegrationTests(unittest.TestCase):
             request = f"Implement {write_analysis_artifact(repository)}"
             interrupted = self._interrupt(repository, request)
             self.assertEqual("active", interrupted.status.value)
-            self.assertEqual("EXPLORE", interrupted.current_phase)
+            self.assertEqual("EXPLORE_BUNDLE", interrupted.current_phase)
 
             result = Orchestrator(
                 repository, HarnessConfig(provider="local"), ScriptedProvider()
@@ -168,7 +168,7 @@ class RecoveryIntegrationTests(unittest.TestCase):
             self.assertIn("Run ID: run-a", completed.stdout)
             self.assertIn("Status: active", completed.stdout)
             self.assertIn("Strategy: SDD", completed.stdout)
-            self.assertIn("Current phase: INITIALIZING", completed.stdout)
+            self.assertIn("Current phase: EXPLORE_BUNDLE", completed.stdout)
             self.assertIn("Selected provider: local", completed.stdout)
             self.assertIn(f"Artifact dir: {active.current}", completed.stdout)
             self.assertIn("Latest job: J0001", completed.stdout)

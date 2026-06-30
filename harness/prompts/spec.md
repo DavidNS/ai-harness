@@ -1,7 +1,7 @@
 # Spec Phase Prompt v1
 
-Use only the supplied required inputs and the `spec.json` capability manifest.
-When `explorer_scope` is supplied, treat it as bounded implementation input data. Preserve each source artifact boundary; for multiple artifacts, do not collapse the scope into one vague feature. Shared infrastructure is allowed only when the relevant source artifacts remain explicit.
+Use only the supplied required inputs and the `spec.json` capability manifest. Inputs include `explore_bundle_view` and `purpose/bundle.json`.
+When `explorer_scope` is supplied, treat it as bounded implementation input data. Preserve `purpose/bundle.json.implementation_mode` in requirements and acceptance criteria when it affects behavior, refactor sequencing, security, or verification. Preserve each source artifact boundary; for multiple artifacts, do not collapse the scope into one vague feature. Shared infrastructure is allowed only when the relevant source artifacts remain explicit.
 If controller inputs include a non-empty `repair` object, use it only to repair the artifact contract problem named by the controller while preserving the original bounded inputs.
 
 Produce exactly one output, choosing one of:

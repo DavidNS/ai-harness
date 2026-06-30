@@ -51,7 +51,7 @@ class InterruptOnExplore:
         self.delegate = ScriptedProvider()
 
     def run_prompt(self, prompt: str, *, cwd: Path, permissions=None, progress=None):
-        if "# Explore Request Understanding Worker v1" in prompt:
+        if "# Explore Request Profile Worker v1" in prompt:
             raise KeyboardInterrupt("simulated interruption")
         return self.delegate.run_prompt(prompt, cwd=cwd, permissions=permissions, progress=progress)
 
@@ -327,20 +327,14 @@ def explore_bundle():
     }, ensure_ascii=False, indent=2, sort_keys=True) + "\\n"
 
 STAGES = {
-    "Explore Request Understanding": json.dumps({"schema_version": 1, "phase": "explore_request_understanding", "intent": "implement_request", "summary": "Implement the request.", "mentioned_surfaces": [], "explicit_constraints": [], "unclear_parts": [], "request_type": "feature"}),
-    "Explore Clarification Gate": json.dumps({"schema_version": 1, "phase": "explore_clarification_gate", "status": "continue", "clarification_questions": [], "rationale": "The request is bounded."}),
-    "Explore Triage": json.dumps({"schema_version": 1, "phase": "explore_triage", "complexity": "local_change", "ambiguity": "clear", "novelty": "known_repo_pattern", "risk": "low", "evidence_depth": "standard", "rationale": "Small deterministic fixture."}),
-    "Explore Evidence Plan": json.dumps({"schema_version": 1, "phase": "explore_evidence_plan", "required_gatherers": ["code", "knowledge"], "optional_gatherers": ["ci"], "ci_requirement": "optional", "questions": ["Is the request bounded?"], "skip_reason": {"web": "No external current fact is required."}}),
-    "Explore Evidence Collection": json.dumps({"schema_version": 1, "phase": "explore_evidence_collection", "evidence": [{"id": "R1", "claim": "The fixture request is bounded.", "status": "supported", "confidence": "high", "sources": [{"type": "knowledge", "description": "Fixture evidence."}]}], "blockers": []}),
-    "Explore Ci Barrier": json.dumps({"schema_version": 1, "phase": "explore_ci_barrier", "ci_requirement": "optional", "status": "ready", "evidence": [], "blockers": []}),
-    "Explore Evidence Normalization": json.dumps({"schema_version": 1, "phase": "explore_evidence_normalization", "evidence": [{"id": "E1", "claim": "The fixture request is bounded.", "status": "supported", "confidence": "high", "sources": [{"type": "knowledge", "description": "Fixture evidence."}]}]}),
+    "Explore Request Profile": json.dumps({"schema_version": 1, "phase": "explore_request_profile", "summary": "Implement the request.", "request_type": "feature", "complexity": "local_change", "ambiguity": "clear", "risk": "low", "evidence_depth": "standard", "request_parts": ["Implement the request."], "constraints": [], "evidence_questions": ["Is the request bounded?"], "gatherers": ["code", "knowledge", "ci"], "clarification_questions": []}),
+    "Explore Evidence Digest": json.dumps({"schema_version": 1, "phase": "explore_evidence_digest", "evidence": [{"id": "E1", "kind": "knowledge", "claim": "The fixture request is bounded.", "status": "supported", "confidence": "high", "severity": "info", "sources": [{"type": "knowledge", "description": "Fixture evidence."}]}], "blockers": []}),
     "Explore Outcome Synthesis": explore_bundle(),
-    "Explore Review": "# Review v1\\n## Verdict\\nAPPROVE\\n## Findings\\nThe bundle is valid.\\n",
 }
 
 MARKDOWN = {
     "explore": explore_bundle(),
-    "purpose": "# Purpose v1\\n## Problem\\nImplement the request.\\n## Scope\\nOne bounded change.\\n## Approach\\nUse controller gates.\\n## Exclusions\\nNo unrelated work.\\n## Acceptance Outline\\nTests pass.\\n",
+    "purpose": json.dumps({"schema_version": 1, "kind": "purpose_bundle", "summary": "Implement the request.", "selected_entries": ["entry-1"], "implementation_mode": "direct_patch", "problem": "Implement the bounded request.", "scope": "One bounded change.", "approach": "Use controller gates.", "structural_work": [], "exclusions": ["No unrelated work."], "acceptance_outline": ["Tests pass."], "evidence_refs": ["E1"]}, ensure_ascii=False, indent=2, sort_keys=True) + "\\n",
     "spec": "# Spec v1\\n## Behavioral Requirements\\nThe feature works.\\n## Acceptance Criteria\\nController tests pass.\\n",
     "design": "# Design v1\\n## Boundaries\\nRepository only.\\n## Invariants\\nController owns state.\\n## Implementation Approach\\nWrite feature.py.\\n## Unit Test Design\\nCheck content.\\n## Integration Test Design\\nRun a process.\\n## End-to-End Test Design\\nComplete the pipeline.\\n",
     "implement": "# Implementation v1\\n## Changes\\nUpdated feature.py.\\n## Evidence\\nController tests must verify it.\\n",

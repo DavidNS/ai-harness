@@ -166,6 +166,44 @@ def _bundle_phase(value: str) -> str:
 
 
 @dataclass(frozen=True, slots=True)
+class EvidenceRequest:
+    origin_phase: str
+    reason: str
+    questions: tuple[str, ...]
+    gatherers: tuple[str, ...]
+    scope_paths: tuple[str, ...] = ()
+    schema_version: int = 1
+    kind: str = "evidence_request"
+
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, object], *, expected_origin: str) -> "EvidenceRequest":
+        _require_kind(value, "evidence_request")
+        origin = _phase(value.get("origin_phase"), "origin_phase")
+        if origin != expected_origin:
+            raise ValidationError("evidence request origin does not match the active worker phase")
+        questions = tuple(_text_sequence(value.get("questions"), "questions"))
+        gatherers = tuple(_text_sequence(value.get("gatherers"), "gatherers"))
+        scope_paths = tuple(_optional_text_sequence(value.get("scope_paths", []), "scope_paths"))
+        if not questions or not gatherers:
+            raise ValidationError("evidence_request requires questions and gatherers")
+        allowed = {"code", "git", "gitlab", "knowledge", "ci"}
+        if any(item not in allowed for item in gatherers):
+            raise ValidationError("evidence_request gatherer is unsupported")
+        return cls(origin, _text(value.get("reason"), "reason"), questions, gatherers, scope_paths)
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "schema_version": self.schema_version,
+            "kind": self.kind,
+            "origin_phase": self.origin_phase,
+            "reason": self.reason,
+            "questions": list(self.questions),
+            "gatherers": list(self.gatherers),
+            "scope_paths": list(self.scope_paths),
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class PhaseEscalation:
     origin_phase: str
     target_phase: str
@@ -370,7 +408,7 @@ class DecisionAnswer:
         }
 
 
-ControlOutput = DecisionRequest | PhaseEscalation | ImpossibleOutcome | ExplorerBundle
+ControlOutput = DecisionRequest | EvidenceRequest | PhaseEscalation | ImpossibleOutcome | ExplorerBundle
 
 
 class ControlFlowSignal(Exception):

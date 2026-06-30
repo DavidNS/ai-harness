@@ -8,7 +8,8 @@ from ..contracts.limits import LEARNING as _LEARNING_LIMITS
 from ..phases import PhaseRepairExhaustedError, PhaseValidationError, get_phase
 
 _GENERIC_REPAIR_PHASES = frozenset({
-    "explore", "purpose", "spec", "design", "tasks", "test", "implement", "review",
+    "explore", "explore_request_profile", "explore_evidence_digest", "explore_delta",
+    "explore_outcome_synthesis", "purpose", "spec", "design", "tasks", "test", "implement", "review",
     "explorer", "explorer_intake", "explorer_discovery",
     "explorer_decision", "explorer_artifact", "explorer_distill",
     "explorer_review", "knowledge_synthesis", "knowledge_review",
@@ -44,6 +45,30 @@ class _StateRecorder(Protocol):
 def phase_contract_summary(definition) -> dict[str, object]:
     """Return a structured contract summary for error reporting."""
     summary: dict[str, object] = {"artifact": definition.artifact}
+
+    if definition.name == "purpose":
+        summary.update({
+            "format": "json",
+            "required_document_fields": [
+                "schema_version", "kind", "summary", "selected_entries", "implementation_mode",
+                "problem", "scope", "approach", "structural_work", "exclusions",
+                "acceptance_outline", "evidence_refs",
+            ],
+            "required_values": {"schema_version": 1, "kind": "purpose_bundle"},
+            "implementation_mode": [
+                "direct_patch", "patch_with_local_refactor", "refactor_first_then_patch",
+                "security_patch", "existing_functionality", "documentation_only", "blocked",
+            ],
+        })
+        return summary
+    if definition.name.startswith("explore_") or definition.name == "explore":
+        summary.update({
+            "format": "json",
+            "artifact": definition.artifact,
+            "evidence_item_fields": ["id", "kind", "claim", "status", "confidence", "severity", "sources"],
+            "source_requires_one_of": ["path", "artifact", "url", "description"],
+        })
+        return summary
     if definition.name == "tasks":
         summary.update(_TASKS_CONTRACT_SUMMARY)
         return summary

@@ -8,6 +8,7 @@ from typing import Callable, Mapping, Protocol
 
 from ..phases import get_phase
 from .context import RunContext
+from .explore_bundle_view import ExploreBundleView
 from .task_plan_execution import TaskPlanExecution
 
 
@@ -35,7 +36,13 @@ class TaskExecution:
 
     def tasks(self) -> None:
         scope = self._callbacks.explorer_scope()
-        document = json.loads(self._callbacks.worker("tasks", self._callbacks.full_sdd_inputs("spec.md", "design.md")))
+        document = json.loads(self._callbacks.worker("tasks", {
+            "explore_bundle_view": ExploreBundleView(self._ctx.artifacts).build(),
+            "purpose/bundle.json": self._ctx.artifacts.read_json("purpose/bundle.json"),
+            "spec.md": self._ctx.artifacts.read("spec.md"),
+            "design.md": self._ctx.artifacts.read("design.md"),
+            "explorer_scope": scope,
+        }))
         self._callbacks.validate_full_sdd_task_coverage(document, scope)
         self._task_plans.install_tasks(document["tasks"])
 

@@ -13,11 +13,17 @@ _ENTRY_CLASSIFICATIONS = frozenset({"improvement", "limitation", "bullshit"})
 _CLAIM_STATUSES = frozenset({
     "supported",
     "contradicted",
+    "partial",
     "partially_supported",
     "unresolved",
     "not_applicable",
     "blocked",
 })
+_EVIDENCE_KINDS = frozenset({
+    "code", "test", "documentation", "knowledge", "ci", "git", "structure",
+    "security", "scope", "external",
+})
+_SEVERITIES = frozenset({"info", "warning", "error", "critical"})
 _COMPLEXITIES = frozenset({"typo", "local_change", "multi_file", "cross_cutting", "architecture", "migration"})
 _AMBIGUITIES = frozenset({"clear", "partial", "high", "blocked_by_product_decision"})
 _NOVELTIES = frozenset({"known_repo_pattern", "low", "medium", "high", "uncertain_feasibility"})
@@ -132,8 +138,13 @@ def _enum(value: object, field: str, allowed: frozenset[str]) -> str:
 def _validate_sources(value: object, field: str) -> None:
     for source in _optional_object_list(value, field):
         _enum(source.get("type"), f"{field} type", frozenset({"file", "artifact", "git", "gitlab", "web", "knowledge", "ci"}))
-        if not (_optional_text(source.get("path"), f"{field} path") or _optional_text(source.get("url"), f"{field} url") or _optional_text(source.get("description"), f"{field} description")):
-            raise _validation_error(f"{field} entries require path, url, or description")
+        if not (
+            _optional_text(source.get("path"), f"{field} path")
+            or _optional_text(source.get("artifact"), f"{field} artifact")
+            or _optional_text(source.get("url"), f"{field} url")
+            or _optional_text(source.get("description"), f"{field} description")
+        ):
+            raise _validation_error(f"{field} entries require path, artifact, url, or description")
 
 
 def _validate_evidence_items(value: object, field: str, *, allow_empty: bool) -> list[Mapping[str, object]]:
@@ -144,11 +155,55 @@ def _validate_evidence_items(value: object, field: str, *, allow_empty: bool) ->
         if evidence_id in seen:
             raise _validation_error(f"{field} IDs must be unique")
         seen.add(evidence_id)
+        _enum(item.get("kind", "code"), f"{field} kind", _EVIDENCE_KINDS)
         _text(item.get("claim"), f"{field} claim")
         _enum(item.get("status"), f"{field} status", _CLAIM_STATUSES)
         _optional_text(item.get("confidence"), f"{field} confidence")
+        if "severity" in item:
+            _enum(item.get("severity"), f"{field} severity", _SEVERITIES)
         _validate_sources(item.get("sources", []), f"{field} sources")
     return evidence
+
+
+def _validate_request_profile(value: Mapping[str, object]) -> None:
+    _require_stage(value, "explore_request_profile")
+    _text(value.get("summary"), "summary")
+    _text(value.get("request_type"), "request_type")
+    _enum(value.get("complexity"), "complexity", _COMPLEXITIES)
+    _enum(value.get("ambiguity"), "ambiguity", _AMBIGUITIES)
+    _enum(value.get("risk"), "risk", _RISKS)
+    _enum(value.get("evidence_depth"), "evidence_depth", _EVIDENCE_DEPTHS)
+    _text_list(value.get("request_parts", []), "request_parts", allow_empty=False)
+    _text_list(value.get("constraints", []), "constraints")
+    _text_list(value.get("evidence_questions", []), "evidence_questions", allow_empty=False)
+    for gatherer in _text_list(value.get("gatherers", []), "gatherers", allow_empty=False):
+        if gatherer not in _GATHERERS:
+            raise _validation_error("gatherers contains unsupported gatherer")
+    _text_list(value.get("clarification_questions", []), "clarification_questions")
+
+
+def validate_explore_request_profile(candidate: str) -> dict[str, Any]:
+    value = _document(candidate)
+    _validate_request_profile(value)
+    return value
+
+
+def validate_explore_evidence_digest(candidate: str) -> dict[str, Any]:
+    value = _document(candidate)
+    _require_stage(value, "explore_evidence_digest")
+    _validate_evidence_items(value.get("evidence", []), "evidence", allow_empty=True)
+    _text_list(value.get("blockers", []), "blockers")
+    return value
+
+
+def validate_explore_delta(candidate: str) -> dict[str, Any]:
+    value = _document(candidate)
+    if value.get("schema_version") != 1 or value.get("kind") != "explore_delta_bundle":
+        raise _validation_error("explore delta version or kind is invalid")
+    _text(value.get("request_id"), "request_id")
+    _validate_evidence_items(value.get("evidence", []), "evidence", allow_empty=True)
+    _text_list(value.get("questions_answered", []), "questions_answered")
+    return value
 
 
 def _validate_evidence_refs(value: object, field: str, evidence_ids: set[str]) -> None:
@@ -163,8 +218,14 @@ def _validate_exploration_map(value: object, evidence_ids: set[str]) -> None:
     exploration_map = _mapping(value, "exploration_map")
     if exploration_map.get("schema_version") != 1 or exploration_map.get("kind") != "exploration_map":
         raise _validation_error("exploration_map version or kind is invalid")
-    for field in ("surfaces", "behaviors", "constraints", "risks", "unknowns", "candidate_work_shapes", "verification_surfaces"):
+    for field in (
+        "surfaces", "behaviors", "constraints", "risks", "unknowns",
+        "candidate_work_shapes", "verification_surfaces",
+    ):
         _object_list(exploration_map.get(field), f"exploration_map {field}")
+    for field in ("existing_functionality", "similar_functionality", "structural_signals", "security_signals"):
+        if field in exploration_map:
+            _object_list(exploration_map.get(field), f"exploration_map {field}")
     for surface in _optional_object_list(exploration_map.get("surfaces"), "exploration_map surfaces"):
         _text(surface.get("id"), "surface id")
         _enum(surface.get("kind"), "surface kind", _SURFACE_KINDS)
@@ -336,6 +397,26 @@ def validate_explore_outcome_bundle(candidate: str) -> dict[str, Any]:
             raise _validation_error("needs_clarification must not include classified entries")
     if status == "problem_gathering_info" and not operational_blockers:
         raise _validation_error("problem_gathering_info requires operational_blockers")
+    return value
+
+
+def validate_purpose_bundle(candidate: str) -> dict[str, Any]:
+    value = _document(candidate)
+    if value.get("schema_version") != 1 or value.get("kind") != "purpose_bundle":
+        raise _validation_error("purpose bundle version or kind is invalid")
+    _text(value.get("summary"), "summary")
+    _text_list(value.get("selected_entries", []), "selected_entries", allow_empty=False)
+    _enum(value.get("implementation_mode"), "implementation_mode", frozenset({
+        "direct_patch", "patch_with_local_refactor", "refactor_first_then_patch",
+        "security_patch", "existing_functionality", "documentation_only", "blocked",
+    }))
+    _text(value.get("problem"), "problem")
+    _text(value.get("scope"), "scope")
+    _text(value.get("approach"), "approach")
+    _text_list(value.get("structural_work", []), "structural_work")
+    _text_list(value.get("exclusions", []), "exclusions")
+    _text_list(value.get("acceptance_outline", []), "acceptance_outline", allow_empty=False)
+    _text_list(value.get("evidence_refs", []), "evidence_refs", allow_empty=False)
     return value
 
 

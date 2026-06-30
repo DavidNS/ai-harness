@@ -1,7 +1,7 @@
 # Tasks Phase Prompt v1
 
-Use only the supplied required inputs and the `tasks.json` capability manifest.
-When `explorer_scope` is supplied, treat it as bounded implementation input data. Preserve each source artifact boundary; for multiple artifacts, do not collapse the scope into one vague feature. Shared infrastructure is allowed only when the relevant source artifacts remain explicit.
+Use only the supplied required inputs and the `tasks.json` capability manifest. Inputs include `explore_bundle_view` and `purpose/bundle.json`.
+When `explorer_scope` is supplied, treat it as bounded implementation input data. Reflect `purpose/bundle.json.implementation_mode` in task sequencing when it calls for local refactor, security work, or existing functionality handling. Preserve each source artifact boundary; for multiple artifacts, do not collapse the scope into one vague feature. Shared infrastructure is allowed only when the relevant source artifacts remain explicit.
 If controller inputs include a non-empty `repair` object, use it only to repair the artifact contract problem named by the controller while preserving the original bounded inputs.
 If controller inputs include non-empty `escalation_history`, treat it as controller feedback from later phases. Regenerate tasks to address the recorded cause, such as expanding `touched_paths`, splitting an oversized task, or correcting dependencies when a later phase reports that the current task plan cannot be implemented as scoped.
 

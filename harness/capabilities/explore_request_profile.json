@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "phase": "explore_request_profile",
+  "paths": [
+    {
+      "pattern": "**",
+      "mode": "read"
+    }
+  ],
+  "commands": [],
+  "skills": [
+    "explore-playbook"
+  ],
+  "mcp_tools": [],
+  "required_evidence": [
+    "phase_output"
+  ],
+  "postconditions": [],
+  "limits": {
+    "timeout_seconds": 120,
+    "output_bytes": 1000000,
+    "retries": 1
+  }
+}

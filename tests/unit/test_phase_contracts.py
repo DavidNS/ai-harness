@@ -17,7 +17,7 @@ class PhaseContractTests(unittest.TestCase):
         self.harness = Path(__file__).resolve().parents[2] / "harness"
 
     def test_every_phase_has_resources_and_matching_manifest(self) -> None:
-        self.assertEqual(27, len(PHASE_DEFINITIONS))
+        self.assertEqual(22, len(PHASE_DEFINITIONS))
         for phase in PHASE_DEFINITIONS.values():
             self.assertTrue((self.harness / "workers" / phase.playbook).is_file())
             self.assertTrue((self.harness / "prompts" / phase.prompt).is_file())
@@ -25,12 +25,12 @@ class PhaseContractTests(unittest.TestCase):
 
     def test_exact_inputs_are_required(self) -> None:
         phase = get_phase("purpose")
-        supplied = {"request": "r", "explore/outcome_bundle.json": {"kind": "explore_outcome_bundle"}, "explorer_scope": {"artifacts": []}}
+        supplied = {"request": "r", "explore_bundle_view": {"kind": "explore_bundle_view"}, "explorer_scope": {"artifacts": []}}
         self.assertEqual(supplied, phase.build_input(supplied))
         with self.assertRaises(PhaseValidationError):
-            phase.build_input({"request": "r", "explore/outcome_bundle.json": {"kind": "explore_outcome_bundle"}})
+            phase.build_input({"request": "r", "explore_bundle_view": {"kind": "explore_bundle_view"}})
         with self.assertRaises(PhaseValidationError):
-            phase.build_input({"request": "r", "explore/outcome_bundle.json": {"kind": "explore_outcome_bundle"}, "explorer_scope": {}, "state": {}})
+            phase.build_input({"request": "r", "explore_bundle_view": {"kind": "explore_bundle_view"}, "explorer_scope": {}, "state": {}})
 
     def test_explore_outcome_bundle_accepts_exploration_map(self) -> None:
         document = json.loads(explore_outcome_bundle())

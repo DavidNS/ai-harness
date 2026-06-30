@@ -1,6 +1,6 @@
 # Design Phase Prompt v1
 
-Use only the supplied required inputs and the `design.json` capability manifest.
+Use only the supplied required inputs and the `design.json` capability manifest. Inputs include `explore_bundle_view` and `purpose/bundle.json`.
 When `explorer_scope` is supplied, treat it as bounded implementation input data. Preserve each source artifact boundary; for multiple artifacts, do not collapse the scope into one vague feature. Shared infrastructure is allowed only when the relevant source artifacts remain explicit.
 If controller inputs include a non-empty `repair` object, use it only to repair the artifact contract problem named by the controller while preserving the original bounded inputs.
 
@@ -10,7 +10,7 @@ Produce exactly one output, choosing one of:
 - a structured `decision_request` control JSON object when a user decision is required before a valid artifact can be produced;
 - a structured `phase_escalation` control JSON object when an answer or discovered constraint requires an earlier phase to rerun.
 
-Use `explore/outcome_bundle.json` as evidence input. If it includes `exploration_map`, use its surfaces, behaviors, constraints, risks, unknowns, candidate_work_shapes, verification_surfaces, and `handoff_notes.design` to choose and justify the design boundaries. Candidate work shapes are not Explorer decisions; DESIGN must make the technical choice, preserve observed invariants, and explain the verification plan from the evidence.
+Use `explore_bundle_view` as evidence input. If it includes `exploration_map`, use its surfaces, behaviors, constraints, risks, unknowns, candidate_work_shapes, verification_surfaces, and `handoff_notes.design` to choose and justify the design boundaries. Candidate work shapes are not Explorer decisions; DESIGN must make the technical choice while preserving `purpose/bundle.json.implementation_mode`, preserve observed invariants, and explain the verification plan from the evidence.
 
 When returning the normal `design.md` candidate, match this Markdown contract:
 

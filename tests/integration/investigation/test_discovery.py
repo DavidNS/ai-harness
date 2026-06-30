@@ -18,15 +18,9 @@ from tests.fixtures.scripted_provider import ScriptedProvider
 
 
 EXPLORE_CALLS = [
-    "explore_request_understanding",
-    "explore_clarification_gate",
-    "explore_triage",
-    "explore_evidence_plan",
-    "explore_evidence_collection",
-    "explore_ci_barrier",
-    "explore_evidence_normalization",
+    "explore_request_profile",
+    "explore_evidence_digest",
     "explore_outcome_synthesis",
-    "explore_review",
     "knowledge_synthesis",
 ]
 
@@ -55,7 +49,7 @@ class ExploreBundleDiscoveryTests(unittest.TestCase):
             outcome_bundle = json.loads((result.snapshot_path / "explore" / "outcome_bundle.json").read_text(encoding="utf-8"))
             self.assertEqual(exploration_map, outcome_bundle["exploration_map"])
 
-    def test_related_improvements_are_supplied_to_evidence_collection(self) -> None:
+    def test_related_improvements_are_supplied_to_context_pack(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             repository = Path(directory)
             existing = repository / "docs/explorer/improvements/routing-bundle-output/improvement.md"
@@ -79,12 +73,12 @@ class ExploreBundleDiscoveryTests(unittest.TestCase):
             )
 
             self.assertEqual("success", result.outcome)
-            inputs = provider.phase_inputs["explore_evidence_collection"][0]
-            related = inputs["related_improvements"]
+            inputs = provider.phase_inputs["explore_evidence_digest"][0]
+            related = inputs["context_pack"]["related_improvements"]
             self.assertTrue(any(item["path"] == "docs/explorer/improvements/routing-bundle-output/improvement.md" for item in related))
             self.assertTrue(any(item.get("checksum") == checksum(content) for item in related))
 
-    def test_repository_observations_are_supplied_to_evidence_collection(self) -> None:
+    def test_repository_observations_are_supplied_to_context_pack(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             repository = Path(directory)
             source = repository / "ui/console_input.py"
@@ -102,8 +96,8 @@ class ExploreBundleDiscoveryTests(unittest.TestCase):
             )
 
             self.assertEqual("success", result.outcome)
-            inputs = provider.phase_inputs["explore_evidence_collection"][0]
-            observations = json.dumps(inputs["repository_observations"])
+            inputs = provider.phase_inputs["explore_evidence_digest"][0]
+            observations = json.dumps(inputs["context_pack"]["repository_observations"])
             self.assertIn("ui/console_input.py", observations)
             self.assertIn("slash_command_mode", observations)
 

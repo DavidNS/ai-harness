@@ -43,6 +43,37 @@ class ControlOutputTests(unittest.TestCase):
         self.assertEqual({"explore_bundle": 8, "sdd": 3}, request.to_dict()["scores"])
         self.assertEqual({"yes": "Preserves existing behavior for callers."}, request.to_dict()["option_details"])
 
+    def test_evidence_request_parses_and_artifact_kinds_are_ignored(self) -> None:
+        artifact = json.dumps({"schema_version": 1, "kind": "purpose_bundle", "summary": "Normal artifact."})
+        self.assertIsNone(parse_control_output(artifact, expected_origin="PURPOSE", active_graph_phase="PROPOSAL_BUNDLE", graph=GRAPH))
+
+        request = parse_control_output(json.dumps({
+            "schema_version": 1,
+            "kind": "evidence_request",
+            "origin_phase": "PURPOSE",
+            "reason": "More structure evidence is needed before selecting implementation mode.",
+            "questions": ["Which files implement the adjacent behavior?"],
+            "gatherers": ["code", "ci"],
+            "scope_paths": ["harness/ai_harness"],
+        }), expected_origin="PURPOSE", active_graph_phase="PROPOSAL_BUNDLE", graph=GRAPH)
+
+        self.assertEqual("evidence_request", request.kind)
+        self.assertEqual("PURPOSE", request.origin_phase)
+        self.assertEqual(("code", "ci"), request.gatherers)
+        self.assertEqual(("harness/ai_harness",), request.scope_paths)
+        self.assertEqual(["code", "ci"], request.to_dict()["gatherers"])
+
+    def test_evidence_request_rejects_unknown_gatherer(self) -> None:
+        with self.assertRaises(ValidationError):
+            parse_control_output(json.dumps({
+                "schema_version": 1,
+                "kind": "evidence_request",
+                "origin_phase": "PURPOSE",
+                "reason": "Need unsupported evidence.",
+                "questions": ["What should be checked?"],
+                "gatherers": ["browser"],
+            }), expected_origin="PURPOSE", active_graph_phase="PROPOSAL_BUNDLE", graph=GRAPH)
+
     def test_rejects_mismatched_decision_origin(self) -> None:
         with self.assertRaises(ValidationError):
             parse_control_output(json.dumps({

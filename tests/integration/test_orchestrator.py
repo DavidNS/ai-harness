@@ -17,6 +17,7 @@ from ai_harness.providers.base import ProviderResult
 from ai_harness.strategy import finalize_strategy_decision, select_strategy
 from ai_harness.stores.runtime import RunLock
 from tests.fixtures.flow import run_with_flow, run_with_route
+from tests.fixtures.scripted_provider import ScriptedProvider
 
 
 class RejectingProvider:
@@ -37,51 +38,34 @@ class RoutingProvider:
         )
 
 
-class FailingImplementProvider:
+class FailingImplementProvider(ScriptedProvider):
     def run_prompt(self, prompt, *, cwd, permissions=None, progress=None):
-        del cwd, permissions
         if "# Implement Worker v1" in prompt:
             if progress is not None:
                 progress("stderr", "codex auth failed\n")
             return ProviderResult("", "codex auth failed", 1, 0.01)
-        return ProviderResult(
-            '{"mode":"code","intent":"modify_code","confidence":0.8}',
-            "",
-            0,
-            0.01,
-        )
+        return super().run_prompt(prompt, cwd=cwd, permissions=permissions, progress=progress)
 
 
-class LegacyFailingImplementProvider:
+class LegacyFailingImplementProvider(ScriptedProvider):
     def run_prompt(self, prompt, *, cwd, permissions=None):
-        del cwd, permissions
         if "# Implement Worker v1" in prompt:
             return ProviderResult("", "legacy provider failed", 1, 0.01)
-        return ProviderResult(
-            '{"mode":"code","intent":"modify_code","confidence":0.8}',
-            "",
-            0,
-            0.01,
-        )
+        return super().run_prompt(prompt, cwd=cwd, permissions=permissions)
 
 
-class CapturingImplementProvider:
+class CapturingImplementProvider(ScriptedProvider):
     def __init__(self) -> None:
+        super().__init__()
         self.implement_prompt = ""
         self.implement_permissions: Mapping[str, object] | None = None
 
     def run_prompt(self, prompt, *, cwd, permissions=None, progress=None):
-        del cwd, progress
         if "# Implement Worker v1" in prompt:
             self.implement_prompt = prompt
             self.implement_permissions = permissions
             return ProviderResult("", "stop after capture", 1, 0.01)
-        return ProviderResult(
-            '{"mode":"code","intent":"modify_code","confidence":0.8}',
-            "",
-            0,
-            0.01,
-        )
+        return super().run_prompt(prompt, cwd=cwd, permissions=permissions, progress=progress)
 
 
 class OrchestratorIntegrationTests(unittest.TestCase):
@@ -165,14 +149,18 @@ class OrchestratorIntegrationTests(unittest.TestCase):
                         "sdd_low",
                     )
 
-                job = repository / ".ai-harness" / "artifacts" / "current" / "jobs" / "J0001"
+                jobs_root = repository / ".ai-harness" / "artifacts" / "current" / "jobs"
+                job = next(
+                    job_dir for job_dir in sorted(jobs_root.iterdir())
+                    if json.loads((job_dir / "debug-before.json").read_text(encoding="utf-8"))["phase"] == "implement"
+                )
                 before = json.loads((job / "debug-before.json").read_text(encoding="utf-8"))
                 after = json.loads((job / "debug-after.json").read_text(encoding="utf-8"))
                 self.assertEqual("before", before["stage"])
                 self.assertEqual("after", after["stage"])
                 self.assertEqual("implement", before["phase"])
                 self.assertEqual("implement", after["phase"])
-                self.assertEqual("J0001", before["job_id"])
+                self.assertEqual(job.name, before["job_id"])
                 self.assertEqual(3, len(before["commands"]))
                 self.assertEqual(["git", "status", "--short", "--untracked-files=all"], before["commands"][0]["command"])
                 self.assertEqual(["git", "diff", "--name-status", "--"], after["commands"][2]["command"])
@@ -202,7 +190,7 @@ class OrchestratorIntegrationTests(unittest.TestCase):
             )
             self.assertIn("legacy provider failed", attempt["implementation"]["stderr"])
 
-    def test_simple_task_includes_referenced_markdown_draft(self) -> None:
+    def test_explore_context_is_created_before_second_route_for_markdown_draft(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             repository = Path(directory)
             (repository / "tests").mkdir()
@@ -212,38 +200,32 @@ class OrchestratorIntegrationTests(unittest.TestCase):
                 "# Non-Code Provider Pass-Through\n\nRoute non-code requests to the provider.\n",
                 encoding="utf-8",
             )
-            provider = CapturingImplementProvider()
+            provider = ScriptedProvider()
 
-            with self.assertRaises(HarnessError):
-                run_with_flow(
-                    Orchestrator(
-                        repository,
-                        HarnessConfig(provider="local", max_attempts=1),
-                        provider,
-                    ),
-                    "Fix a typo in draft-improvements/non-code-provider-pass-through.md",
-                    "sdd_low",
-                )
-
-            tasks = json.loads((repository / ".ai-harness" / "artifacts" / "current" / "tasks.json").read_text())
-            self.assertEqual(
-                "Implement the improvement described by draft-improvements/non-code-provider-pass-through.md",
-                tasks["tasks"][0]["title"],
+            result = run_with_flow(
+                Orchestrator(
+                    repository,
+                    HarnessConfig(provider="local", max_attempts=1),
+                    provider,
+                ),
+                "Implement draft-improvements/non-code-provider-pass-through.md",
+                "sdd_low",
             )
-            self.assertIn("Route non-code requests to the provider.", provider.implement_prompt)
-            self.assertEqual([[sys.executable, "-c", "print('syntax gate skipped outside git')"]], tasks["tasks"][0]["focused_tests"])
-            broader = tasks["tasks"][0]["broader_tests"]
-            self.assertTrue(any(command[-2:] == ["discover", "tests/integration"] for command in broader))
-            self.assertTrue(any(command[-1] == "tests.acceptance.test_end_to_end" for command in broader))
-            self.assertIsNotNone(provider.implement_permissions)
-            assert provider.implement_permissions is not None
-            self.assertIsNone(provider.implement_permissions["timeout_seconds"])
+
+            self.assertEqual("waiting_for_user", result.outcome)
+            scope = json.loads((repository / ".ai-harness" / "artifacts" / "current" / "explorer_scope.json").read_text())
+            context_pack = json.loads((repository / ".ai-harness" / "artifacts" / "current" / "explore" / "context_pack.json").read_text())
+            self.assertEqual("explorer_scope", scope["kind"])
+            self.assertEqual("explore_context_pack", context_pack["kind"])
+            self.assertEqual("ROUTING", result.control["request"]["origin_phase"])
+            self.assertFalse((repository / ".ai-harness" / "artifacts" / "current" / "tasks.json").exists())
+
 
     def test_preselected_strategy_override_is_persisted_for_audit(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             repository = Path(directory)
             recommendation = select_strategy("Update orchestrator routing")
-            decision = finalize_strategy_decision(recommendation, answer="simple", prompted=True)
+            decision = finalize_strategy_decision(recommendation, answer="tdd", prompted=True)
 
             provider = CapturingImplementProvider()
             waiting = Orchestrator(
@@ -254,34 +236,33 @@ class OrchestratorIntegrationTests(unittest.TestCase):
             self.assertEqual("waiting_for_user", waiting.outcome)
             assert waiting.control is not None
 
-            with self.assertRaises(HarnessError):
-                Orchestrator(
-                    repository,
-                    HarnessConfig(provider="local", max_attempts=1),
-                    provider,
-                ).run(
-                    "Fix typo in README.md",
-                    resume_run_id=waiting.run_id,
-                    decision_answer=json.dumps({
-                        "schema_version": 1,
-                        "kind": "decision_answer",
-                        "decision_id": waiting.control["decision_id"],
-                        "answer": "Use code.",
-                        "selected_option": "code",
-                    }),
-                )
+            Orchestrator(
+                repository,
+                HarnessConfig(provider="local", max_attempts=1),
+                provider,
+            ).run(
+                "Fix typo in README.md",
+                resume_run_id=waiting.run_id,
+                decision_answer=json.dumps({
+                    "schema_version": 1,
+                    "kind": "decision_answer",
+                    "decision_id": waiting.control["decision_id"],
+                    "answer": "Use code.",
+                    "selected_option": "code",
+                }),
+            )
 
             strategy = json.loads(
                 (repository / ".ai-harness" / "artifacts" / "current" / "strategy.json").read_text()
             )
-            self.assertEqual("SDD", strategy["strategy"])
-            self.assertEqual("LOW", strategy["complexity"])
+            self.assertEqual("TDD_BUNDLE", strategy["strategy"])
+            self.assertEqual("HIGH", strategy["complexity"])
             self.assertEqual("SDD", strategy["recommended_strategy"])
             self.assertEqual("MEDIUM", strategy["recommended_complexity"])
             self.assertTrue(strategy["prompted"])
             self.assertTrue(strategy["overridden"])
             self.assertEqual("prompt_override", strategy["selection_source"])
-            self.assertEqual("simple", strategy["override_text"])
+            self.assertEqual("tdd", strategy["override_text"])
 
     def test_non_code_pipeline_completes_without_modifying_worker(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -301,7 +282,7 @@ class OrchestratorIntegrationTests(unittest.TestCase):
             self.assertEqual("COMPLETED", archived_state["current_phase"])
             self.assertEqual(list(PHASES), archived_state["completed_phases"])
             self.assertNotIn("tasks.json", result.artifacts)
-            headings = ["## Router", "## Strategy", "## Pipeline", "## Artifacts", "## Result"]
+            headings = ["## Router", "## Flow", "## Bundles", "## Artifacts", "## Result"]
             self.assertEqual(sorted(rendered.index(item) for item in headings), [rendered.index(item) for item in headings])
             with RunLock(repository):
                 pass

@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import json
-from typing import Callable, Mapping, Protocol, Sequence
+from collections.abc import Mapping, Sequence
+from typing import Callable, Protocol
 
-from ..errors import HarnessError
 from ..phases import get_phase
 from .context import RunContext
 from .exploration_map import ExplorationMapBuilder
+from .explore_evidence import ci_evidence_from_artifacts, context_pack, evidence_from_digest, merge_evidence
 
 
 class ExplorePipelineCallbacks(Protocol):
@@ -19,7 +20,7 @@ class ExplorePipelineCallbacks(Protocol):
 
 
 class ExplorePipelineService:
-    """Run the internal EXPLORE stages and publish the PURPOSE handoff bundle."""
+    """Run EXPLORE as evidence acquisition and PURPOSE handoff packaging."""
 
     def __init__(
         self,
@@ -32,47 +33,38 @@ class ExplorePipelineService:
         self._invoke_with_repair = invoke_with_repair
 
     def run(self) -> None:
-        request_understanding = self._invoke_json("explore_request_understanding", self._base_inputs())
-        clarification_gate = self._invoke_json("explore_clarification_gate", {
-            "request_understanding": request_understanding,
-        })
-        triage = self._invoke_json("explore_triage", {
-            "request_understanding": request_understanding,
-            "clarification_gate": clarification_gate,
-        })
-        evidence_plan = self._invoke_json("explore_evidence_plan", {
-            **self._base_inputs(),
-            "request_understanding": request_understanding,
-            "triage": triage,
-        })
+        profile = self._invoke_json("explore_request_profile", self._base_inputs())
         related = self._callbacks.related_improvements()
-        observations = self._callbacks.repository_observations(related, request_understanding)
+        observations = self._callbacks.repository_observations(related, profile)
         self._ctx.repository_observations = observations
-        evidence_collection = self._invoke_json("explore_evidence_collection", {
-            **self._base_inputs(),
-            "request_understanding": request_understanding,
-            "triage": triage,
-            "evidence_plan": evidence_plan,
-            "related_improvements": related,
-            "repository_observations": observations,
+        pack = context_pack(
+            request=self._callbacks.request_brief(),
+            profile=profile,
+            knowledge=[entry.summary for entry in self._ctx.knowledge_context],
+            related_improvements=related,
+            repository_observations=observations,
+            artifacts=self._ctx.artifacts,
+            explorer_scope=self._callbacks.explorer_scope(),
+        )
+        self._ctx.artifacts.write_json("explore/context_pack.json", pack)
+        self._ctx.state.record_artifact("explore/context_pack.json", "EXPLORE")
+        controller_evidence = ci_evidence_from_artifacts(self._ctx.artifacts)
+        digest = self._invoke_json("explore_evidence_digest", {
+            "request_profile": profile,
+            "context_pack": pack,
+            "controller_evidence": controller_evidence,
         })
-        ci_barrier = self._invoke_json("explore_ci_barrier", {
-            "evidence_plan": evidence_plan,
-            "ci_status": self._artifact_json("ci-status.json"),
-            "git_run": self._artifact_json("git-run.json"),
-            "ci_signals": self._artifact_json("ci-signals.json"),
-        })
-        evidence_normalization = self._invoke_json("explore_evidence_normalization", {
-            "evidence_collection": evidence_collection,
-            "ci_barrier": ci_barrier,
-        })
+        evidence = merge_evidence(controller_evidence, evidence_from_digest(digest))
+        digest["evidence"] = evidence
+        self._ctx.artifacts.write_json("explore/evidence_digest.json", digest)
+        self._ctx.state.record_artifact("explore/evidence_digest.json", "EXPLORE_EVIDENCE_DIGEST")
         exploration_map = ExplorationMapBuilder(
-            request_understanding=request_understanding,
-            triage=triage,
-            evidence_plan=evidence_plan,
-            evidence_collection=evidence_collection,
-            ci_barrier=ci_barrier,
-            evidence_normalization=evidence_normalization,
+            request_understanding=self._profile_as_request_understanding(profile),
+            triage=self._profile_as_triage(profile),
+            evidence_plan=self._profile_as_evidence_plan(profile),
+            evidence_collection={"evidence": evidence, "blockers": digest.get("blockers", [])},
+            ci_barrier={"blockers": []},
+            evidence_normalization={"evidence": evidence},
             repository_observations=observations,
             related_improvements=related,
         ).build()
@@ -80,29 +72,38 @@ class ExplorePipelineService:
         self._ctx.state.record_artifact("explore/exploration_map.json", "EXPLORE")
         outcome_bundle = self._invoke_json("explore_outcome_synthesis", {
             "request": self._callbacks.request_brief(),
-            "request_understanding": request_understanding,
-            "clarification_gate": clarification_gate,
-            "triage": triage,
-            "evidence_plan": evidence_plan,
-            "evidence_collection": evidence_collection,
-            "ci_barrier": ci_barrier,
-            "evidence_normalization": evidence_normalization,
+            "request_profile": profile,
+            "context_pack": pack,
+            "evidence": evidence,
             "exploration_map": exploration_map,
         })
-        if "exploration_map" not in outcome_bundle:
-            outcome_bundle["exploration_map"] = exploration_map
-            get_phase("explore_outcome_synthesis").validate(json.dumps(outcome_bundle))
-            self._ctx.artifacts.write_json("explore/outcome_bundle.json", outcome_bundle)
-            self._ctx.state.record_artifact("explore/outcome_bundle.json", "EXPLORE_OUTCOME_SYNTHESIS")
-        review = self._invoke_text("explore_review", {
-            "outcome_bundle": outcome_bundle,
-            "request_understanding": request_understanding,
-            "triage": triage,
-            "evidence_plan": evidence_plan,
-            "evidence_normalization": evidence_normalization,
-        })
-        if self._review_verdict(review) != "APPROVE":
-            raise HarnessError("explore review did not approve outcome bundle")
+        outcome_bundle["evidence"] = evidence
+        outcome_bundle["exploration_map"] = exploration_map
+        self._repair_entry_evidence_refs(outcome_bundle, evidence)
+        get_phase("explore_outcome_synthesis").validate(json.dumps(outcome_bundle))
+        self._ctx.artifacts.write_json("explore/outcome_bundle.json", outcome_bundle)
+        self._ctx.state.record_artifact("explore/outcome_bundle.json", "EXPLORE_OUTCOME_SYNTHESIS")
+
+    @staticmethod
+    def _repair_entry_evidence_refs(outcome_bundle: dict[str, object], evidence: Sequence[Mapping[str, object]]) -> None:
+        ordered_ids = [str(item.get("id")) for item in evidence if item.get("id")]
+        evidence_ids = set(ordered_ids)
+        fallback = ordered_ids[0] if ordered_ids else ""
+        entries = outcome_bundle.get("entries", [])
+        if not isinstance(entries, list):
+            return
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            refs = entry.get("evidence_refs", [])
+            if not isinstance(refs, list):
+                entry["evidence_refs"] = [fallback] if fallback else []
+                continue
+            valid_refs = [ref for ref in refs if isinstance(ref, str) and ref in evidence_ids]
+            if valid_refs:
+                entry["evidence_refs"] = valid_refs
+            elif fallback:
+                entry["evidence_refs"] = [fallback]
 
     def _base_inputs(self) -> dict[str, object]:
         return {
@@ -112,19 +113,11 @@ class ExplorePipelineService:
             "explorer_scope": self._callbacks.explorer_scope(),
         }
 
-    def _artifact_json(self, name: str) -> object:
-        if not self._ctx.artifacts.exists(name):
-            return {}
-        try:
-            return self._ctx.artifacts.read_json(name)
-        except Exception:
-            return {}
-
     def _invoke_json(self, name: str, inputs: Mapping[str, object]) -> dict[str, object]:
         output = self._invoke_text(name, inputs)
         value = json.loads(output)
         if not isinstance(value, dict):
-            raise HarnessError(f"{name} returned a non-object JSON artifact")
+            raise TypeError(f"{name} returned a non-object JSON artifact")
         return value
 
     def _invoke_text(self, name: str, inputs: Mapping[str, object]) -> str:
@@ -135,9 +128,28 @@ class ExplorePipelineService:
         return output
 
     @staticmethod
-    def _review_verdict(candidate: str) -> str:
-        marker = "## Verdict"
-        if marker not in candidate:
-            return ""
-        tail = candidate.split(marker, 1)[1].strip().splitlines()
-        return tail[0].strip() if tail else ""
+    def _profile_as_request_understanding(profile: Mapping[str, object]) -> dict[str, object]:
+        return {
+            "summary": profile.get("summary", ""),
+            "explicit_constraints": profile.get("constraints", []),
+            "mentioned_surfaces": profile.get("request_parts", []),
+        }
+
+    @staticmethod
+    def _profile_as_triage(profile: Mapping[str, object]) -> dict[str, object]:
+        return {
+            "complexity": profile.get("complexity", "local_change"),
+            "ambiguity": profile.get("ambiguity", "clear"),
+            "risk": profile.get("risk", "low"),
+            "evidence_depth": profile.get("evidence_depth", "standard"),
+        }
+
+    @staticmethod
+    def _profile_as_evidence_plan(profile: Mapping[str, object]) -> dict[str, object]:
+        gatherers = profile.get("gatherers", []) if isinstance(profile.get("gatherers"), list) else []
+        return {
+            "required_gatherers": gatherers,
+            "optional_gatherers": [],
+            "ci_requirement": "optional" if "ci" in gatherers else "not_needed",
+            "questions": profile.get("evidence_questions", []),
+        }

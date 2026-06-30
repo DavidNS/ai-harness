@@ -39,25 +39,32 @@ def explore_bundle():
         "status": "ready_for_purpose",
         "normalized_request": {"summary": "Implement the request."},
         "triage": {"complexity": "local_change", "ambiguity": "clear", "risk": "low", "evidence_depth": "standard"},
-        "evidence": [{"id": "E1", "claim": "The fixture request is bounded.", "status": "supported", "confidence": "high", "sources": [{"type": "knowledge", "description": "Fixture evidence."}]}],
+        "evidence": [{"id": "E1", "kind": "knowledge", "claim": "The fixture request is bounded.", "status": "supported", "confidence": "high", "severity": "info", "sources": [{"type": "knowledge", "description": "Fixture evidence."}]}],
         "entries": [{"id": "entry-1", "classification": "improvement", "title": "Implement the request", "problem": "The bounded request should be implemented.", "evidence_refs": ["E1"], "constraints": ["Offline fixture."], "unknowns": []}],
     }, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
 
 stage_outputs = {
-    "explore_request_understanding": json.dumps({"schema_version": 1, "phase": "explore_request_understanding", "intent": "implement_request", "summary": "Implement the request.", "mentioned_surfaces": [], "explicit_constraints": [], "unclear_parts": [], "request_type": "feature"}),
-    "explore_clarification_gate": json.dumps({"schema_version": 1, "phase": "explore_clarification_gate", "status": "continue", "clarification_questions": [], "rationale": "The request is bounded."}),
-    "explore_triage": json.dumps({"schema_version": 1, "phase": "explore_triage", "complexity": "local_change", "ambiguity": "clear", "novelty": "known_repo_pattern", "risk": "low", "evidence_depth": "standard", "rationale": "Small deterministic fixture."}),
-    "explore_evidence_plan": json.dumps({"schema_version": 1, "phase": "explore_evidence_plan", "required_gatherers": ["code", "knowledge"], "optional_gatherers": ["ci"], "ci_requirement": "optional", "questions": ["Is the request bounded?"], "skip_reason": {"web": "No external current fact is required."}}),
-    "explore_evidence_collection": json.dumps({"schema_version": 1, "phase": "explore_evidence_collection", "evidence": [{"id": "R1", "claim": "The fixture request is bounded.", "status": "supported", "confidence": "high", "sources": [{"type": "knowledge", "description": "Fixture evidence."}]}], "blockers": []}),
-    "explore_ci_barrier": json.dumps({"schema_version": 1, "phase": "explore_ci_barrier", "ci_requirement": "optional", "status": "ready", "evidence": [], "blockers": []}),
-    "explore_evidence_normalization": json.dumps({"schema_version": 1, "phase": "explore_evidence_normalization", "evidence": [{"id": "E1", "claim": "The fixture request is bounded.", "status": "supported", "confidence": "high", "sources": [{"type": "knowledge", "description": "Fixture evidence."}]}]}),
+    "explore_request_profile": json.dumps({"schema_version": 1, "phase": "explore_request_profile", "summary": "Implement the request.", "request_type": "feature", "complexity": "local_change", "ambiguity": "clear", "risk": "low", "evidence_depth": "standard", "request_parts": ["Implement the request."], "constraints": [], "evidence_questions": ["Is the request bounded?"], "gatherers": ["code", "knowledge", "ci"], "clarification_questions": []}),
+    "explore_evidence_digest": json.dumps({"schema_version": 1, "phase": "explore_evidence_digest", "evidence": [{"id": "E1", "kind": "knowledge", "claim": "The fixture request is bounded.", "status": "supported", "confidence": "high", "severity": "info", "sources": [{"type": "knowledge", "description": "Fixture evidence."}]}], "blockers": []}),
     "explore_outcome_synthesis": explore_bundle(),
-    "explore_review": "# Review v1\n## Verdict\nAPPROVE\n## Findings\nThe bundle is valid.\n",
 }
 
 outputs = {
     "explore": explore_bundle(),
-    "purpose": "# Purpose v1\n## Problem\nImplement the request.\n## Scope\nOne bounded change.\n## Approach\nUse controller gates.\n## Exclusions\nNo unrelated work.\n## Acceptance Outline\nTests pass.\n",
+    "purpose": json.dumps({
+        "schema_version": 1,
+        "kind": "purpose_bundle",
+        "summary": "Implement the request.",
+        "selected_entries": ["entry-1"],
+        "implementation_mode": "direct_patch",
+        "problem": "Implement the request.",
+        "scope": "One bounded change.",
+        "approach": "Use controller gates.",
+        "structural_work": [],
+        "exclusions": ["No unrelated work."],
+        "acceptance_outline": ["Tests pass."],
+        "evidence_refs": ["E1"]
+    }, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
     "spec": "# Spec v1\n## Behavioral Requirements\nThe feature works.\n## Acceptance Criteria\nController tests pass.\n",
     "design": "# Design v1\n## Boundaries\nRepository only.\n## Invariants\nController owns state.\n## Implementation Approach\nWrite feature.py.\n## Unit Test Design\nCheck content.\n## Integration Test Design\nRun a process.\n## End-to-End Test Design\nComplete the pipeline.\n",
     "implement": "# Implementation v1\n## Changes\nCreated feature.py.\n## Evidence\nController tests verify it.\n",

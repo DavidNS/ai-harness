@@ -14,15 +14,11 @@ from .markdown import markdown_validator
 from .types import PhaseDefinition, Validator
 from .validators.explorer import validate_explorer, validate_explorer_distill
 from .validators.explore import (
-    validate_explore_ci_barrier,
-    validate_explore_clarification_gate,
-    validate_explore_evidence_collection,
-    validate_explore_evidence_normalization,
-    validate_explore_evidence_plan,
+    validate_explore_delta,
+    validate_explore_evidence_digest,
     validate_explore_outcome_bundle,
-    validate_explore_request_understanding,
-    validate_explore_review,
-    validate_explore_triage,
+    validate_explore_request_profile,
+    validate_purpose_bundle,
 )
 from .validators.knowledge import validate_knowledge_review, validate_learning
 from .validators.review import validate_review
@@ -44,19 +40,14 @@ def _definition(
 
 PHASE_DEFINITIONS = {
     "explore": _definition("explore", "explore/outcome_bundle.json", ("request", "knowledge", "repository", "explorer_scope"), "Explore Outcome Bundle", (), validate_explore_outcome_bundle),
-    "purpose": _definition("purpose", "purpose.md", ("request", "explore/outcome_bundle.json", "explorer_scope"), "Purpose", ("Problem", "Scope", "Approach", "Exclusions", "Acceptance Outline")),
-    "spec": _definition("spec", "spec.md", ("explore/outcome_bundle.json", "purpose.md", "explorer_scope"), "Spec", ("Behavioral Requirements", "Acceptance Criteria")),
-    "design": _definition("design", "design.md", ("explore/outcome_bundle.json", "spec.md", "explorer_scope"), "Design", ("Boundaries", "Invariants", "Implementation Approach", "Unit Test Design", "Integration Test Design", "End-to-End Test Design")),
-    "tasks": _definition("tasks", "tasks.json", ("spec.md", "design.md", "explorer_scope"), "Tasks", (), validate_tasks),
-    "explore_request_understanding": _definition("explore_request_understanding", "explore/request_understanding.json", ("request", "knowledge", "repository", "explorer_scope"), "Explore Request Understanding", (), validate_explore_request_understanding),
-    "explore_clarification_gate": _definition("explore_clarification_gate", "explore/clarification_gate.json", ("request_understanding",), "Explore Clarification Gate", (), validate_explore_clarification_gate),
-    "explore_triage": _definition("explore_triage", "explore/triage.json", ("request_understanding", "clarification_gate"), "Explore Triage", (), validate_explore_triage),
-    "explore_evidence_plan": _definition("explore_evidence_plan", "explore/evidence_plan.json", ("request", "request_understanding", "triage", "knowledge", "repository", "explorer_scope"), "Explore Evidence Plan", (), validate_explore_evidence_plan),
-    "explore_evidence_collection": _definition("explore_evidence_collection", "explore/evidence_collection.json", ("request", "request_understanding", "triage", "evidence_plan", "knowledge", "repository", "explorer_scope", "related_improvements", "repository_observations"), "Explore Evidence Collection", (), validate_explore_evidence_collection),
-    "explore_ci_barrier": _definition("explore_ci_barrier", "explore/ci_evidence_barrier.json", ("evidence_plan", "ci_status", "git_run", "ci_signals"), "Explore CI Barrier", (), validate_explore_ci_barrier),
-    "explore_evidence_normalization": _definition("explore_evidence_normalization", "explore/evidence_normalization.json", ("evidence_collection", "ci_barrier"), "Explore Evidence Normalization", (), validate_explore_evidence_normalization),
-    "explore_outcome_synthesis": _definition("explore_outcome_synthesis", "explore/outcome_bundle.json", ("request", "request_understanding", "clarification_gate", "triage", "evidence_plan", "evidence_collection", "ci_barrier", "evidence_normalization", "exploration_map"), "Explore Outcome Synthesis", (), validate_explore_outcome_bundle),
-    "explore_review": _definition("explore_review", "explore/review.md", ("outcome_bundle", "request_understanding", "triage", "evidence_plan", "evidence_normalization"), "Review", ("Verdict", "Findings"), validate_explore_review),
+    "purpose": _definition("purpose", "purpose/bundle.json", ("request", "explore_bundle_view", "explorer_scope"), "Purpose Bundle", (), validate_purpose_bundle),
+    "spec": _definition("spec", "spec.md", ("explore_bundle_view", "purpose/bundle.json", "explorer_scope"), "Spec", ("Behavioral Requirements", "Acceptance Criteria")),
+    "design": _definition("design", "design.md", ("explore_bundle_view", "purpose/bundle.json", "spec.md", "explorer_scope"), "Design", ("Boundaries", "Invariants", "Implementation Approach", "Unit Test Design", "Integration Test Design", "End-to-End Test Design")),
+    "tasks": _definition("tasks", "tasks.json", ("explore_bundle_view", "purpose/bundle.json", "spec.md", "design.md", "explorer_scope"), "Tasks", (), validate_tasks),
+    "explore_request_profile": _definition("explore_request_profile", "explore/request_profile.json", ("request", "knowledge", "repository", "explorer_scope"), "Explore Request Profile", (), validate_explore_request_profile),
+    "explore_evidence_digest": _definition("explore_evidence_digest", "explore/evidence_digest.json", ("request_profile", "context_pack", "controller_evidence"), "Explore Evidence Digest", (), validate_explore_evidence_digest),
+    "explore_delta": _definition("explore_delta", "explore/delta.json", ("evidence_request", "context_pack", "controller_evidence"), "Explore Delta", (), validate_explore_delta),
+    "explore_outcome_synthesis": _definition("explore_outcome_synthesis", "explore/outcome_bundle.json", ("request", "request_profile", "context_pack", "evidence", "exploration_map"), "Explore Outcome Synthesis", (), validate_explore_outcome_bundle),
     "explorer": _definition("explorer", "explorer/bundle.json", ("request", "knowledge", "repository", "runtime_context", "related_improvements", "repository_observations", "repair"), "Explorer Bundle", (), validate_explorer),
     "explorer_intake": _definition("explorer_intake", "explorer/intake.json", ("request", "knowledge", "repository", "runtime_context"), "Explorer Intake", (), validate_explorer_intake),
     "explorer_discovery": _definition("explorer_discovery", "explorer/discovery.json", ("request", "knowledge", "repository", "runtime_context", "intake", "related_improvements", "repository_observations", "refinement"), "Explorer Discovery", (), validate_explorer_discovery),

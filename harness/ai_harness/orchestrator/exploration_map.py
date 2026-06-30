@@ -147,6 +147,8 @@ class ExplorationMapBuilder:
         unknowns = self._unknowns(evidence)
         verification = self._verification_surfaces(surfaces, risks)
         work_shapes = self._candidate_work_shapes(risks, unknowns, surfaces)
+        structural_signals = self._signals_by_kind(risks, "coupling")
+        security_signals = self._signals_by_kind(risks, "security")
         return {
             "schema_version": 1,
             "kind": "exploration_map",
@@ -157,6 +159,10 @@ class ExplorationMapBuilder:
             "unknowns": unknowns,
             "candidate_work_shapes": work_shapes,
             "verification_surfaces": verification,
+            "existing_functionality": [],
+            "similar_functionality": [],
+            "structural_signals": structural_signals,
+            "security_signals": security_signals,
             "handoff_notes": self._handoff_notes(unknowns, risks, verification),
         }
 
@@ -223,6 +229,7 @@ class ExplorationMapBuilder:
             "partially_supported": "partially_observed",
             "contradicted": "contradicted",
             "unresolved": "unresolved",
+            "partial": "partially_observed",
             "blocked": "unresolved",
             "not_applicable": "not_applicable",
         }
@@ -234,6 +241,19 @@ class ExplorationMapBuilder:
                 "evidence_refs": [_text(item.get("id"))] if _text(item.get("id")) else [],
             })
         return behaviors
+
+    @staticmethod
+    def _signals_by_kind(risks: Sequence[Mapping[str, object]], kind: str) -> list[dict[str, object]]:
+        signals: list[dict[str, object]] = []
+        for index, risk in enumerate([item for item in risks if _text(item.get("kind")) == kind], start=1):
+            signals.append({
+                "id": f"SS{index}" if kind == "coupling" else f"SEC{index}",
+                "kind": kind,
+                "text": _text(risk.get("text")),
+                "severity": _text(risk.get("severity")) or "medium",
+                "evidence_refs": _strings(risk.get("evidence_refs")),
+            })
+        return signals
 
     def _constraints(self) -> list[dict[str, object]]:
         constraints: list[dict[str, object]] = []

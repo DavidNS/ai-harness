@@ -10,6 +10,7 @@ from .models import (
     ControlOutput,
     DecisionAnswer,
     DecisionRequest,
+    EvidenceRequest,
     ImpossibleOutcome,
     ExplorerBundle,
     PhaseEscalation,
@@ -33,8 +34,12 @@ def parse_control_output(
     if not isinstance(value, dict) or "kind" not in value:
         return None
     kind = value["kind"]
+    if kind in {"purpose_bundle", "explore_outcome_bundle", "explore_delta_bundle", "exploration_map", "explore_bundle_view", "explore_context_pack"}:
+        return None
     if kind == "decision_request":
         return DecisionRequest.from_mapping(value, expected_origin=expected_origin)
+    if kind == "evidence_request":
+        return EvidenceRequest.from_mapping(value, expected_origin=expected_origin)
     if kind == "phase_escalation":
         return PhaseEscalation.from_mapping(
             value,

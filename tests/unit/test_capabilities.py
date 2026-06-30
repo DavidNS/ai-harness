@@ -18,7 +18,7 @@ class CapabilityTests(unittest.TestCase):
         self.capabilities = self.root / "harness" / "capabilities"
 
     def test_all_phase_manifests_are_valid_and_only_implement_can_write(self) -> None:
-        expected = {"explore", "purpose", "spec", "design", "tasks", "explore_request_understanding", "explore_clarification_gate", "explore_triage", "explore_evidence_plan", "explore_evidence_collection", "explore_ci_barrier", "explore_evidence_normalization", "explore_outcome_synthesis", "explore_review", "explorer", "explorer_intake", "explorer_discovery", "explorer_decision", "explorer_artifact", "explorer_distill", "explorer_review", "implement", "test", "review", "learning", "knowledge_synthesis", "knowledge_review"}
+        expected = {"explore", "purpose", "spec", "design", "tasks", "explore_request_understanding", "explore_clarification_gate", "explore_triage", "explore_evidence_plan", "explore_evidence_collection", "explore_ci_barrier", "explore_evidence_normalization", "explore_outcome_synthesis", "explore_review", "explore_request_profile", "explore_evidence_digest", "explore_delta", "explorer", "explorer_intake", "explorer_discovery", "explorer_decision", "explorer_artifact", "explorer_distill", "explorer_review", "implement", "test", "review", "learning", "knowledge_synthesis", "knowledge_review"}
         loaded = {path.stem: load_manifest(path) for path in self.capabilities.glob("*.json")}
         self.assertEqual(expected, set(loaded))
         writers = {name for name, manifest in loaded.items() if any(path.mode == "write" for path in manifest.paths)}

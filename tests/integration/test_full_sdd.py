@@ -127,7 +127,7 @@ class FullSddIntegrationTests(unittest.TestCase):
                 "sdd_high",
             )
 
-            expected_workers = ["explore_request_understanding", "explore_clarification_gate", "explore_triage", "explore_evidence_plan", "explore_evidence_collection", "explore_ci_barrier", "explore_evidence_normalization", "explore_outcome_synthesis", "explore_review", "knowledge_synthesis", "purpose", "spec", "design", "tasks", "implement", "review", "knowledge_synthesis", "knowledge_review"]
+            expected_workers = ["explore_request_profile", "explore_evidence_digest", "explore_outcome_synthesis", "knowledge_synthesis", "purpose", "spec", "design", "tasks", "implement", "review", "knowledge_synthesis", "knowledge_review"]
             self.assertEqual(expected_workers, provider.calls)
             running_progress = [item for item in progress if item.startswith("Running ")]
             for phase in result.phases:
@@ -143,8 +143,8 @@ class FullSddIntegrationTests(unittest.TestCase):
             self.assertEqual("exploration_map", exploration_map["kind"])
             self.assertEqual(exploration_map, outcome_bundle["exploration_map"])
             self.assertEqual(exploration_map, provider.phase_inputs["explore_outcome_synthesis"][0]["exploration_map"])
-            self.assertEqual(exploration_map, provider.phase_inputs["purpose"][0]["explore/outcome_bundle.json"]["exploration_map"])
-            self.assertEqual(exploration_map, provider.phase_inputs["design"][0]["explore/outcome_bundle.json"]["exploration_map"])
+            self.assertEqual(exploration_map, provider.phase_inputs["purpose"][0]["explore_bundle_view"]["exploration_map"])
+            self.assertEqual(exploration_map, provider.phase_inputs["design"][0]["explore_bundle_view"]["exploration_map"])
             self.assertTrue((result.snapshot_path / "state.json").is_file())
             strategy = json.loads((result.snapshot_path / "strategy.json").read_text(encoding="utf-8"))
             self.assertEqual("SDD", strategy["strategy"])
@@ -176,12 +176,11 @@ class FullSddIntegrationTests(unittest.TestCase):
 
             self.assertEqual("success", result.outcome)
             self.assertEqual(2, provider.calls.count("purpose"))
-            self.assertIn("purpose.md", result.artifacts)
+            self.assertIn("purpose/bundle.json", result.artifacts)
             repair_prompt = provider.proposal_prompts[1]
             self.assertIn('"repair"', repair_prompt)
-            self.assertIn("required section must appear once: Problem", repair_prompt)
-            self.assertIn('"required_heading": "# Purpose v1"', repair_prompt)
-            self.assertIn('"required_sections"', repair_prompt)
+            self.assertIn("explore stage output must be valid JSON", repair_prompt)
+            self.assertIn('"kind": "purpose_bundle"', repair_prompt)
             self.assertIn("Missing the controller-required sections.", repair_prompt)
 
     def test_exhausted_proposal_repair_records_validation_failure_without_artifact(self) -> None:
@@ -191,7 +190,7 @@ class FullSddIntegrationTests(unittest.TestCase):
             entry = write_analysis_artifact(repository)
             provider = RepairProposalProvider([malformed, malformed])
 
-            with self.assertRaisesRegex(Exception, "required section must appear once: Problem"):
+            with self.assertRaisesRegex(Exception, "valid JSON"):
                 run_with_flow(
                     Orchestrator(repository, HarnessConfig(provider="local"), provider),
                     f"Implement {entry}",
@@ -202,11 +201,11 @@ class FullSddIntegrationTests(unittest.TestCase):
             store = StateStore(repository)
             state = store.load()
             self.assertEqual("failed", state.status.value)
-            self.assertNotIn("purpose.md", state.artifacts)
+            self.assertNotIn("purpose/bundle.json", state.artifacts)
             self.assertIn("validation/purpose-failure.json", state.artifacts)
             failure = store.artifacts.read_json("validation/purpose-failure.json")
             self.assertEqual("purpose", failure["phase"])
-            self.assertEqual("purpose.md", failure["artifact"])
+            self.assertEqual("purpose/bundle.json", failure["artifact"])
             self.assertEqual(["original", "repair"], [item["attempt"] for item in failure["attempts"]])
             self.assertTrue(all(str(item["job_result"]).startswith("jobs/J") for item in failure["attempts"]))
 
@@ -384,7 +383,7 @@ class FullSddIntegrationTests(unittest.TestCase):
                     "Implement docs/explorer/improvements/coverage",
                     "sdd_high",
                 )
-            self.assertEqual(["explore_request_understanding", "explore_clarification_gate", "explore_triage", "explore_evidence_plan", "explore_evidence_collection", "explore_ci_barrier", "explore_evidence_normalization", "explore_outcome_synthesis", "explore_review", "knowledge_synthesis", "purpose", "spec", "design", "tasks"], provider.calls)
+            self.assertEqual(["explore_request_profile", "explore_evidence_digest", "explore_outcome_synthesis", "knowledge_synthesis", "purpose", "spec", "design", "tasks"], provider.calls)
 
     def test_full_sdd_accepts_deferred_scope_with_reason(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -426,7 +425,7 @@ class FullSddIntegrationTests(unittest.TestCase):
             )
 
             self.assertEqual("EXPLORE_BUNDLE", result.strategy.strategy)
-            self.assertEqual(["explore_request_understanding", "explore_clarification_gate", "explore_triage", "explore_evidence_plan", "explore_evidence_collection", "explore_ci_barrier", "explore_evidence_normalization", "explore_outcome_synthesis", "explore_review", "knowledge_synthesis"], provider.calls)
+            self.assertEqual(["explore_request_profile", "explore_evidence_digest", "explore_outcome_synthesis", "knowledge_synthesis"], provider.calls)
             self.assertFalse((repository / "feature.py").exists())
             self.assertIn("explore/outcome_bundle.json", result.artifacts)
             self.assertIn("published/explore-handoff.json", result.artifacts)

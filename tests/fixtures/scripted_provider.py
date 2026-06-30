@@ -100,9 +100,11 @@ def explore_outcome_bundle() -> str:
         "triage": {"complexity": "local_change", "ambiguity": "clear", "risk": "low", "evidence_depth": "standard"},
         "evidence": [{
             "id": "E1",
+            "kind": "knowledge",
             "claim": "The deterministic fixture request is bounded enough for PURPOSE.",
             "status": "supported",
             "confidence": "high",
+            "severity": "info",
             "sources": [{"type": "knowledge", "description": "Scripted provider fixture evidence."}],
         }],
         "exploration_map": {
@@ -127,6 +129,10 @@ def explore_outcome_bundle() -> str:
                 "handoff_phase": "design",
             }],
             "verification_surfaces": [],
+            "existing_functionality": [],
+            "similar_functionality": [],
+            "structural_signals": [],
+            "security_signals": [],
             "handoff_notes": {"purpose": [], "design": [], "tasks": []},
         },
         "entries": [{
@@ -245,7 +251,20 @@ def synthesized_explorer_output(inputs: dict[str, object]) -> str:
 
 MARKDOWN = {
     "explore": explore_outcome_bundle(),
-    "purpose": "# Purpose v1\n## Problem\nImplement the request.\n## Scope\nOne bounded change.\n## Approach\nUse controller gates.\n## Exclusions\nNo unrelated work.\n## Acceptance Outline\nTests pass.\n",
+    "purpose": json.dumps({
+        "schema_version": 1,
+        "kind": "purpose_bundle",
+        "summary": "Implement the request.",
+        "selected_entries": ["entry-1"],
+        "implementation_mode": "direct_patch",
+        "problem": "Implement the request.",
+        "scope": "One bounded change.",
+        "approach": "Use controller gates.",
+        "structural_work": [],
+        "exclusions": ["No unrelated work."],
+        "acceptance_outline": ["Tests pass."],
+        "evidence_refs": ["E1"],
+    }, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
     "spec": "# Spec v1\n## Behavioral Requirements\nThe feature works.\n## Acceptance Criteria\nController tests pass.\n",
     "design": "# Design v1\n## Boundaries\nRepository only.\n## Invariants\nController owns state.\n## Implementation Approach\nWrite feature.py.\n## Unit Test Design\nCheck content.\n## Integration Test Design\nRun a process.\n## End-to-End Test Design\nComplete the pipeline.\n",
     "implement": "# Implementation v1\n## Changes\nUpdated feature.py.\n## Evidence\nController tests must verify it.\n",
@@ -283,15 +302,10 @@ class ScriptedProvider:
             *MARKDOWN,
             "tasks",
             "review",
-            "explore_request_understanding",
-            "explore_clarification_gate",
-            "explore_triage",
-            "explore_evidence_plan",
-            "explore_evidence_collection",
-            "explore_ci_barrier",
-            "explore_evidence_normalization",
+            "explore_request_profile",
+            "explore_evidence_digest",
+            "explore_delta",
             "explore_outcome_synthesis",
-            "explore_review",
             "explorer_intake",
             "explorer_discovery",
             "explorer_decision",
@@ -317,87 +331,61 @@ class ScriptedProvider:
         except (IndexError, json.JSONDecodeError):
             pass
 
-        if phase == "explore_request_understanding":
+        if phase == "explore_request_profile":
             output = json.dumps({
                 "schema_version": 1,
-                "phase": "explore_request_understanding",
-                "intent": "implement_request",
+                "phase": "explore_request_profile",
                 "summary": "Implement the request.",
-                "mentioned_surfaces": [],
-                "explicit_constraints": [],
-                "unclear_parts": [],
                 "request_type": "feature",
-            })
-        elif phase == "explore_clarification_gate":
-            output = json.dumps({
-                "schema_version": 1,
-                "phase": "explore_clarification_gate",
-                "status": "continue",
-                "clarification_questions": [],
-                "rationale": "The deterministic fixture request is bounded.",
-            })
-        elif phase == "explore_triage":
-            output = json.dumps({
-                "schema_version": 1,
-                "phase": "explore_triage",
                 "complexity": "local_change",
                 "ambiguity": "clear",
-                "novelty": "known_repo_pattern",
                 "risk": "low",
                 "evidence_depth": "standard",
-                "rationale": "The fixture is small and deterministic.",
+                "request_parts": ["Implement the request."],
+                "constraints": [],
+                "evidence_questions": ["Is the request bounded enough for PURPOSE?"],
+                "gatherers": ["code", "knowledge", "ci"],
+                "clarification_questions": [],
             })
-        elif phase == "explore_evidence_plan":
+        elif phase == "explore_evidence_digest":
             output = json.dumps({
                 "schema_version": 1,
-                "phase": "explore_evidence_plan",
-                "required_gatherers": ["code", "knowledge"],
-                "optional_gatherers": ["ci"],
-                "ci_requirement": "optional",
-                "questions": ["Is the request bounded enough for PURPOSE?"],
-                "skip_reason": {"web": "No external current fact is required."},
-            })
-        elif phase == "explore_evidence_collection":
-            output = json.dumps({
-                "schema_version": 1,
-                "phase": "explore_evidence_collection",
+                "phase": "explore_evidence_digest",
                 "evidence": [{
-                    "id": "R1",
+                    "id": "E1",
+                    "kind": "knowledge",
                     "claim": "The deterministic fixture request is bounded enough for PURPOSE.",
                     "status": "supported",
                     "confidence": "high",
+                    "severity": "info",
                     "sources": [{"type": "knowledge", "description": "Scripted provider fixture evidence."}],
                 }],
                 "blockers": [],
             })
-        elif phase == "explore_ci_barrier":
+        elif phase == "explore_delta":
+            request = inputs.get("evidence_request", {}) if isinstance(inputs.get("evidence_request"), dict) else {}
             output = json.dumps({
                 "schema_version": 1,
-                "phase": "explore_ci_barrier",
-                "ci_requirement": "optional",
-                "status": "ready",
-                "evidence": [],
-                "blockers": [],
-            })
-        elif phase == "explore_evidence_normalization":
-            output = json.dumps({
-                "schema_version": 1,
-                "phase": "explore_evidence_normalization",
+                "kind": "explore_delta_bundle",
+                "request_id": str(request.get("request_id", "ER1")),
+                "questions_answered": request.get("questions", []),
                 "evidence": [{
-                    "id": "E1",
-                    "claim": "The deterministic fixture request is bounded enough for PURPOSE.",
+                    "id": "D1",
+                    "kind": "code",
+                    "claim": "The deterministic fixture delta answers the evidence request.",
                     "status": "supported",
                     "confidence": "high",
-                    "sources": [{"type": "knowledge", "description": "Scripted provider fixture evidence."}],
+                    "severity": "info",
+                    "sources": [{"type": "file", "path": "feature.py", "description": "Fixture delta evidence."}],
                 }],
             })
         elif phase == "explore_outcome_synthesis":
             document = json.loads(explore_outcome_bundle())
             if isinstance(inputs.get("exploration_map"), dict):
                 document["exploration_map"] = inputs["exploration_map"]
+            if isinstance(inputs.get("evidence"), list):
+                document["evidence"] = inputs["evidence"] or document["evidence"]
             output = json.dumps(document, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
-        elif phase == "explore_review":
-            output = "# Review v1\n## Verdict\nAPPROVE\n## Findings\nThe deterministic outcome bundle is evidence-backed.\n"
         elif phase == "knowledge_synthesis":
             if inputs.get("source") == "explorer":
                 output = synthesized_explorer_output(inputs)
