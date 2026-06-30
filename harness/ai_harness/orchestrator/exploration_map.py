@@ -71,6 +71,66 @@ def _source_paths(evidence: Sequence[Mapping[str, object]]) -> dict[str, list[st
     return paths_by_evidence
 
 
+def _first_unambiguous_path(evidence_refs: Sequence[str], paths_by_evidence: Mapping[str, list[str]]) -> str:
+    paths: list[str] = []
+    for evidence_ref in evidence_refs:
+        for path in paths_by_evidence.get(evidence_ref, []):
+            if path not in paths:
+                paths.append(path)
+    return paths[0] if len(paths) == 1 else ""
+
+
+def _drop_empty_optional_strings(item: dict[str, object], fields: Sequence[str]) -> None:
+    for field in fields:
+        if field in item and not _text(item.get(field)):
+            del item[field]
+
+
+def _valid_evidence_refs(value: object, evidence_ids: set[str]) -> list[str]:
+    refs: list[str] = []
+    for evidence_ref in _strings(value):
+        if evidence_ref in evidence_ids and evidence_ref not in refs:
+            refs.append(evidence_ref)
+    return refs
+
+
+def normalize_exploration_map(
+    exploration_map: Mapping[str, object],
+    evidence: Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    """Repair derivable map fields without making semantic decisions."""
+    evidence_ids = {_text(item.get("id")) for item in evidence if _text(item.get("id"))}
+    paths_by_evidence = _source_paths(evidence)
+    normalized: dict[str, object] = dict(exploration_map)
+
+    for section in (
+        "surfaces", "behaviors", "constraints", "risks", "unknowns",
+        "candidate_work_shapes", "verification_surfaces",
+        "existing_functionality", "similar_functionality", "structural_signals",
+        "security_signals",
+    ):
+        raw_items = normalized.get(section)
+        if not isinstance(raw_items, list):
+            continue
+        items: list[dict[str, object]] = []
+        for raw_item in raw_items:
+            if not isinstance(raw_item, Mapping):
+                continue
+            item = dict(raw_item)
+            for refs_field in ("evidence_refs", "supporting_evidence_refs", "counterevidence_refs"):
+                if refs_field in item:
+                    item[refs_field] = _valid_evidence_refs(item.get(refs_field), evidence_ids)
+            evidence_refs = _strings(item.get("evidence_refs"))
+            if not _text(item.get("path")) and evidence_refs:
+                resolved_path = _first_unambiguous_path(evidence_refs, paths_by_evidence)
+                if resolved_path:
+                    item["path"] = resolved_path
+            _drop_empty_optional_strings(item, ("path", "severity", "handoff_phase", "best_resolved_by"))
+            items.append(item)
+        normalized[section] = items
+    return normalized
+
+
 def _surface_kind(observation: Mapping[str, object]) -> str:
     kind = _text(observation.get("kind")).casefold()
     path = _text(observation.get("path")).casefold()
@@ -149,7 +209,7 @@ class ExplorationMapBuilder:
         surfaces = self._surfaces(paths_by_evidence)[:_SURFACE_LIMIT]
         behaviors = self._behaviors(evidence)[:_BEHAVIOR_LIMIT]
         constraints = self._constraints()
-        risks = self._risks(surfaces, evidence)[:_RISK_LIMIT]
+        risks = self._risks(evidence, paths_by_evidence)[:_RISK_LIMIT]
         unknowns = self._unknowns(evidence)
         verification = self._verification_surfaces(surfaces, risks)[:_VERIFICATION_LIMIT]
         work_shapes = self._candidate_work_shapes(risks, unknowns, surfaces)
@@ -277,20 +337,27 @@ class ExplorationMapBuilder:
         return constraints
 
     @staticmethod
-    def _risks(surfaces: Sequence[Mapping[str, object]], evidence: Sequence[Mapping[str, object]]) -> list[dict[str, object]]:
+    def _risks(
+        evidence: Sequence[Mapping[str, object]],
+        paths_by_evidence: Mapping[str, list[str]],
+    ) -> list[dict[str, object]]:
         risks: list[dict[str, object]] = []
         for item in evidence:
             claim = _text(item.get("claim"))
             kind = _risk_kind(claim)
             if kind is not None:
-                _append_unique(risks, {
+                evidence_refs = [_text(item.get("id"))] if _text(item.get("id")) else []
+                risk = {
                     "id": f"K{len(risks) + 1}",
                     "kind": kind,
-                    "path": "",
                     "text": claim,
                     "severity": _confidence(item.get("confidence")),
-                    "evidence_refs": [_text(item.get("id"))] if _text(item.get("id")) else [],
-                })
+                    "evidence_refs": evidence_refs,
+                }
+                resolved_path = _first_unambiguous_path(evidence_refs, paths_by_evidence)
+                if resolved_path:
+                    risk["path"] = resolved_path
+                _append_unique(risks, risk)
         return risks
 
     @staticmethod
@@ -333,13 +400,16 @@ class ExplorationMapBuilder:
                 text = "Add or update regression coverage for this behavior."
             else:
                 continue
-            verification.append({
+            item = {
                 "id": f"V{len(verification) + 1}",
                 "kind": f"{kind}_verification",
-                "path": _text(risk.get("path")),
                 "text": text,
                 "evidence_refs": _strings(risk.get("evidence_refs")),
-            })
+            }
+            path = _text(risk.get("path"))
+            if path:
+                item["path"] = path
+            verification.append(item)
         return verification
 
     @staticmethod

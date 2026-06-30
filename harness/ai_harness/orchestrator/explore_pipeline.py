@@ -8,7 +8,7 @@ from typing import Callable, Protocol
 
 from ..phases import get_phase
 from .context import RunContext
-from .exploration_map import ExplorationMapBuilder
+from .exploration_map import ExplorationMapBuilder, normalize_exploration_map
 from .explore_evidence import ci_evidence_from_artifacts, compact_context_pack, context_pack, evidence_from_digest, merge_evidence
 
 
@@ -61,7 +61,7 @@ class ExplorePipelineService:
         digest["evidence"] = evidence
         self._ctx.artifacts.write_json("explore/evidence_digest.json", digest)
         self._ctx.state.record_artifact("explore/evidence_digest.json", "EXPLORE_EVIDENCE_DIGEST")
-        exploration_map = ExplorationMapBuilder(
+        raw_exploration_map = ExplorationMapBuilder(
             request_understanding=self._profile_as_request_understanding(profile),
             triage=self._profile_as_triage(profile),
             evidence_plan=self._profile_as_evidence_plan(profile),
@@ -71,6 +71,7 @@ class ExplorePipelineService:
             repository_observations=observations,
             related_improvements=related,
         ).build()
+        exploration_map = normalize_exploration_map(raw_exploration_map, evidence)
         self._ctx.artifacts.write_json("explore/exploration_map.json", exploration_map)
         self._ctx.state.record_artifact("explore/exploration_map.json", "EXPLORE")
         synthesis = self._invoke_json("explore_outcome_synthesis", {

@@ -8,7 +8,7 @@ from pathlib import Path
 PACKAGE = Path(__file__).resolve().parents[2] / "harness"
 sys.path.insert(0, str(PACKAGE))
 
-from ai_harness.orchestrator.exploration_map import ExplorationMapBuilder
+from ai_harness.orchestrator.exploration_map import ExplorationMapBuilder, normalize_exploration_map
 from ai_harness.phases import PHASE_DEFINITIONS, PhaseValidationError, get_phase
 from tests.fixtures.scripted_provider import explore_outcome_bundle, explore_outcome_synthesis, learning_output
 
@@ -66,6 +66,116 @@ class PhaseContractTests(unittest.TestCase):
         self.assertLessEqual(len(exploration_map["risks"]), 12)
         self.assertLessEqual(len(exploration_map["verification_surfaces"]), 12)
         self.assertEqual([], exploration_map["security_signals"])
+
+    def test_exploration_map_normalizer_resolves_paths_and_drops_empty_optionals(self) -> None:
+        evidence = [
+            {
+                "id": "E1",
+                "kind": "security",
+                "claim": "Subprocess input can be unsafe.",
+                "status": "supported",
+                "confidence": "high",
+                "sources": [{"type": "ci", "path": "harness/cli/runtime.py", "description": "Semgrep finding."}],
+            },
+            {
+                "id": "E2",
+                "kind": "test",
+                "claim": "Baseline pytest failed.",
+                "status": "supported",
+                "confidence": "high",
+                "sources": [{"type": "artifact", "artifact": "ci-signals.json", "description": "Pytest summary."}],
+            },
+            {
+                "id": "E3",
+                "kind": "code",
+                "claim": "Two paths are related.",
+                "status": "supported",
+                "confidence": "medium",
+                "sources": [
+                    {"type": "file", "path": "a.py", "description": "First path."},
+                    {"type": "file", "path": "b.py", "description": "Second path."},
+                ],
+            },
+        ]
+        exploration_map = {
+            "schema_version": 1,
+            "kind": "exploration_map",
+            "surfaces": [],
+            "behaviors": [],
+            "constraints": [],
+            "risks": [{"id": "K1", "kind": "security", "path": "", "text": "Risk", "severity": "", "evidence_refs": ["E1", "missing"]}],
+            "unknowns": [],
+            "candidate_work_shapes": [],
+            "verification_surfaces": [
+                {"id": "V1", "kind": "security_verification", "path": "", "text": "Verify security.", "evidence_refs": ["E1"]},
+                {"id": "V2", "kind": "regression_verification", "path": "", "text": "Verify baseline.", "evidence_refs": ["E2"]},
+                {"id": "V3", "kind": "regression_verification", "path": "", "text": "Verify ambiguity.", "evidence_refs": ["E3"]},
+            ],
+            "existing_functionality": [],
+            "similar_functionality": [],
+            "structural_signals": [],
+            "security_signals": [],
+            "handoff_notes": {"purpose": [], "design": [], "tasks": []},
+        }
+
+        normalized = normalize_exploration_map(exploration_map, evidence)
+
+        self.assertEqual("harness/cli/runtime.py", normalized["risks"][0]["path"])
+        self.assertNotIn("severity", normalized["risks"][0])
+        self.assertEqual(["E1"], normalized["risks"][0]["evidence_refs"])
+        self.assertEqual("harness/cli/runtime.py", normalized["verification_surfaces"][0]["path"])
+        self.assertNotIn("path", normalized["verification_surfaces"][1])
+        self.assertNotIn("path", normalized["verification_surfaces"][2])
+
+    def test_exploration_map_builder_outputs_valid_risk_verification_paths(self) -> None:
+        evidence = [
+            {
+                "id": "CI2",
+                "kind": "security",
+                "claim": "Detected user input entering a subprocess call unsafely.",
+                "status": "supported",
+                "confidence": "high",
+                "sources": [{"type": "ci", "path": "harness/cli/runtime.py", "artifact": "ci-signals.json", "description": "Semgrep finding."}],
+            },
+            {
+                "id": "CI4",
+                "kind": "test",
+                "claim": "Pytest failed on trunk baseline.",
+                "status": "supported",
+                "confidence": "high",
+                "sources": [{"type": "ci", "artifact": "ci-signals.json", "description": "Pytest summary."}],
+            },
+            {
+                "id": "E4",
+                "kind": "test",
+                "claim": "tests/unit/test_decision_menu.py provides regression coverage.",
+                "status": "supported",
+                "confidence": "high",
+                "sources": [{"type": "file", "path": "tests/unit/test_decision_menu.py", "description": "Regression test surface."}],
+            },
+        ]
+        exploration_map = ExplorationMapBuilder(
+            request_understanding={"summary": "Slash command UI", "explicit_constraints": [], "mentioned_surfaces": []},
+            triage={"complexity": "local_change", "ambiguity": "clear", "risk": "low", "evidence_depth": "standard"},
+            evidence_plan={"required_gatherers": ["code", "ci"], "optional_gatherers": [], "ci_requirement": "optional", "questions": []},
+            evidence_collection={"evidence": evidence, "blockers": []},
+            ci_barrier={"blockers": []},
+            evidence_normalization={"evidence": evidence},
+            repository_observations=[],
+            related_improvements=[],
+        ).build()
+        normalized = normalize_exploration_map(exploration_map, evidence)
+        bundle = json.loads(explore_outcome_bundle())
+        bundle["evidence"] = evidence
+        bundle["entries"][0]["evidence_refs"] = ["CI2"]
+        bundle["exploration_map"] = normalized
+
+        validated = get_phase("explore").validate(json.dumps(bundle))
+
+        verifications = {item["id"]: item for item in validated["exploration_map"]["verification_surfaces"]}
+        self.assertTrue(any(item.get("path") == "harness/cli/runtime.py" for item in verifications.values()))
+        self.assertTrue(any(item.get("path") == "tests/unit/test_decision_menu.py" for item in verifications.values()))
+        self.assertTrue(all(item.get("path") != "" for item in verifications.values()))
 
     def test_explore_outcome_synthesis_accepts_partial_worker_output(self) -> None:
         document = json.loads(explore_outcome_synthesis())
