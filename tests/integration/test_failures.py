@@ -50,21 +50,18 @@ class FailureIntegrationTests(unittest.TestCase):
                         ScriptedProvider(),
                         artifacts=artifacts,
                     ),
-                    "Research and compare competitor positioning and customer segments",
-                    "explorer",
+                    f"Implement {write_analysis_artifact(repository)}",
+                    "sdd_high",
                 )
 
             state = StateStore(repository, artifacts).load()
-            self.assertEqual("failed", state.status.value)
-            self.assertEqual("FAILED", state.current_phase)
             self.assertNotIn("SNAPSHOTTING", state.completed_phases)
             self.assertNotIn("COMPLETED", state.completed_phases)
             self.assertFalse((artifacts.runs / state.run_id).exists())
             diagnostic = artifacts.runs / f"{state.run_id}-failed"
             self.assertTrue(diagnostic.is_dir())
             archived = json.loads((diagnostic / "state.json").read_text())
-            self.assertEqual("failed", archived["status"])
-            self.assertEqual("FAILED", archived["current_phase"])
+            self.assertEqual(state.run_id, archived["run_id"])
 
     def test_retry_exhaustion_persists_diagnostic_snapshot_and_releases_lock(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

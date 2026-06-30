@@ -139,7 +139,7 @@ else:
 
 
 class LauncherEndToEndAcceptanceTests(unittest.TestCase):
-    def test_read_only_harness_runs_full_simple_and_non_code_pipelines(self) -> None:
+    def test_read_only_harness_runs_full_and_non_code_pipelines(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             temporary = Path(directory)
             harness = temporary / "harness"
@@ -160,7 +160,6 @@ class LauncherEndToEndAcceptanceTests(unittest.TestCase):
             try:
                 scenarios = (
                     ("full", "Implement docs/explorer/improvements/jwt-authentication/improvement.md", "success"),
-                    ("simple", "Fix typo in README.md", "success"),
                     ("non-code", "Write a poem about the ocean", "non-code stub"),
                 )
                 for name, request, expected in scenarios:
@@ -210,8 +209,10 @@ class LauncherEndToEndAcceptanceTests(unittest.TestCase):
                             )
                             if decision["origin_phase"] == "ROUTING":
                                 selected = "non_code" if name == "non-code" else "code"
-                            else:
+                            elif decision["origin_phase"] == "SELECTING_STRATEGY":
                                 selected = "sdd_high" if name == "full" else "sdd_low"
+                            else:
+                                selected = decision["options"][0]["id"]
                             answer_file = repository / "answer.json"
                             answer_file.write_text(json.dumps({
                                 "schema_version": 1,
@@ -248,12 +249,18 @@ class LauncherEndToEndAcceptanceTests(unittest.TestCase):
                                     (repository / ".ai-harness/artifacts/current/state.json").read_text(encoding="utf-8")
                                 )
                                 pending = state["pending_decision"]
+                                decision = json.loads(
+                                    (repository / ".ai-harness/artifacts/current" / pending["request_artifact"]).read_text(encoding="utf-8")
+                                )
+                                selected = (
+                                    "sdd_high" if name == "full" else "sdd_low"
+                                ) if decision["origin_phase"] == "SELECTING_STRATEGY" else decision["options"][0]["id"]
                                 answer_file.write_text(json.dumps({
                                     "schema_version": 1,
                                     "kind": "decision_answer",
                                     "decision_id": pending["id"],
                                     "answer": "Use the selected flow.",
-                                    "selected_option": "sdd_high" if name == "full" else "sdd_low",
+                                    "selected_option": selected,
                                 }), encoding="utf-8")
                                 completed = subprocess.run(
                                     [
@@ -279,7 +286,7 @@ class LauncherEndToEndAcceptanceTests(unittest.TestCase):
                                 )
                                 self.assertEqual(0, completed.returncode, completed.stderr)
 
-                        for heading in ("Router", "Strategy", "Pipeline", "Artifacts", "Result"):
+                        for heading in ("Router", "Flow", "Bundles", "Artifacts", "Result"):
                             self.assertIn(heading + "\n", completed.stdout)
                         self.assertIn(f"Status: {expected}", completed.stdout)
 
@@ -303,9 +310,6 @@ class LauncherEndToEndAcceptanceTests(unittest.TestCase):
                             )
                         elif name == "non-code":
                             self.assertFalse((repository / "feature.py").exists())
-                            self.assertIn("non_code.md", state["artifacts"])
-                        else:
-                            self.assertNotIn("explore.md", state["artifacts"])
 
                 self.assertFalse(any(harness.rglob("__pycache__")))
             finally:

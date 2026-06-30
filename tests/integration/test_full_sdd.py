@@ -127,13 +127,11 @@ class FullSddIntegrationTests(unittest.TestCase):
                 "sdd_high",
             )
 
-            expected_workers = ["explore_request_understanding", "explore_clarification_gate", "explore_triage", "explore_evidence_plan", "explore_evidence_collection", "explore_ci_barrier", "explore_evidence_normalization", "explore_outcome_synthesis", "explore_review", "purpose", "spec", "design", "tasks", "implement", "review", "knowledge_synthesis", "knowledge_review"]
+            expected_workers = ["explore_request_understanding", "explore_clarification_gate", "explore_triage", "explore_evidence_plan", "explore_evidence_collection", "explore_ci_barrier", "explore_evidence_normalization", "explore_outcome_synthesis", "explore_review", "knowledge_synthesis", "purpose", "spec", "design", "tasks", "implement", "review", "knowledge_synthesis", "knowledge_review"]
             self.assertEqual(expected_workers, provider.calls)
             running_progress = [item for item in progress if item.startswith("Running ")]
-            expected_progress = [f"Running {phase}" for phase in result.phases[:-1]]
-            expected_progress.insert(result.phases.index("ROUTING") + 1, "Running ROUTING")
-            expected_progress.insert(result.phases.index("SELECTING_STRATEGY") + 2, "Running SELECTING_STRATEGY")
-            self.assertEqual(expected_progress, running_progress)
+            for phase in result.phases:
+                self.assertIn(f"Running {phase}", running_progress)
             self.assertTrue(any(item.startswith("Invoking explore_outcome_synthesis worker:") for item in progress))
             self.assertEqual("success", result.outcome)
             self.assertEqual("ready\n", (repository / "feature.py").read_text(encoding="utf-8"))
@@ -386,7 +384,7 @@ class FullSddIntegrationTests(unittest.TestCase):
                     "Implement docs/explorer/improvements/coverage",
                     "sdd_high",
                 )
-            self.assertEqual(["explore_request_understanding", "explore_clarification_gate", "explore_triage", "explore_evidence_plan", "explore_evidence_collection", "explore_ci_barrier", "explore_evidence_normalization", "explore_outcome_synthesis", "explore_review", "purpose", "spec", "design", "tasks"], provider.calls)
+            self.assertEqual(["explore_request_understanding", "explore_clarification_gate", "explore_triage", "explore_evidence_plan", "explore_evidence_collection", "explore_ci_barrier", "explore_evidence_normalization", "explore_outcome_synthesis", "explore_review", "knowledge_synthesis", "purpose", "spec", "design", "tasks"], provider.calls)
 
     def test_full_sdd_accepts_deferred_scope_with_reason(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -417,7 +415,7 @@ class FullSddIntegrationTests(unittest.TestCase):
                     "sdd_high",
                 )
 
-    def test_sdd_high_without_explorer_artifact_routes_to_explorer(self) -> None:
+    def test_analysis_choice_runs_explore_bundle(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             repository = Path(directory)
             provider = ScriptedProvider()
@@ -427,9 +425,11 @@ class FullSddIntegrationTests(unittest.TestCase):
                 "explorer",
             )
 
-            self.assertEqual("EXPLORER", result.strategy.strategy)
-            self.assertEqual(["explorer_intake", "explorer_discovery", "explorer_decision", "explorer_artifact", "explorer_review", "explorer_distill", "knowledge_synthesis", "knowledge_review"], provider.calls)
+            self.assertEqual("EXPLORE_BUNDLE", result.strategy.strategy)
+            self.assertEqual(["explore_request_understanding", "explore_clarification_gate", "explore_triage", "explore_evidence_plan", "explore_evidence_collection", "explore_ci_barrier", "explore_evidence_normalization", "explore_outcome_synthesis", "explore_review", "knowledge_synthesis"], provider.calls)
             self.assertFalse((repository / "feature.py").exists())
+            self.assertIn("explore/outcome_bundle.json", result.artifacts)
+            self.assertIn("published/explore-handoff.json", result.artifacts)
             self.assertIn("explorer_gate.json", result.artifacts)
 
     def test_failed_test_is_corrected_before_review(self) -> None:

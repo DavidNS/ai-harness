@@ -1,111 +1,128 @@
-# Architecture Principles
+# Architecture
 
-This repository is both a Python project and an operating context for agents.
-Architecture decisions must make the code easier for humans and agents to
-inspect, change, validate, and recover. A smaller file is only an improvement
-when it reduces context load, clarifies ownership, and makes future changes
-more local.
+This repository is an AI coding harness.
 
-## Repository As Context
+It must be readable for both software engineers and machines.
 
-Agents do not learn from intent alone. They are steered by the repository they
-see: file layout, names, tests, docs, lint rules, CI, scripts, errors, and
-review comments. Treat those surfaces as part of the architecture.
+A smaller file is only better when it clarifies ownership, reduces context load, and makes validation more local.
 
-- Keep stable engineering principles in this file.
-- Keep temporary plans, task breakdowns, and investigation notes outside this
-  file.
-- Keep live refactor state, worker orders, decisions, and completed history in
-  distinct docs so startup context stays small.
-- Prefer executable guardrails over repeated human reminders.
-- Make validation commands discoverable and cheap enough to run during normal
-  work.
-- Write docs that constrain future behavior, not docs that only narrate past
-  cleanup.
+We split by domain to make boundaries clear, and we use hexagonal architecture to increase isolation.
 
-## Ownership Boundaries
+We try to keep agent context as small and isolated as possible.
 
-Organize code by responsibility, not by chronology or the shape of an old large
-file. Every module should have one primary reason to change and a name that
-makes that reason visible.
+## Purpose and core ideas of this repo
 
-- Orchestration owns sequencing, control-flow decisions, phase transitions, and
-  final run outcomes.
-- Stores own persistence, checksums, resume validation, and mutable state
-  invariants.
-- Publishers own artifact formatting and publication details.
-- Provider gateways own external process invocation, worker job artifacts, and
-  provider-specific call mechanics.
-- Phase services own bounded phase semantics; they should not own the global
-  execution loop.
-- UI modules own interaction and rendering; they should not contain domain
-  policy.
-- Pure parsing, projection, and classification helpers should stay stateless
-  when behavior can be expressed without hidden mutation.
+We are building a portable tool, as plug and play as possible, that automates the full software engineering release lifecycle.
 
-Reject boundaries that only move lines. Thin delegators, vague utility modules,
-and helpers that receive an entire controller object usually hide coupling
-instead of removing it.
+The tool includes a CLI and a UI.
 
-## Agent Legibility
+The tool triggers pipelines composed of Python code, Codex/Claude, and git CI.
 
-Design for bounded reading. A future worker should be able to inspect one
-boundary, understand its dependencies, run focused validation, and report useful
-evidence without loading the whole repository.
+The idea is to run a pipeline that orchestrates steps made up of deterministic code and AI workers in charge of the nondeterministic steps.
 
-- Prefer explicit constructor dependencies over `__getattr__`, implicit parent
-  mutation, or broad pass-through objects.
-- Prefer explicit return values over hidden cross-service side effects.
-- Keep state mutation easy to audit: the code that mutates an invariant should
-  be close to the code that validates it.
-- Route context intentionally. Do not dump the whole workspace into an agent
-  when a scoped file set and a concrete question would do.
-- Require evidence for architectural claims: file references, tests, failure
-  output, or observed behavior.
-- Allow workers and reviewers to push back when a request expands scope or
-  conflicts with existing ownership.
+We try to make the pipelines as reproducible as possible, so each AI step has one clear task.
 
-## Feedback To Guardrails
+The harness acts as an orchestrator and guides each step of the pipeline.
 
-Human attention is the scarce resource. If the same review comment, bug, or
-agent mistake appears more than once, convert it into a durable guardrail.
+### The lifecycle of the SE
 
-Possible guardrails include:
+The main phases of our software engineering lifecycle are based on current SDD literature:
 
-- focused unit or integration tests;
-- lint or type-check coverage;
-- clearer architecture rules;
-- worker instructions or review checklists;
-- scripts that make the right validation path obvious;
-- better error messages or artifact records.
+- `EXPLORE`, `PROPOSAL`, `SPEC`, `DESIGN`, `TASKS`, `IMPLEMENT`, `TEST`, `REVIEW`, `ARCHIVE`
 
-Guardrails should be native to the repository where possible. Tests, lints,
-types, docs, and scripts age better than opaque external process rules.
+But we make a few changes.
 
-## Executable Architecture Checks
+We perform a `TDD_LOOP` at the end instead of a simple implement-test-review sequence.
 
-`scripts/check_architecture.py` is the repo-native architecture gate. It fails
-closed on graph/dispatcher drift, phase resource drift, forbidden orchestrator
-imports, and unauthorized state mutation paths. Size and coupling budgets are
-reported as warnings first so cleanup pressure is visible without blocking
-normal work until the boundary is ready to tighten.
+TDD loop steps:
 
-## Refactor Acceptance
+- Create the required test code. The tests should fail at first and describe the expected behavior.
+- Create the code that makes the tests pass.
+- Review that all criteria are met: tests match the described behavior, code matches the tests, and all tests are green.
+- Iterate until the reviewer approves or escalation is required.
 
-A refactor is acceptable when:
+We also extract learning at the end of the `EXPLORE` phase and at the end of `TDD_LOOP`.
 
-- the entrypoint is easier to read;
-- the new boundary can be described in one sentence;
-- dependency direction is clearer;
-- state mutation is no less auditable than before;
-- behavior is preserved unless a behavior change was explicitly approved;
-- validation covers the changed responsibility.
+So the simplified harness lifecycle looks more like this:
 
-A refactor is not acceptable when it only reduces line count, creates several
-files with the same mixed responsibility, hides coupling behind pass-through
-functions, or requires readers to reconstruct behavior from scattered side
-effects.
+- `EXPLORE`, `KNOWLEDGE_PHASE_EXTRACTOR`, `PROPOSAL`, `SPEC`, `DESIGN`, `TASKS`, `TDD_LOOP`, `KNOWLEDGE_PHASE_EXTRACTOR`
 
-Prefer small reversible steps. Each step should name the boundary, the intended
-ownership improvement, the files allowed to change, and the validation command
-that proves behavior still holds.
+Any phase can escalate a problem to a previous phase or ask the user if something is unclear. For example, design may say not to touch a file, but implementation may require it. Or an unexpected bug may appear. In that case, the escalation process decides how to resolve it.
+
+On top of that, the release lifecycle follows trunk-based development and powers the SDD lifecycle with artifacts generated by GitHub or GitLab CI.
+
+So the full lifecycle looks like this:
+
+- There is a main branch with generated artifacts that contain repository status information.
+- We create our feature branch.
+- We start the full SDD lifecycle.
+- The `EXPLORE` phase uses the main branch artifacts, if they exist, and extracts relevant repository status information from CI output artifacts.
+- The next SDD phases use that information to make better decisions.
+- At the end of SDD, our code is pushed to the feature branch.
+- Push to feature triggers feature CI steps.
+- A merge request to main is created, reviewed, and approved manually. It has to pass the CI checks.
+- When the merge request is merged to main, the CI pipeline creates new main artifacts.
+- We repeat the loop.
+
+So the real harness pipeline is made of SDD steps plus trunk-based development. One side lives in GitHub or GitLab; the other runs locally.
+
+### The learning phases purpose and expectations
+
+The problem the learning phases try to solve is not to create a knowledge base like Jira.
+
+What we want is a regenerative database with information about the folders it is about to touch. This helps agents complete tasks with fewer tokens and fewer iterations. We also want a way to generate human-readable files from this learning system, not just fast-access data for agents.
+
+We want to store relevant information about repositories, code, flows, and current behavior. Things that help agents find the information they need faster.
+
+We also want this to be regenerative. If you delete the DB, it should be able to start fresh and eventually reach the same state again.
+
+Another goal is to extract that machine-oriented DB structure and turn it into more human-readable files. For example, Markdown docs that describe domains, flows, interactions, ideas behind each part of the code, and diagrams.
+
+
+#### Learning pieces
+
+The learning pieces are:
+
+- Source of truth (SOT): lives in git files.
+- Local agents DB (LADB): from the source of truth we create a local copy DB for agents.
+- Human knowledge files (HKF): from the source of truth we create human-readable files.
+- Knowledge patches (KP): data learned by our SDD flow during `KNOWLEDGE_PHASE_EXTRACTOR`.
+- KP to SOT pipeline: flow that automatically merges the patches into the source of truth.
+- SOT to LADB script: script that erases and repopulates LADB from SOT.
+- SOT to HKF pipeline: flow that generates HKF from SOT.
+
+
+### The SDD detailed phases
+
+The main problem is to break the meaning of each step into subphases. That is why each SDD phase is not a single step, but a bundle of them.
+
+#### EXPLORE
+
+Breaks down the user's initial intent and gathers the information needed to decide whether the request can be implemented or should be rejected. It does not make decisions; it only collects context for the next phases.
+
+#### PROPOSAL
+
+Evaluates the gathered information and decides the next step: proceed, reject, ask for clarification, take a different approach, or adjust the scope.
+
+#### SPEC
+
+Turns the proposal into a formal specification.
+
+#### DESIGN
+
+Creates an implementation plan based on the specification.
+
+#### TASKS
+
+Splits the plan into smaller tasks that can be executed sequentially or in parallel. Each task clearly defines the steps needed to complete the implementation.
+
+### TDD_LOOP
+
+Implements the tasks following a Test-Driven Development (TDD) workflow.
+
+
+### The full overview
+
+- CLI + UI: to activate the harness lifecycle
+- Python harness tool + Codex/Claude + git CI
+- SDD pipeline where we try to improve each step by breaking it into smaller, reproducible steps.

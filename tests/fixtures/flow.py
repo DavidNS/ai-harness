@@ -6,7 +6,8 @@ from typing import Any
 
 def _normalize_option(selected_option: str) -> str:
     return {
-        "analysis": "explorer",
+        "analysis": "explore_bundle",
+        "explorer": "explore_bundle",
         "easy_implementation": "sdd_low",
         "full_implementation": "sdd_high",
     }.get(selected_option, selected_option)
