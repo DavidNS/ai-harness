@@ -306,7 +306,7 @@ class RecoveryIntegrationTests(unittest.TestCase):
             self.assertEqual(interrupted.run_id, StateStore(repository).load().run_id)
             self.assertEqual(before, state_path.read_bytes())
 
-    def test_show_runs_prints_self_contained_commands(self) -> None:
+    def test_show_runs_prints_compact_rows_and_action_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             repository = Path(directory)
             active = write_active_state(repository, "run-a")
@@ -320,10 +320,13 @@ class RecoveryIntegrationTests(unittest.TestCase):
             )
 
             self.assertEqual(0, completed.returncode, completed.stderr)
-            self.assertIn("Run ID: run-a", completed.stdout)
+            self.assertIn("[", completed.stdout)
+            self.assertIn("][active]: Request for run-a", completed.stdout)
+            self.assertIn("id: run-a", completed.stdout)
             self.assertIn(str(active.current), completed.stdout)
-            self.assertIn("--cwd", completed.stdout)
+            self.assertIn("resume:", completed.stdout)
             self.assertIn("--resume run-a", completed.stdout)
+            self.assertIn("archive:", completed.stdout)
             self.assertIn("--archive run-a", completed.stdout)
 
     def test_archive_requested_run_when_multiple_unfinished_runs_exist(self) -> None:

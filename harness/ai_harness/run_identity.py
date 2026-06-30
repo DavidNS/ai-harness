@@ -23,6 +23,36 @@ def is_timestamped_run_id(value: str) -> bool:
     return bool(_RUN_ID_RE.fullmatch(value))
 
 
+def run_id_datetime(value: str) -> datetime | None:
+    if not is_timestamped_run_id(value):
+        return None
+    try:
+        return datetime.strptime(value[:15], "%Y%m%dT%H%M%S").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def parse_timestamp(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def display_timestamp(value: datetime | None) -> str:
+    if value is None:
+        return "unknown date"
+    return value.astimezone().strftime("%d-%m-%Y %H:%M:%S")
+
+
 def short_run_id(value: object) -> str:
     text = str(value or "").strip()
     if not text:

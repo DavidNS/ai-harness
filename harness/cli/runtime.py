@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from ai_harness.run_identity import short_run_id
+from ai_harness.run_display import run_display_label
 
 from .bootstrap import OPEN_STATUSES, RUNNER
 
@@ -238,12 +238,7 @@ def _run_phase(state: dict[str, Any]) -> str:
 
 def _run_line(index: int | None, state: dict[str, Any], root: Path | None = None) -> str:
     prefix = f" {index}. " if index is not None else "- "
-    branch = _run_branch(root)
-    branch_text = f" branch={branch}" if branch else ""
-    return (
-        f"{prefix}{short_run_id(state.get('run_id'))} [{state.get('status', 'unknown')}] "
-        f"phase={_run_phase(state)}{branch_text} - {_run_title(root, state)}"
-    )
+    return f"{prefix}{run_display_label(root, state)}"
 
 
 def _print_unfinished_runs(repository: Path, runs: list[tuple[Path, dict[str, Any]]] | None = None, *, heading: str = "Unfinished runs") -> None:

@@ -89,3 +89,30 @@ Learning pieces would be the follow:
 - KP to SOT pipeline: Flow that allows automatically merge the patches into source of true.
 - SOT to LADB script: Script that erases and populates again from SOT to LADB.
 - SOT to HKF pipeline: Flow that allows us to generate HKF from SOT.
+
+
+### The SDD detailed phases
+
+### EXPLORE
+
+Breaks down the user's initial intent and gathers the information needed to determine whether the request can be implemented or should be rejected. It does not make decisions, only collects context for the next phases.
+
+### PROPOSAL
+
+Evaluates the gathered information and decides the next step: proceed, reject, ask the user for clarification, take a different approach, or adjust the scope.
+
+### SPEC
+
+Transforms the proposal into a formal specification.
+
+### DESIGN
+
+Creates an implementation plan based on the specification.
+
+### TASK
+
+Splits the plan into smaller tasks that can be executed sequentially or in parallel. Each task clearly defines the steps required to complete the implementation.
+
+### TDD_LOOP
+
+Implements the tasks following a Test-Driven Development (TDD) workflow.

@@ -3,7 +3,8 @@ import unittest
 from datetime import datetime, timezone
 from unittest import mock
 
-from ai_harness.run_identity import new_run_id, run_id_date, run_id_token
+from ai_harness.run_display import run_display_label
+from ai_harness.run_identity import display_timestamp, new_run_id, parse_timestamp, run_id_date, run_id_datetime, run_id_token
 
 
 class RunIdentityTests(unittest.TestCase):
@@ -20,6 +21,41 @@ class RunIdentityTests(unittest.TestCase):
     def test_legacy_run_ids_remain_branch_name_compatible(self) -> None:
         self.assertEqual("legacy", run_id_date("abcdef123456"))
         self.assertEqual("abcdef123456", run_id_token("abcdef1234567890"))
+
+    def test_timestamped_run_ids_format_as_human_dates(self) -> None:
+        run_id = "20260630T123456Z-abcdef123456"
+        expected = datetime(2026, 6, 30, 12, 34, 56, tzinfo=timezone.utc).astimezone().strftime("%d-%m-%Y %H:%M:%S")
+
+        self.assertEqual(expected, display_timestamp(run_id_datetime(run_id)))
+
+    def test_parse_timestamp_accepts_iso_offsets_and_zulu(self) -> None:
+        expected = datetime(2026, 6, 30, 12, 34, 56, tzinfo=timezone.utc).astimezone().strftime("%d-%m-%Y %H:%M:%S")
+
+        self.assertEqual(expected, display_timestamp(parse_timestamp("2026-06-30T12:34:56+00:00")))
+        self.assertEqual(expected, display_timestamp(parse_timestamp("2026-06-30T12:34:56Z")))
+
+    def test_run_display_label_uses_timestamped_id_and_title(self) -> None:
+        state = {
+            "run_id": "20260630T123456Z-abcdef123456",
+            "status": "completed",
+            "user_input": "Improve launcher run display",
+        }
+
+        expected = datetime(2026, 6, 30, 12, 34, 56, tzinfo=timezone.utc).astimezone().strftime("%d-%m-%Y %H:%M:%S")
+
+        self.assertEqual(f"[{expected}][completed]: Improve launcher run display", run_display_label(None, state))
+
+    def test_run_display_label_falls_back_to_legacy_state_timestamp(self) -> None:
+        state = {
+            "run_id": "abcdef123456",
+            "status": "active",
+            "user_input": "Fix tests",
+            "timestamps": {"started_at": "2026-06-30T12:34:56+00:00"},
+        }
+
+        expected = datetime(2026, 6, 30, 12, 34, 56, tzinfo=timezone.utc).astimezone().strftime("%d-%m-%Y %H:%M:%S")
+
+        self.assertEqual(f"[{expected}][active]: Fix tests", run_display_label(None, state))
 
 
 if __name__ == "__main__":

@@ -97,7 +97,7 @@ class RootLauncherIntegrationTests(unittest.TestCase):
             self.assertIn("Status: no run", status.stdout)
             self.assertNotIn("harness/run.py", status.stderr)
             self.assertEqual(0, runs.returncode, runs.stderr)
-            self.assertIn("No live runs found", runs.stdout)
+            self.assertIn("No runs found", runs.stdout)
 
     def test_verbose_and_dry_run_expose_backend_command(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -497,8 +497,7 @@ class RootLauncherIntegrationTests(unittest.TestCase):
                 self.assertEqual(0, process.returncode, decoded)
                 self.assertIn("AI Harness runs", decoded)
                 self.assertIn("Unfinished runs must be resolved before a new run", decoded)
-                self.assertIn("run-a", decoded)
-                self.assertIn("phase=DESIGN", decoded)
+                self.assertIn("][waiting_for_user]: Untitled harness run", decoded)
             finally:
                 try:
                     os.close(master)
