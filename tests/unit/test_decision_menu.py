@@ -599,12 +599,43 @@ class DecisionMenuTests(unittest.TestCase):
         self.assertEqual(1, run.call_count)
         prompt.assert_not_called()
 
-    def test_console_blocks_plain_request_when_multiple_unfinished_runs_require_selection(self) -> None:
+    def test_continue_completed_run_starts_next_bundle_from_snapshot(self) -> None:
         launcher = load_launcher()
-        namespace = launcher.argparse.Namespace(cwd=Path("/repo"), provider="local", verbose=False, dry_run=False, _recovery_blocked=True)
-        stderr = io.StringIO()
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            snapshot = repository / ".ai-harness" / "artifacts" / "runs" / "run-1"
+            (snapshot / "published").mkdir(parents=True)
+            (snapshot / "state.json").write_text(
+                '{"run_id":"run-1","status":"completed","user_input":"Original prompt","current_phase":"COMPLETED"}\n',
+                encoding="utf-8",
+            )
+            (snapshot / "run-title.json").write_text('{"title":"Explore launcher recovery"}\n', encoding="utf-8")
+            (snapshot / "published" / "explore-handoff.json").write_text('{"schema_version":1}\n', encoding="utf-8")
+            namespace = launcher.argparse.Namespace(cwd=repository, provider="local", verbose=False, dry_run=False, prompt_file=None)
 
-        with mock.patch.object(launcher, "_start") as start, contextlib.redirect_stderr(stderr):
+            def choose(_title_lines, items, **_kwargs):
+                return items[0]
+
+            with mock.patch.object(launcher, "_unfinished_runs", return_value=[]), \
+                mock.patch.object(launcher, "_menu_prompt", side_effect=choose), \
+                mock.patch.object(launcher, "_start", return_value=0) as start:
+                code = launcher._continue_completed_run(namespace)
+
+        self.assertEqual(0, code)
+        _, _, kwargs = start.mock_calls[0]
+        self.assertEqual("proposal", kwargs["flow"])
+        self.assertEqual("run-1", kwargs["source_run"])
+        self.assertIn("Explore launcher recovery", kwargs["request_override"])
+
+    def test_console_blocks_plain_request_when_unfinished_runs_require_selection(self) -> None:
+        launcher = load_launcher()
+        namespace = launcher.argparse.Namespace(cwd=Path("/repo"), provider="local", verbose=False, dry_run=False)
+        stderr = io.StringIO()
+        unfinished = [(Path("/tmp/current-run"), {"run_id": "run-1", "status": "active"})]
+
+        with mock.patch.object(launcher, "_unfinished_runs", return_value=unfinished), \
+            mock.patch.object(launcher, "_start") as start, \
+            contextlib.redirect_stderr(stderr):
             code = launcher._console_command(namespace, "Fix tests")
 
         self.assertEqual(1, code)

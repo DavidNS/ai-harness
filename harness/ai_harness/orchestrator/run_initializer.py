@@ -6,7 +6,6 @@ all deps are constructor-injected.
 """
 from __future__ import annotations
 
-import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -18,10 +17,19 @@ from ..bundle_inputs import import_source_run_artifacts
 from ..models import Complexity, Mode, RunState, RunStatus, Strategy
 from ..providers.base import Provider
 from ..router import RouteDecision, route_request
+from ..run_identity import new_run_id
 from ..stores.artifact import ArtifactStore
 from ..stores.state import StateStore
 from ..strategy import StrategyDecision, explorer_strategy_decision, strategy_audit
 from ..pipeline.state_machine import graph_for
+
+
+def _title_from_request(request: str) -> str:
+    for line in request.splitlines():
+        title = " ".join(line.strip().split())
+        if title:
+            return title[:120]
+    return "Untitled harness run"
 
 
 def _routing_permissions(timeout_seconds: float) -> dict[str, object]:
@@ -78,10 +86,15 @@ class RunInitializer:
         route_decision: RouteDecision | None = None,
         strategy_decision: StrategyDecision | None = None,
     ) -> InitResult:
-        run_id = uuid.uuid4().hex
+        run_id = new_run_id()
         if not self._external_runtime:
             self._artifacts = ArtifactStore.for_run(self._target, run_id)
             self._state = StateStore(self._target, self._artifacts)
+        self._artifacts.write_json("run-title.json", {
+            "schema_version": 1,
+            "title": _title_from_request(request),
+            "source": "prompt_first_line",
+        })
         route = route_decision or route_request(
             request,
             provider=self._provider,
@@ -113,6 +126,7 @@ class RunInitializer:
             status=status,
         )
         self._state.save(run_state)
+        self._state.record_artifact("run-title.json", current_phase)
         self._artifacts.write_json("route.json", {
             "mode": route.mode,
             "intent": route.intent,

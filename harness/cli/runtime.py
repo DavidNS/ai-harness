@@ -9,6 +9,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from ai_harness.run_identity import short_run_id
+
 from .bootstrap import OPEN_STATUSES, RUNNER
 
 
@@ -47,6 +49,89 @@ def _read_json(path: Path) -> dict[str, Any] | None:
     except (OSError, json.JSONDecodeError):
         return None
     return value if isinstance(value, dict) else None
+
+
+def _first_text_line(value: object) -> str:
+    if not isinstance(value, str):
+        return ""
+    for line in value.splitlines():
+        text = " ".join(line.strip().split())
+        if text:
+            return text
+    return ""
+
+
+def _markdown_section_first_line(text: str, heading: str) -> str:
+    marker = f"## {heading}"
+    lines = text.splitlines()
+    for index, line in enumerate(lines):
+        if line.strip().casefold() != marker.casefold():
+            continue
+        for candidate in lines[index + 1:]:
+            stripped = candidate.strip()
+            if stripped.startswith("## "):
+                return ""
+            if stripped:
+                return stripped.lstrip("# ").strip()
+    return ""
+
+
+def _run_title(root: Path | None, state: dict[str, Any]) -> str:
+    if root is not None:
+        title = _read_json(root / "run-title.json")
+        if title:
+            value = _first_text_line(title.get("title"))
+            if value:
+                return value[:120]
+        for artifact in ("published/explore-handoff.json", "published/explorer-handoff.json"):
+            handoff = _read_json(root / artifact)
+            if handoff:
+                entries = handoff.get("entries")
+                if isinstance(entries, list):
+                    for entry in entries:
+                        if isinstance(entry, dict):
+                            value = _first_text_line(entry.get("title"))
+                            if value:
+                                return value[:120]
+                value = _first_text_line(handoff.get("title"))
+                if value:
+                    return value[:120]
+        outcome = _read_json(root / "explore" / "outcome_bundle.json")
+        if outcome:
+            entries = outcome.get("entries")
+            if isinstance(entries, list):
+                for entry in entries:
+                    if isinstance(entry, dict):
+                        value = _first_text_line(entry.get("title"))
+                        if value:
+                            return value[:120]
+        purpose = root / "purpose.md"
+        if purpose.is_file():
+            try:
+                value = _markdown_section_first_line(purpose.read_text(encoding="utf-8"), "Problem")
+            except OSError:
+                value = ""
+            if value:
+                return value[:120]
+        tasks = _read_json(root / "tasks.json")
+        raw_tasks = tasks.get("tasks") if tasks else None
+        if isinstance(raw_tasks, list):
+            for task in raw_tasks:
+                if isinstance(task, dict):
+                    value = _first_text_line(task.get("title"))
+                    if value:
+                        return value[:120]
+    return (_first_text_line(state.get("user_input")) or "Untitled harness run")[:120]
+
+
+def _run_branch(root: Path | None) -> str:
+    if root is None:
+        return ""
+    git = _read_json(root / "git-run.json")
+    if not git:
+        return ""
+    branch = git.get("created_branch") or git.get("current_branch")
+    return str(branch).strip() if isinstance(branch, str) else ""
 
 
 def _candidate_live_dirs(repository: Path) -> list[Path]:
@@ -91,7 +176,31 @@ def _unfinished_runs(repository: Path) -> list[tuple[Path, dict[str, Any]]]:
         if not isinstance(state.get("run_id"), str):
             continue
         runs.append((current, state))
-    return sorted(runs, key=lambda item: (str(item[1].get("started_at", "")), str(item[1].get("run_id", ""))))
+    return sorted(runs, key=lambda item: (str(item[1].get("started_at", "")), str(item[1].get("run_id", ""))), reverse=True)
+
+
+def _completed_runs(repository: Path) -> list[tuple[Path, dict[str, Any]]]:
+    runs_root = repository / ".ai-harness" / "artifacts" / "runs"
+    if not runs_root.is_dir():
+        return []
+    runs: list[tuple[Path, dict[str, Any]]] = []
+    for snapshot in runs_root.iterdir():
+        if not snapshot.is_dir():
+            continue
+        state = _read_json(snapshot / "state.json")
+        if not state or state.get("status") != "completed":
+            continue
+        if not isinstance(state.get("run_id"), str):
+            state["run_id"] = snapshot.name
+        runs.append((snapshot, state))
+    return sorted(
+        runs,
+        key=lambda item: (
+            str(item[1].get("finished_at") or item[1].get("updated_at") or item[1].get("started_at") or ""),
+            str(item[1].get("run_id", "")),
+        ),
+        reverse=True,
+    )
 
 
 def _find_run(repository: Path, run_id: str | None) -> tuple[Path, dict[str, Any]] | None:
@@ -127,9 +236,14 @@ def _run_phase(state: dict[str, Any]) -> str:
     return str(value) if value else "unknown"
 
 
-def _run_line(index: int | None, state: dict[str, Any]) -> str:
+def _run_line(index: int | None, state: dict[str, Any], root: Path | None = None) -> str:
     prefix = f" {index}. " if index is not None else "- "
-    return f"{prefix}{state.get('run_id')} [{state.get('status', 'unknown')}] phase={_run_phase(state)}"
+    branch = _run_branch(root)
+    branch_text = f" branch={branch}" if branch else ""
+    return (
+        f"{prefix}{short_run_id(state.get('run_id'))} [{state.get('status', 'unknown')}] "
+        f"phase={_run_phase(state)}{branch_text} - {_run_title(root, state)}"
+    )
 
 
 def _print_unfinished_runs(repository: Path, runs: list[tuple[Path, dict[str, Any]]] | None = None, *, heading: str = "Unfinished runs") -> None:
@@ -138,8 +252,8 @@ def _print_unfinished_runs(repository: Path, runs: list[tuple[Path, dict[str, An
         print("No unfinished runs found.", file=sys.stderr)
         return
     print(f"{heading}:", file=sys.stderr)
-    for index, (_, state) in enumerate(selected, 1):
-        print(_run_line(index, state), file=sys.stderr)
+    for index, (current, state) in enumerate(selected, 1):
+        print(_run_line(index, state, current), file=sys.stderr)
 
 
 def _print_recovery_actions(repository: Path) -> None:

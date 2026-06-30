@@ -19,6 +19,7 @@ from typing import Any, Callable, Literal
 
 from .config import resource_path
 from .errors import HarnessError
+from .run_identity import run_id_date, run_id_token
 from .stores.artifact import ArtifactStore
 from .stores.state import StateStore
 
@@ -790,6 +791,18 @@ def _slug(value: str) -> str:
     return slug[:32] or "run"
 
 
+def _run_branch_name(run_id: str, request: str) -> str:
+    return f"aih/{run_id_date(run_id)}/{run_id_token(run_id)}-{_slug(request)}"
+
+
+def _main_branch_ref(repository: Path) -> str | None:
+    if _run_git(repository, ["rev-parse", "--verify", "main"]) is not None:
+        return "main"
+    if _run_git(repository, ["rev-parse", "--verify", "origin/main"]) is not None:
+        return "origin/main"
+    return None
+
+
 def maybe_create_run_branch(repository: Path, run_id: str, request: str, mode: BranchMode) -> dict[str, object]:
     metadata = git_metadata(repository)
     metadata["branch_mode"] = mode
@@ -801,23 +814,25 @@ def maybe_create_run_branch(repository: Path, run_id: str, request: str, mode: B
         warnings.append("Per-run git branch was skipped because the worktree has uncommitted changes.")
         metadata["warnings"] = warnings
         return metadata
-    branch = f"aih/{run_id[:8]}/{_slug(request)}"
-    pushed = _run_git(repository, ["push", "origin", f"HEAD:refs/heads/{branch}"])
-    if pushed is None:
-        warnings.append(f"Per-run remote branch {branch} could not be created on origin.")
-        metadata["warnings"] = warnings
-        return metadata
-    fetched = _run_git(repository, ["fetch", "origin", branch])
-    if fetched is None:
-        warnings.append(f"Per-run remote branch {branch} could not be fetched from origin.")
-        metadata["warnings"] = warnings
-        return metadata
-    checked_out = _run_git(repository, ["checkout", "--track", "-b", branch, f"origin/{branch}"])
+    branch = _run_branch_name(run_id, request)
+    base_ref = "HEAD"
+    if mode == "create-from-main":
+        base_ref = _main_branch_ref(repository) or ""
+        if not base_ref:
+            warnings.append("Per-run git branch was skipped because main or origin/main could not be resolved.")
+            metadata["warnings"] = warnings
+            return metadata
+    metadata["branch_base_ref"] = base_ref
+    checked_out = _run_git(repository, ["checkout", "-b", branch, base_ref])
     if checked_out is None:
-        warnings.append(f"Per-run branch {branch} could not be checked out from origin.")
-    else:
-        metadata["created_branch"] = branch
-        metadata["current_branch"] = branch
+        warnings.append(f"Per-run branch {branch} could not be checked out from {base_ref}.")
+        metadata["warnings"] = warnings
+        return metadata
+    metadata["created_branch"] = branch
+    metadata["current_branch"] = branch
+    pushed = _run_git(repository, ["push", "-u", "origin", branch])
+    if pushed is None:
+        warnings.append(f"Per-run remote branch {branch} could not be pushed to origin.")
     metadata["warnings"] = warnings
     return metadata
 

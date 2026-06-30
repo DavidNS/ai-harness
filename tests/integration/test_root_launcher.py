@@ -328,6 +328,7 @@ class RootLauncherIntegrationTests(unittest.TestCase):
                 )
                 os.close(slave)
                 output = bytearray()
+                sent_console = False
                 sent_status = False
                 sent_exit = False
                 deadline = time.time() + 5
@@ -341,7 +342,10 @@ class RootLauncherIntegrationTests(unittest.TestCase):
                         break
                     output.extend(chunk)
                     prompts = output.count(b"aih>")
-                    if not sent_status and prompts >= 1:
+                    if not sent_console and b"Open console" in output:
+                        os.write(master, b"o")
+                        sent_console = True
+                    elif sent_console and not sent_status and prompts >= 1:
                         os.write(master, b"status\r")
                         sent_status = True
                     elif sent_status and not sent_exit and prompts >= 2:
@@ -354,6 +358,7 @@ class RootLauncherIntegrationTests(unittest.TestCase):
                     stdout, _ = process.communicate()
 
                 decoded = output.decode("utf-8", errors="replace")
+                self.assertTrue(sent_console, decoded)
                 self.assertTrue(sent_status, decoded)
                 self.assertTrue(sent_exit, decoded)
                 self.assertEqual(0, process.returncode, decoded)
@@ -387,6 +392,7 @@ class RootLauncherIntegrationTests(unittest.TestCase):
                 )
                 os.close(slave)
                 output = bytearray()
+                sent_new = False
                 sent_request = False
                 sent_ci_continue = False
                 sent_branch = False
@@ -402,7 +408,10 @@ class RootLauncherIntegrationTests(unittest.TestCase):
                     except OSError:
                         break
                     output.extend(chunk)
-                    if not sent_request and b"aih>" in output:
+                    if not sent_new and b"New run" in output:
+                        os.write(master, b"n")
+                        sent_new = True
+                    if sent_new and not sent_request and b"Request:" in output:
                         os.write(master, b"I want to add autocompletion to console\r")
                         sent_request = True
                     if sent_request and not sent_ci_continue and b"CI setup check" in output:
@@ -424,6 +433,7 @@ class RootLauncherIntegrationTests(unittest.TestCase):
                     process.communicate()
 
                 decoded = output.decode("utf-8", errors="replace")
+                self.assertTrue(sent_new, decoded)
                 self.assertTrue(sent_request, decoded)
                 self.assertTrue(sent_ci_continue, decoded)
                 self.assertTrue(selected_code, decoded)
@@ -469,11 +479,11 @@ class RootLauncherIntegrationTests(unittest.TestCase):
                     except OSError:
                         break
                     output.extend(chunk)
-                    if not sent_new and b"Start a new request" in output:
+                    if not sent_new and b"New run" in output:
                         os.write(master, b"n")
                         sent_new = True
-                    elif sent_new and not sent_exit and b"aih>" in output:
-                        os.write(master, b"exit\r")
+                    elif sent_new and not sent_exit and b"Resume or archive" in output:
+                        os.write(master, b"x")
                         sent_exit = True
                 try:
                     process.communicate(timeout=2)
@@ -485,8 +495,9 @@ class RootLauncherIntegrationTests(unittest.TestCase):
                 self.assertTrue(sent_new, decoded)
                 self.assertTrue(sent_exit, decoded)
                 self.assertEqual(0, process.returncode, decoded)
-                self.assertIn("Unfinished run found", decoded)
-                self.assertIn("Resume run-a", decoded)
+                self.assertIn("AI Harness runs", decoded)
+                self.assertIn("Unfinished runs must be resolved before a new run", decoded)
+                self.assertIn("run-a", decoded)
                 self.assertIn("phase=DESIGN", decoded)
             finally:
                 try:
@@ -513,6 +524,7 @@ class RootLauncherIntegrationTests(unittest.TestCase):
                 )
                 os.close(slave)
                 output = bytearray()
+                sent_new = False
                 sent_request = False
                 sent_ci_continue = False
                 sent_branch = False
@@ -530,7 +542,10 @@ class RootLauncherIntegrationTests(unittest.TestCase):
                     except OSError:
                         break
                     output.extend(chunk)
-                    if not sent_request and b"aih>" in output:
+                    if not sent_new and b"New run" in output:
+                        os.write(master, b"n")
+                        sent_new = True
+                    if sent_new and not sent_request and b"Request:" in output:
                         os.write(master, b"Full implementation for console flow\r")
                         sent_request = True
                     if sent_request and not sent_ci_continue and b"CI setup check" in output:
@@ -548,7 +563,7 @@ class RootLauncherIntegrationTests(unittest.TestCase):
                     if selected_route and not selected_flow and b"Code flow" in output:
                         os.write(master, b"f")
                         selected_flow = True
-                    if selected_flow and not sent_exit and output.count(b"aih>") >= 2:
+                    if selected_flow and not sent_exit and output.count(b"aih>") >= 1:
                         os.write(master, b"exit\r")
                         sent_exit = True
                 try:
@@ -558,6 +573,7 @@ class RootLauncherIntegrationTests(unittest.TestCase):
                     process.communicate()
 
                 decoded = output.decode("utf-8", errors="replace")
+                self.assertTrue(sent_new, decoded)
                 self.assertTrue(sent_request, decoded)
                 self.assertTrue(sent_ci_continue, decoded)
                 self.assertTrue(sent_scope, decoded)

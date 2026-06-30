@@ -7,6 +7,7 @@ import os
 import shlex
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 
 from ai_harness.ci_support import ci_preflight
 from ai_harness.bundle_inputs import compatible_runs
@@ -14,11 +15,13 @@ from ai_harness.recommended_packages import load_recommended_package_groups
 
 from .bootstrap import ACTIONS, GITHUB_CI_MODES, RUNNER, _default_provider, _parser, _prompt_for_model, _prompt_for_reasoning_effort
 from .runtime import (
+    _completed_runs,
     _decision_request,
     _find_run,
     _print_unfinished_runs,
     _run,
     _run_line,
+    _run_title,
     _unfinished_runs,
 )
 from .ui import (
@@ -81,33 +84,138 @@ def _follow_waiting_decisions(namespace: argparse.Namespace, code: int, *, run_i
         code = _resume(namespace, run_id, follow_decisions=False)
 
 
+def _has_unfinished_runs(namespace: argparse.Namespace) -> bool:
+    return bool(_unfinished_runs(namespace.cwd.resolve()))
+
+
+def _refresh_recovery_block(namespace: argparse.Namespace) -> None:
+    setattr(namespace, "_recovery_blocked", _has_unfinished_runs(namespace))
+
+
+def _select_run(title: str, runs: list[tuple[object, dict[str, object]]]) -> tuple[object, dict[str, object]] | None:
+    if not runs:
+        print(f"No {title.casefold()} found.", file=sys.stderr)
+        return None
+    items = []
+    for index, (root, state) in enumerate(runs, 1):
+        label = _run_line(None, state, root).removeprefix("- ")
+        run_id = str(state.get("run_id") or getattr(root, "name", ""))
+        items.append(_MenuItem(str(index), label, str(index - 1), (run_id,)))
+    items.append(_MenuItem("b", "Back", "__back__", ("back",)))
+    selected = _menu_prompt([title], items, help_kind="action").value
+    if selected == "__back__":
+        return None
+    try:
+        return runs[int(selected)]
+    except (ValueError, IndexError):
+        return None
+
+
+def _next_flow_for_completed_run(root: object) -> str | None:
+    path = Path(root)
+    handoffs = (
+        ("published/tdd-handoff.json", None),
+        ("published/tasks-handoff.json", "tdd"),
+        ("published/design-handoff.json", "tasks"),
+        ("published/spec-handoff.json", "design"),
+        ("published/proposal-handoff.json", "spec"),
+        ("published/explore-handoff.json", "proposal"),
+    )
+    for artifact, flow in handoffs:
+        if (path / artifact).is_file():
+            return flow
+    return None
+
+
+def _continue_unfinished_run(namespace: argparse.Namespace) -> int | None:
+    selected = _select_run("Unfinished runs", _unfinished_runs(namespace.cwd.resolve()))
+    if selected is None:
+        return None
+    _, state = selected
+    run_id = str(state.get("run_id"))
+    return _resume(namespace, run_id)
+
+
+def _continue_completed_run(namespace: argparse.Namespace) -> int | None:
+    _refresh_recovery_block(namespace)
+    if getattr(namespace, "_recovery_blocked", False):
+        _print_unfinished_runs(namespace.cwd.resolve(), heading="Unfinished runs must be resolved before continuing a completed run")
+        print("Resume or archive unfinished runs before starting the next bundle from a completed run.", file=sys.stderr)
+        return None
+    selected = _select_run("Completed runs", _completed_runs(namespace.cwd.resolve()))
+    if selected is None:
+        return None
+    root, state = selected
+    flow = _next_flow_for_completed_run(root)
+    if flow is None:
+        print("Selected run has no next bundle to continue.", file=sys.stderr)
+        print(f"Artifacts: {root}", file=sys.stderr)
+        return None
+    source_run = Path(root).name
+    title = _run_title(Path(root), state)
+    request = f"Continue {flow} from {source_run}: {title}"
+    return _start(namespace, [], request_override=request, flow=flow, source_run=source_run)
+
+
+def _continue_run_menu(namespace: argparse.Namespace) -> int | None:
+    while True:
+        selected = _menu_prompt(
+            ["Continue run"],
+            [
+                _MenuItem("u", "Unfinished runs", "unfinished", ("unfinished", "open")),
+                _MenuItem("c", "Completed runs", "completed", ("completed", "done")),
+                _MenuItem("b", "Back", "back", ("back",)),
+            ],
+            help_kind="action",
+            default_index=0,
+        ).value
+        if selected == "back":
+            return None
+        if selected == "unfinished":
+            result = _continue_unfinished_run(namespace)
+        else:
+            result = _continue_completed_run(namespace)
+        _refresh_recovery_block(namespace)
+        if result is not None:
+            return result
+
+
 def _startup_recovery(namespace: argparse.Namespace) -> int | None:
     repository = namespace.cwd.resolve()
-    runs = _unfinished_runs(repository)
-    setattr(namespace, "_recovery_blocked", False)
-    if not runs:
-        return None
-    if len(runs) > 1:
-        setattr(namespace, "_recovery_blocked", True)
-        _print_unfinished_runs(repository, runs, heading="Unfinished runs found")
-        print("Use `resume <RUN_ID>` or `archive <RUN_ID>` before starting unrelated work.", file=sys.stderr)
-        return None
-    _, state = runs[0]
-    run_id = str(state.get("run_id"))
-    selected = _menu_prompt(
-        ["Unfinished run found", _run_line(None, state)],
-        [
-            _MenuItem("r", f"Resume {run_id}", "resume", ("resume",)),
-            _MenuItem("a", f"Archive {run_id}", "archive", ("archive",)),
-            _MenuItem("n", "Start a new request", "new", ("new", "start")),
-        ],
-        help_kind="action",
-    ).value
-    if selected == "resume":
-        return _resume(namespace, run_id)
-    if selected == "archive":
-        return _archive(namespace, run_id)
-    return None
+    _refresh_recovery_block(namespace)
+    while True:
+        selected = _menu_prompt(
+            ["AI Harness runs"],
+            [
+                _MenuItem("c", "Continue run", "continue", ("continue", "resume")),
+                _MenuItem("n", "New run", "new", ("new", "start")),
+                _MenuItem("o", "Open console", "console", ("console", "shell")),
+                _MenuItem("s", "Show runs", "show", ("show", "runs")),
+                _MenuItem("x", "Exit launcher", "exit", ("exit", "quit")),
+            ],
+            help_kind="action",
+            default_index=0 if getattr(namespace, "_recovery_blocked", False) else 1,
+        ).value
+        if selected == "exit":
+            raise _LauncherExit
+        if selected == "show":
+            _run(["--cwd", str(repository), "--show-runs"], verbose=namespace.verbose, dry_run=namespace.dry_run)
+            continue
+        if selected == "console":
+            return None
+        if selected == "continue":
+            result = _continue_run_menu(namespace)
+            if result is not None:
+                return result
+            _refresh_recovery_block(namespace)
+            continue
+        if selected == "new":
+            _refresh_recovery_block(namespace)
+            if getattr(namespace, "_recovery_blocked", False):
+                _print_unfinished_runs(repository, heading="Unfinished runs must be resolved before a new run")
+                print("Resume or archive unfinished runs before starting unrelated work.", file=sys.stderr)
+                continue
+            return _dispatch_console_action(namespace, "start", [], "start")
 
 
 @dataclass(frozen=True, slots=True)
@@ -354,6 +462,7 @@ def _dispatch_console_action(namespace: argparse.Namespace, command: str, args: 
     if command == "archive":
         return _archive(namespace, args[0] if args else None)
     if command == "start":
+        _refresh_recovery_block(namespace)
         if getattr(namespace, "_recovery_blocked", False):
             print("error: resolve unfinished runs with resume <RUN_ID> or archive <RUN_ID> before starting new work", file=sys.stderr)
             return 1
@@ -363,6 +472,10 @@ def _dispatch_console_action(namespace: argparse.Namespace, command: str, args: 
             return 2
         return _start(namespace, [], request_override=request)
     if command in {"sdd", "explore", "proposal", "spec", "design", "tasks", "tdd"}:
+        _refresh_recovery_block(namespace)
+        if getattr(namespace, "_recovery_blocked", False):
+            print("error: resolve unfinished runs with resume <RUN_ID> or archive <RUN_ID> before starting new work", file=sys.stderr)
+            return 1
         request = raw_line.split(None, 1)[1].strip() if args and command in {"sdd", "explore"} else None
         source_run = _source_run_for_bundle(namespace, command, args) if command not in {"sdd", "explore"} else None
         return _start(namespace, [], request_override=request, flow=command, source_run=source_run)
@@ -445,6 +558,7 @@ def _console_command(namespace: argparse.Namespace, line: str) -> int:
     if is_slash:
         print(f"Unknown slash command: /{command}", file=sys.stderr)
         return 0
+    _refresh_recovery_block(namespace)
     if getattr(namespace, "_recovery_blocked", False):
         print("error: resolve unfinished runs with resume <RUN_ID> or archive <RUN_ID> before starting new work", file=sys.stderr)
         return 1
@@ -573,6 +687,8 @@ def _resume(namespace: argparse.Namespace, run_id: str | None, *, follow_decisio
             if selected is not None:
                 backend.extend(["--selected-option", selected])
     code = _run(backend, verbose=namespace.verbose, dry_run=namespace.dry_run)
+    if follow_decisions:
+        _refresh_recovery_block(namespace)
     if follow_decisions and not namespace.dry_run and sys.stdin.isatty():
         return _follow_waiting_decisions(namespace, code, run_id=actual_run_id)
     return code
@@ -585,7 +701,9 @@ def _archive(namespace: argparse.Namespace, run_id: str | None) -> int:
             print("error: no unfinished run found", file=sys.stderr)
             return 1
         run_id = str(selected[1]["run_id"])
-    return _run(["--cwd", str(namespace.cwd.resolve()), "--archive", run_id], verbose=namespace.verbose, dry_run=namespace.dry_run)
+    code = _run(["--cwd", str(namespace.cwd.resolve()), "--archive", run_id], verbose=namespace.verbose, dry_run=namespace.dry_run)
+    _refresh_recovery_block(namespace)
+    return code
 
 
 def main(argv: list[str] | None = None) -> int:

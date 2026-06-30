@@ -414,7 +414,7 @@ class CiSupportTests(unittest.TestCase):
             self.assertTrue(metadata["dirty"])
             self.assertIn("skipped", metadata["warnings"][-1])
 
-    def test_branch_creation_creates_remote_first_and_tracks_it(self) -> None:
+    def test_branch_creation_creates_local_branch_and_tracks_pushed_origin(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             repository = root / "work"
@@ -428,7 +428,7 @@ class CiSupportTests(unittest.TestCase):
 
             metadata = maybe_create_run_branch(repository, "abcdef123456", "Fix tests", "create")
 
-            branch = "aih/abcdef12/fix-tests"
+            branch = "aih/legacy/abcdef123456-fix-tests"
             self.assertEqual(branch, metadata["created_branch"])
             self.assertEqual(branch, metadata["current_branch"])
             self.assertFalse(metadata["dirty"])
@@ -436,18 +436,18 @@ class CiSupportTests(unittest.TestCase):
             upstream = subprocess.check_output(["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], cwd=repository, text=True).strip()
             self.assertEqual(f"origin/{branch}", upstream)
 
-    def test_branch_creation_without_origin_does_not_create_local_branch(self) -> None:
+    def test_create_from_main_without_main_does_not_create_local_branch(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             repository = Path(directory)
             subprocess.run(["git", "init"], cwd=repository, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             subprocess.run(["git", "-c", "user.email=a@example.com", "-c", "user.name=A", "commit", "--allow-empty", "-m", "init"], cwd=repository, check=True, stdout=subprocess.DEVNULL)
             original_branch = subprocess.check_output(["git", "branch", "--show-current"], cwd=repository, text=True).strip()
 
-            metadata = maybe_create_run_branch(repository, "abcdef123456", "Fix tests", "create")
+            metadata = maybe_create_run_branch(repository, "abcdef123456", "Fix tests", "create-from-main")
 
             self.assertIsNone(metadata["created_branch"])
             self.assertEqual(original_branch, subprocess.check_output(["git", "branch", "--show-current"], cwd=repository, text=True).strip())
-            self.assertIn("could not be created on origin", metadata["warnings"][-1])
+            self.assertIn("main or origin/main", metadata["warnings"][-1])
 
     def test_record_branch_ci_artifacts_records_comparison_and_passes_when_branch_ci_passes(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
