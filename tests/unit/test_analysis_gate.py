@@ -18,7 +18,7 @@ class ExplorerGateTests(unittest.TestCase):
         )
         self.assertEqual("ask_user", decision.path)
         self.assertIn("explorer_language", decision.matched_signals)
-        self.assertGreater(decision.scores["explorer"], 0)
+        self.assertGreater(decision.scores["explore_bundle"], 0)
 
     def test_analysis_implementation_conflict_asks_user_and_exposes_scores(self) -> None:
         decision = classify_explorer_gate(
@@ -26,8 +26,8 @@ class ExplorerGateTests(unittest.TestCase):
         )
 
         self.assertEqual("ask_user", decision.path)
-        self.assertGreater(decision.scores["explorer"], 0)
-        self.assertGreater(decision.scores["sdd_low"], 0)
+        self.assertGreater(decision.scores["explore_bundle"], 0)
+        self.assertGreater(decision.scores["sdd"], 0)
         payload = decision.to_dict()
         self.assertIn("scores", payload)
         self.assertIn("score_signals", payload)
@@ -39,14 +39,14 @@ class ExplorerGateTests(unittest.TestCase):
 
         self.assertEqual("ask_user", bug.path)
         self.assertEqual("ask_user", typo.path)
-        self.assertGreater(bug.scores["sdd_low"], 0)
-        self.assertGreater(typo.scores["sdd_low"], 0)
+        self.assertGreater(bug.scores["sdd"], 0)
+        self.assertGreater(typo.scores["sdd"], 0)
 
     def test_workflow_change_requires_full_implementation_artifact(self) -> None:
         decision = classify_explorer_gate("Update orchestrator routing and persisted artifact state handling")
         self.assertEqual("ask_user", decision.path)
         self.assertFalse(decision.explorer_artifact_required)
-        self.assertGreater(decision.scores["sdd_high"], 0)
+        self.assertGreater(decision.scores["sdd"], 0)
         self.assertIsNone(decision.required_artifact)
 
     def test_existing_analysis_artifact_allows_full_implementation(self) -> None:
@@ -63,7 +63,7 @@ class ExplorerGateTests(unittest.TestCase):
 
             self.assertEqual("ask_user", decision.path)
             self.assertFalse(decision.explorer_artifact_required)
-            self.assertGreater(decision.scores["sdd_high"], 0)
+            self.assertGreater(decision.scores["sdd"], 0)
             self.assertEqual("docs/explorer/improvements/analysis-first-gate/improvement.md", decision.supplied_artifact)
 
 
@@ -142,7 +142,7 @@ class ExplorerGateTests(unittest.TestCase):
         decision = classify_explorer_gate("Implement draft-improvements/analysis-first-gate.md")
         self.assertEqual("ask_user", decision.path)
         self.assertIsNone(decision.supplied_artifact)
-        self.assertGreater(decision.scores["explorer"], 0)
+        self.assertGreater(decision.scores["explore_bundle"], 0)
 
 
 if __name__ == "__main__":

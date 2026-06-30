@@ -43,9 +43,9 @@ class ConfigTests(unittest.TestCase):
                     HarnessConfig(max_attempts=value)
 
 
-    def test_git_branch_mode_defaults_create_and_accepts_off(self):
-        self.assertEqual("create", load_config({}).git_branch_mode)
-        self.assertEqual("off", load_config({"AI_HARNESS_GIT_BRANCH_MODE": "off"}).git_branch_mode)
+    def test_git_branch_mode_defaults_current_and_accepts_create_from_main(self):
+        self.assertEqual("current", load_config({}).git_branch_mode)
+        self.assertEqual("create-from-main", load_config({"AI_HARNESS_GIT_BRANCH_MODE": "create-from-main"}).git_branch_mode)
 
     def test_github_ci_mode_defaults_baseline(self):
         self.assertEqual("baseline", load_config({}).github_ci_mode)

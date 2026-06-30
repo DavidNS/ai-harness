@@ -21,8 +21,8 @@ class TaskCoverageValidator:
 
     def validate(self, document: Mapping[str, object], scope: Mapping[str, object]) -> None:
         raw_artifacts = scope.get("artifacts")
-        if not isinstance(raw_artifacts, list) or not raw_artifacts:
-            raise HarnessError("explorer_scope has no artifacts")
+        if not isinstance(raw_artifacts, list):
+            raise HarnessError("explorer_scope artifacts must be a list")
         ordered_scope = [str(item.get("path")) for item in raw_artifacts if isinstance(item, Mapping) and item.get("path")]
         scope_paths = set(ordered_scope)
         if len(scope_paths) != len(ordered_scope):
@@ -37,9 +37,11 @@ class TaskCoverageValidator:
                 raise HarnessError("task has invalid shape")
             task_id = str(task.get("id", ""))
             sources = task.get("source_artifacts")
-            if not isinstance(sources, list) or not sources or any(not isinstance(item, str) or not item for item in sources):
+            if not scope_paths and sources is None:
+                sources = []
+            if not isinstance(sources, list) or (bool(scope_paths) and not sources) or any(not isinstance(item, str) or not item for item in sources):
                 raise HarnessError(f"full SDD task {task_id or '<unknown>'} requires source_artifacts")
-            unknown = sorted(set(sources) - scope_paths)
+            unknown = sorted(set(sources) - scope_paths) if scope_paths else []
             if unknown:
                 raise HarnessError(f"task {task_id} references unknown source_artifacts: {unknown}")
             task_sources[task_id] = list(sources)
@@ -70,4 +72,4 @@ class TaskCoverageValidator:
             "task_source_artifacts": task_sources,
         }
         self._artifacts.write_json("task_coverage.json", audit)
-        self._state.record_artifact("task_coverage.json", "TASKS")
+        self._state.record_artifact("task_coverage.json", self._state.load().current_phase)

@@ -19,9 +19,9 @@ from ai_harness.models import Strategy  # noqa: E402
 from ai_harness.phases import PHASE_DEFINITIONS  # noqa: E402
 from ai_harness.pipeline.state_machine import GRAPHS  # noqa: E402
 
-NOOP_PHASES = {"INITIALIZING", "DETECTING_INTENT", "SNAPSHOTTING", "COMPLETED"}
-EXTRA_DISPATCH_PHASES = {"EXPLORER", "SIMPLE_TASK"}
-REGISTRY_ONLY_PHASES = {"explorer", "explorer_distill", "implement", "test", "review", "knowledge_synthesis", "knowledge_review", "explore_request_understanding", "explore_clarification_gate", "explore_triage", "explore_evidence_plan", "explore_evidence_collection", "explore_ci_barrier", "explore_evidence_normalization", "explore_outcome_synthesis", "explore_review"}
+NOOP_PHASES = {"COMPLETED"}
+EXTRA_DISPATCH_PHASES = set()
+REGISTRY_ONLY_PHASES = {"explore", "purpose", "spec", "design", "tasks", "learning", "explorer", "explorer_intake", "explorer_discovery", "explorer_decision", "explorer_artifact", "explorer_review", "explorer_distill", "implement", "test", "review", "knowledge_synthesis", "knowledge_review", "explore_request_understanding", "explore_clarification_gate", "explore_triage", "explore_evidence_plan", "explore_evidence_collection", "explore_ci_barrier", "explore_evidence_normalization", "explore_outcome_synthesis", "explore_review"}
 ORCHESTRATOR_IMPORT_ALLOWLIST = {Path("harness/run.py")}
 RUN_CONTEXT_CONSUMERS = {
     Path("harness/ai_harness/orchestrator/context.py"),
@@ -193,30 +193,30 @@ def check_graph_contract(report: Report) -> None:
     known = {phase.value for phase in PhaseName}
     for strategy, graph in GRAPHS.items():
         values = [phase_value(phase) for phase in graph]
-        if not values or values[0] != "INITIALIZING" or values[-1] != "COMPLETED":
-            report.error(f"{strategy.value} graph must start INITIALIZING and end COMPLETED")
+        if any(value not in known for value in values):
+            pass
         if len(values) != len(set(values)):
             report.error(f"{strategy.value} graph contains duplicate phases")
         unknown = sorted(set(values) - known)
         if unknown:
             report.error(f"{strategy.value} graph contains phases outside PhaseName: {unknown}")
-        if values[:3] != ["INITIALIZING", "LOADING_KNOWLEDGE", "DETECTING_INTENT"]:
-            report.error(f"{strategy.value} graph must keep the shared startup prefix")
-        if values[-3:] != ["FINALIZING", "SNAPSHOTTING", "COMPLETED"]:
-            report.error(f"{strategy.value} graph must keep the shared terminal suffix")
+        non_bundle = sorted(set(values) - {
+            "EXPLORE_BUNDLE", "PROPOSAL_BUNDLE", "SPEC_BUNDLE",
+            "DESIGN_BUNDLE", "TASKS_BUNDLE", "TDD_BUNDLE",
+        })
+        if non_bundle:
+            report.error(f"{strategy.value} graph contains non-bundle phases: {non_bundle}")
 
 
 def check_dispatcher_contract(report: Report) -> None:
     graph_phases = {phase_value(phase) for graph in GRAPHS.values() for phase in graph}
     dispatched = dispatcher_phases()
-    missing = sorted(graph_phases - dispatched - {"SNAPSHOTTING", "COMPLETED"})
+    missing = sorted(graph_phases - dispatched)
     if missing:
         report.error(f"graph phases missing dispatcher/no-op handlers: {missing}")
     extra = sorted(dispatched - graph_phases - EXTRA_DISPATCH_PHASES)
     if extra:
         report.error(f"dispatcher handles phases not in graphs or allowlist: {extra}")
-    if not {"INITIALIZING", "DETECTING_INTENT"} <= dispatched:
-        report.error("dispatcher must include explicit no-op handlers for INITIALIZING and DETECTING_INTENT")
 
 
 def check_phase_resources(report: Report) -> None:
@@ -236,7 +236,7 @@ def check_phase_resources(report: Report) -> None:
                 report.error(f"phase {name} capability manifest phase mismatch")
     graph_worker_phases = {phase_value(phase).lower() for graph in GRAPHS.values() for phase in graph}
     graph_worker_phases -= {phase.lower() for phase in NOOP_PHASES}
-    registry_missing = sorted(graph_worker_phases - set(PHASE_DEFINITIONS) - {"loading_knowledge", "routing", "selecting_strategy", "simple_task", "tdd_loop", "finalizing", "non_code_stub"})
+    registry_missing = sorted(graph_worker_phases - set(PHASE_DEFINITIONS) - {"explore_bundle", "proposal_bundle", "spec_bundle", "design_bundle", "tasks_bundle", "tdd_bundle"})
     if registry_missing:
         report.error(f"graph worker phases missing registry definitions: {registry_missing}")
     registry_extra = sorted(set(PHASE_DEFINITIONS) - graph_worker_phases - REGISTRY_ONLY_PHASES)

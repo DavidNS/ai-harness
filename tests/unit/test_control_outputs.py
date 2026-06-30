@@ -8,16 +8,15 @@ from ai_harness.errors import ValidationError
 
 
 GRAPH = (
-    "INITIALIZING", "LOADING_KNOWLEDGE", "DETECTING_INTENT", "ROUTING",
-    "SELECTING_STRATEGY", "EXPLORE", "PROPOSAL", "SPEC", "DESIGN", "TASKS",
-    "TDD_LOOP", "LEARNING", "FINALIZING", "SNAPSHOTTING", "COMPLETED",
+    "EXPLORE_BUNDLE", "PROPOSAL_BUNDLE", "SPEC_BUNDLE",
+    "DESIGN_BUNDLE", "TASKS_BUNDLE", "TDD_BUNDLE",
 )
 
 
 class ControlOutputTests(unittest.TestCase):
     def test_decision_request_parses_and_normal_json_is_ignored(self) -> None:
         normal = json.dumps({"schema_version": 1, "phase": "tasks", "tasks": []})
-        self.assertIsNone(parse_control_output(normal, expected_origin="TASKS", active_graph_phase="TASKS", graph=GRAPH))
+        self.assertIsNone(parse_control_output(normal, expected_origin="TASKS", active_graph_phase="TASKS_BUNDLE", graph=GRAPH))
 
         request = parse_control_output(json.dumps({
             "schema_version": 1,
@@ -28,20 +27,20 @@ class ControlOutputTests(unittest.TestCase):
             "context": ["Preserving compatibility is lower risk."],
             "options": [{"id": "yes", "label": "Preserve", "consequence": "Adapter code is required."}],
             "allows_freeform": True,
-            "scores": {"explorer": 8, "sdd_low": 3},
+            "scores": {"explore_bundle": 8, "sdd": 3},
             "score_signals": {"explorer": ["explorer_language+4"]},
-            "ranked_paths": ["explorer", "sdd_low"],
+            "ranked_paths": ["explore_bundle", "sdd"],
             "option_details": {"yes": "Preserves existing behavior for callers."},
-        }), expected_origin="DESIGN", active_graph_phase="DESIGN", graph=GRAPH)
+        }), expected_origin="DESIGN", active_graph_phase="DESIGN_BUNDLE", graph=GRAPH)
 
         self.assertEqual("decision_request", request.kind)
         self.assertEqual("DESIGN", request.origin_phase)
         self.assertEqual("yes", request.options[0].id)
-        self.assertEqual({"explorer": 8, "sdd_low": 3}, request.scores)
+        self.assertEqual({"explore_bundle": 8, "sdd": 3}, request.scores)
         self.assertEqual(("explorer_language+4",), request.score_signals["explorer"])
-        self.assertEqual(("explorer", "sdd_low"), request.ranked_paths)
+        self.assertEqual(("explore_bundle", "sdd"), request.ranked_paths)
         self.assertEqual("Preserves existing behavior for callers.", request.option_details["yes"])
-        self.assertEqual({"explorer": 8, "sdd_low": 3}, request.to_dict()["scores"])
+        self.assertEqual({"explore_bundle": 8, "sdd": 3}, request.to_dict()["scores"])
         self.assertEqual({"yes": "Preserves existing behavior for callers."}, request.to_dict()["option_details"])
 
     def test_rejects_mismatched_decision_origin(self) -> None:
@@ -53,17 +52,17 @@ class ControlOutputTests(unittest.TestCase):
                 "reason": "A decision is needed.",
                 "question": "Which behavior should be used?",
                 "context": ["The active phase is design."],
-            }), expected_origin="DESIGN", active_graph_phase="DESIGN", graph=GRAPH)
+            }), expected_origin="DESIGN", active_graph_phase="DESIGN_BUNDLE", graph=GRAPH)
 
     def test_escalation_must_target_earlier_graph_phase(self) -> None:
         valid = parse_control_output(json.dumps({
             "schema_version": 1,
             "kind": "phase_escalation",
             "origin_phase": "DESIGN",
-            "target_phase": "SPEC",
+            "target_phase": "SPEC_BUNDLE",
             "reason": "The answer changes acceptance criteria.",
-        }), expected_origin="DESIGN", active_graph_phase="DESIGN", graph=GRAPH)
-        self.assertEqual("SPEC", valid.target_phase)
+        }), expected_origin="DESIGN", active_graph_phase="DESIGN_BUNDLE", graph=GRAPH)
+        self.assertEqual("SPEC_BUNDLE", valid.target_phase)
 
         with self.assertRaises(ValidationError):
             parse_control_output(json.dumps({
@@ -72,7 +71,7 @@ class ControlOutputTests(unittest.TestCase):
                 "origin_phase": "DESIGN",
                 "target_phase": "DESIGN",
                 "reason": "Not a backward escalation.",
-            }), expected_origin="DESIGN", active_graph_phase="DESIGN", graph=GRAPH)
+            }), expected_origin="DESIGN", active_graph_phase="DESIGN_BUNDLE", graph=GRAPH)
 
     def test_impossible_requires_evidence(self) -> None:
         with self.assertRaises(ValidationError):
@@ -133,7 +132,7 @@ class ControlOutputTests(unittest.TestCase):
                 "kind": "explorer_bundle",
                 "origin_phase": "DESIGN",
                 "entries": [],
-            }), expected_origin="DESIGN", active_graph_phase="DESIGN", graph=GRAPH)
+            }), expected_origin="DESIGN", active_graph_phase="DESIGN_BUNDLE", graph=GRAPH)
         with self.assertRaises(ValidationError):
             parse_control_output(json.dumps({
                 "schema_version": 1,

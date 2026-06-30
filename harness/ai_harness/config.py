@@ -46,7 +46,7 @@ class HarnessConfig:
     model: str = ""
     timeout_seconds: float = 120.0
     max_attempts: int = CONTROLLER_DEFAULT_ATTEMPTS
-    git_branch_mode: str = "off"
+    git_branch_mode: str = "current"
     github_ci_mode: str = "baseline"
 
     def __post_init__(self) -> None:
@@ -62,8 +62,8 @@ class HarnessConfig:
             raise ConfigurationError("timeout must be positive")
         if isinstance(self.max_attempts, bool) or not 1 <= self.max_attempts <= CONTROLLER_MAX_ATTEMPTS:
             raise ConfigurationError("max attempts must be between one and ten")
-        if self.git_branch_mode not in {"off", "create"}:
-            raise ConfigurationError("git branch mode must be off or create")
+        if self.git_branch_mode not in {"off", "current", "create", "create-from-main"}:
+            raise ConfigurationError("git branch mode must be current or create-from-main")
         if self.github_ci_mode not in {"off", "baseline", "branch"}:
             raise ConfigurationError("GitHub CI mode must be off, baseline, or branch")
 
@@ -83,5 +83,5 @@ def load_config(values: Mapping[str, str] | None = None) -> HarnessConfig:
         attempts = int(env.get("AI_HARNESS_MAX_ATTEMPTS", str(CONTROLLER_DEFAULT_ATTEMPTS)))
     except ValueError as exc:
         raise ConfigurationError("timeout and max attempts must be numeric") from exc
-    branch_mode = env.get("AI_HARNESS_GIT_BRANCH_MODE", "create").strip().lower()
+    branch_mode = env.get("AI_HARNESS_GIT_BRANCH_MODE", "current").strip().lower()
     return HarnessConfig(provider, _command(raw_command) if raw_command else (), model, timeout, attempts, branch_mode)

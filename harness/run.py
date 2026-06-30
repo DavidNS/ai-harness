@@ -22,6 +22,7 @@ from ai_harness.models import RunStatus
 from ai_harness.orchestrator import Orchestrator
 from ai_harness.output import render_result
 from ai_harness.stores.artifact import ArtifactStore, cleanup_terminal_live_artifacts
+from ai_harness.strategy import StrategyDecision
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -38,6 +39,9 @@ def _parser() -> argparse.ArgumentParser:
     recovery.add_argument("--install-packages", action="store_true")
     parser.add_argument("--ci-target", choices=("github", "gitlab", "both"))
     parser.add_argument("--github-ci-mode", choices=("off", "baseline", "branch"), help="GitHub CI evidence mode for harness runs")
+    parser.add_argument("--flow", choices=("sdd", "explore", "proposal", "spec", "design", "tasks", "tdd"), help="bundle flow to run")
+    parser.add_argument("--from-run", help="completed run id or artifact directory to import before running one bundle")
+    parser.add_argument("--branch", choices=("current", "create-from-main"), help="git branch behavior for a new run")
     parser.add_argument("--package", action="append", default=[], help="optional recommended package group to include")
     parser.add_argument("--all-packages", action="store_true", help="include every optional recommended package group")
     parser.add_argument("--dry-install", action="store_true", help="print package installation command without running pip")
@@ -56,6 +60,8 @@ def _request_from_args(args: argparse.Namespace) -> str:
     requestless = args.show_runs or args.status or args.install_ci or args.install_packages or args.resume is not None or args.archive is not None
     if requestless:
         return ""
+    if args.from_run and args.flow:
+        return f"Run {args.flow} bundle from {args.from_run}"
     if args.prompt_file:
         return args.prompt_file.read_text(encoding="utf-8").strip()
     return sys.stdin.read().strip()
@@ -72,6 +78,8 @@ def _apply_cli_environment(args: argparse.Namespace, values: dict[str, str]) -> 
         values["AI_HARNESS_CLAUDE_MODEL"] = args.model
     if args.reasoning_effort:
         values["AI_HARNESS_CODEX_REASONING_EFFORT"] = args.reasoning_effort
+    if args.branch:
+        values["AI_HARNESS_GIT_BRANCH_MODE"] = args.branch
 
 
 def _config_from_args(args: argparse.Namespace, values: dict[str, str]):
@@ -98,6 +106,22 @@ def _decision_answer(args: argparse.Namespace, artifacts: ArtifactStore, unfinis
         return direct_decision_answer(artifacts, unfinished, args.answer, args.selected_option)
     return None
 
+
+
+def _strategy_from_flow(flow: str | None) -> StrategyDecision | None:
+    if flow is None:
+        return None
+    mapping = {
+        "sdd": "SDD",
+        "explore": "EXPLORE_BUNDLE",
+        "proposal": "PROPOSAL_BUNDLE",
+        "spec": "SPEC_BUNDLE",
+        "design": "DESIGN_BUNDLE",
+        "tasks": "TASKS_BUNDLE",
+        "tdd": "TDD_BUNDLE",
+    }
+    strategy = mapping[flow]
+    return StrategyDecision(strategy, "HIGH", 0, f"CLI selected {flow} bundle flow", ("cli_flow",), strategy, "HIGH", False, True, False, "cli", flow)
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
@@ -180,7 +204,8 @@ def main(argv: list[str] | None = None) -> int:
             request,
             resume_run_id=args.resume,
             decision_answer=decision_answer,
-            strategy_decision=None,
+            strategy_decision=_strategy_from_flow(args.flow),
+            source_run=args.from_run,
         )
         print(render_result(result, command_context(repository)), end="")
         return 0

@@ -215,7 +215,7 @@ class ExplorerFlowService:
         bundle: ExplorerBundle,
         context: ExplorerContext,
         *,
-        target_phase: str = PhaseName.EXPLORER,
+        target_phase: str = PhaseName.EXPLORE_BUNDLE,
         split_bundle_rationale: str | None = None,
         pre_distilled_content: Mapping[str, str] | None = None,
     ) -> None:
@@ -277,7 +277,7 @@ class ExplorerFlowService:
             self._record_explorer_bundle(
                 self._bundle_from_explorer_output(output),
                 context,
-                target_phase=PhaseName.EXPLORER,
+                target_phase=PhaseName.EXPLORE_BUNDLE,
                 split_bundle_rationale=split_bundle_rationale,
             )
         except HarnessError as exc:
@@ -298,7 +298,7 @@ class ExplorerFlowService:
             self._record_explorer_bundle(
                 self._bundle_from_explorer_output(repaired),
                 context,
-                target_phase=PhaseName.EXPLORER,
+                target_phase=PhaseName.EXPLORE_BUNDLE,
                 split_bundle_rationale=reader.split_bundle_rationale(),
             )
 
@@ -397,8 +397,8 @@ class ExplorerFlowService:
         if not self._review_approves_explorer(review):
             if self._review_flags_decision_error(review):
                 raise ControlFlowSignal(PhaseEscalation(
-                    PhaseName.EXPLORER_REVIEW,
-                    PhaseName.EXPLORER_DECISION,
+                    PhaseName.EXPLORE_BUNDLE,
+                    PhaseName.EXPLORE_BUNDLE,
                     "Explorer review found outcome drift or an incorrect decision.",
                 ))
             if repaired:
@@ -425,7 +425,7 @@ class ExplorerFlowService:
         self._publish_explorer_bundle(
             bundle,
             context,
-            target_phase=PhaseName.EXPLORER_REVIEW,
+            target_phase=PhaseName.EXPLORE_BUNDLE,
             split_bundle_rationale=self._make_decision_reader().split_bundle_rationale(),
             pre_distilled_content=distilled_bundle,
         )

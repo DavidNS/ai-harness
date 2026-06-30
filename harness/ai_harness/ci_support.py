@@ -23,7 +23,7 @@ from .stores.artifact import ArtifactStore
 from .stores.state import StateStore
 
 CI_TARGETS = ("github", "gitlab", "both")
-BranchMode = Literal["off", "create"]
+BranchMode = Literal["off", "current", "create", "create-from-main"]
 
 _TEMPLATE_VERSION = "1"
 _GITHUB_TEMPLATE = resource_path("ci_templates", "github", "ai-harness-ci.yml")
@@ -794,7 +794,7 @@ def maybe_create_run_branch(repository: Path, run_id: str, request: str, mode: B
     metadata = git_metadata(repository)
     metadata["branch_mode"] = mode
     metadata["created_branch"] = None
-    if mode == "off" or not metadata.get("is_git_repository"):
+    if mode in {"off", "current"} or not metadata.get("is_git_repository"):
         return metadata
     warnings = list(metadata.get("warnings", []))
     if metadata.get("dirty"):

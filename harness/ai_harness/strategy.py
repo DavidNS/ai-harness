@@ -52,26 +52,27 @@ _EXPLORER_EXCLUSIONS = re.compile(
 
 
 _OVERRIDE_ALIASES = {
-    "simple": "SDD_LOW",
-    "low": "SDD_LOW",
-    "sdd low": "SDD_LOW",
-    "sdd_low": "SDD_LOW",
-    "s": "SDD_LOW",
-    "medium": "SDD_MEDIUM",
-    "sdd": "SDD_MEDIUM",
-    "sdd medium": "SDD_MEDIUM",
-    "sdd_medium": "SDD_MEDIUM",
-    "full": "SDD_HIGH",
-    "hard": "SDD_HIGH",
-    "high": "SDD_HIGH",
-    "full sdd": "SDD_HIGH",
-    "sdd high": "SDD_HIGH",
-    "sdd_high": "SDD_HIGH",
-    "f": "SDD_HIGH",
-    "explorer": "EXPLORER",
-    "explore": "EXPLORER",
-    "i": "EXPLORER",
+    "sdd": "SDD",
+    "full": "SDD",
+    "full sdd": "SDD",
+    "flow": "SDD",
+    "explore": "EXPLORE_BUNDLE",
+    "explorer": "EXPLORE_BUNDLE",
+    "explore bundle": "EXPLORE_BUNDLE",
+    "proposal": "PROPOSAL_BUNDLE",
+    "proposal bundle": "PROPOSAL_BUNDLE",
+    "purpose": "PROPOSAL_BUNDLE",
+    "spec": "SPEC_BUNDLE",
+    "spec bundle": "SPEC_BUNDLE",
+    "design": "DESIGN_BUNDLE",
+    "design bundle": "DESIGN_BUNDLE",
+    "tasks": "TASKS_BUNDLE",
+    "tasks bundle": "TASKS_BUNDLE",
+    "tdd": "TDD_BUNDLE",
+    "tdd bundle": "TDD_BUNDLE",
 }
+
+
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,7 +120,7 @@ def parse_strategy_override(answer: str) -> str | None:
     if normalized in _OVERRIDE_ALIASES:
         return _OVERRIDE_ALIASES[normalized]
     raise StrategyOverrideError(
-        "strategy override must be empty, sdd_low, sdd_medium, sdd_high, or explorer"
+        "strategy override must be empty, sdd, explore, proposal, spec, design, tasks, or tdd"
     )
 
 
@@ -140,20 +141,12 @@ def finalize_strategy_decision(
     elif answer is not None and prompted:
         source = "prompt_accept"
 
-    if selected == "SDD_LOW":
-        selected = "SDD"
-        complexity = "LOW"
-    elif selected == "SDD_MEDIUM":
-        selected = "SDD"
-        complexity = "MEDIUM"
-    elif selected == "SDD_HIGH":
+    bundle_strategies = {"EXPLORE_BUNDLE", "PROPOSAL_BUNDLE", "SPEC_BUNDLE", "DESIGN_BUNDLE", "TASKS_BUNDLE", "TDD_BUNDLE"}
+    if selected in bundle_strategies:
+        complexity = "HIGH"
+    else:
         selected = "SDD"
         complexity = "HIGH"
-    elif selected == "EXPLORER":
-        complexity = recommendation.complexity if recommendation.complexity != "LOW" else "MEDIUM"
-    else:
-        selected = "SDD" if selected != "EXPLORER" else selected
-        complexity = recommendation.complexity
 
     overridden = selected != recommendation.recommended_strategy or complexity != recommendation.recommended_complexity
     reason = recommendation.reason
@@ -192,13 +185,13 @@ def explorer_strategy_decision(request: str, signals: tuple[str, ...] = ()) -> S
     del request
     selected_signals = signals or ("explorer_request",)
     return StrategyDecision(
-        "EXPLORER",
-        "MEDIUM",
+        "EXPLORE_BUNDLE",
+        "HIGH",
         3,
-        "Improvement explorer selected for discovery and triage before implementation",
+        "Explore bundle selected for discovery and evidence before later bundles",
         selected_signals,
-        "EXPLORER",
-        "MEDIUM",
+        "EXPLORE_BUNDLE",
+        "HIGH",
         False,
     )
 

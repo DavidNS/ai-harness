@@ -12,6 +12,7 @@ from typing import Callable
 from ..explorer_gate import ExplorerGateDecision
 from ..control_outputs import ControlFlowSignal, DecisionRequest
 from ..models import Complexity, Strategy
+from ..pipeline.state_machine import graph_for
 from ..stores.artifact import ArtifactStore
 from ..stores.state import StateStore
 from ..strategy import StrategyDecision, strategy_audit
@@ -62,9 +63,12 @@ class StrategyPersister:
                 source="user_decision",
             )
             self._strategy = self._resolve_fn(self._state.load().user_input, self._explorer_gate)
+            selected_strategy = Strategy(self._strategy.strategy)
+            graph = graph_for(selected_strategy, self._strategy.complexity)
             self._state.update(
-                strategy=Strategy(self._strategy.strategy),
+                strategy=selected_strategy,
                 complexity=Complexity(self._strategy.complexity),
+                current_phase=graph[0] if graph else "COMPLETED",
             )
             mutated = True
         self._write_explorer_gate()
@@ -76,10 +80,10 @@ class StrategyPersister:
             "matched_signals": list(self._strategy.matched_signals),
             **strategy_audit(self._strategy),
         })
-        self._state.record_artifact("strategy.json", "SELECTING_STRATEGY")
+        self._state.record_artifact("strategy.json", self._state.load().current_phase)
         return StrategyPersistResult(self._explorer_gate, self._strategy) if mutated else None
 
     def _write_explorer_gate(self) -> None:
         if self._explorer_gate is not None:
             self._artifacts.write_json("explorer_gate.json", self._explorer_gate.to_dict())
-            self._state.record_artifact("explorer_gate.json", "SELECTING_STRATEGY")
+            self._state.record_artifact("explorer_gate.json", self._state.load().current_phase)

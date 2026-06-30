@@ -102,10 +102,9 @@ class ControlOutputHandler:
             self._record_impossible_as_limitation(output, target_phase=target_phase)
             state = self._ctx.state.load()
             graph = graph_for(state.strategy, state.complexity)
-            if target_phase.startswith("EXPLORER") and PhaseName.EXPLORER_REVIEW in graph:
-                review_index = graph.index(PhaseName.EXPLORER_REVIEW)
-                completed = list(dict.fromkeys([*state.completed_phases, *graph[: review_index + 1]]))
-                self._ctx.state.update(completed_phases=completed, current_phase=PhaseName.EXPLORER_REVIEW)
+            if target_phase == PhaseName.EXPLORE_BUNDLE and PhaseName.EXPLORE_BUNDLE in graph:
+                completed = list(dict.fromkeys([*state.completed_phases, PhaseName.EXPLORE_BUNDLE]))
+                self._ctx.state.update(completed_phases=completed, current_phase=PhaseName.EXPLORE_BUNDLE)
             self._ctx.progress("Converted explorer impossible outcome to limitation artifact")
             return None
         if isinstance(output, ExplorerBundle):

@@ -145,6 +145,26 @@ class DecisionRequest:
         return data
 
 
+def _bundle_phase(value: str) -> str:
+    mapping = {
+        "EXPLORE": "EXPLORE_BUNDLE",
+        "EXPLORER": "EXPLORE_BUNDLE",
+        "EXPLORER_REVIEW": "EXPLORE_BUNDLE",
+        "PURPOSE": "PROPOSAL_BUNDLE",
+        "PROPOSAL": "PROPOSAL_BUNDLE",
+        "SPEC": "SPEC_BUNDLE",
+        "DESIGN": "DESIGN_BUNDLE",
+        "TASKS": "TASKS_BUNDLE",
+        "SIMPLE_TASK": "TASKS_BUNDLE",
+        "TDD_LOOP": "TDD_BUNDLE",
+        "IMPLEMENT": "TDD_BUNDLE",
+        "IMPLEMENTING": "TDD_BUNDLE",
+        "TEST": "TDD_BUNDLE",
+        "REVIEW": "TDD_BUNDLE",
+    }
+    return mapping.get(value, value)
+
+
 @dataclass(frozen=True, slots=True)
 class PhaseEscalation:
     origin_phase: str
@@ -166,7 +186,8 @@ class PhaseEscalation:
         origin = _phase(value.get("origin_phase"), "origin_phase")
         if origin != expected_origin:
             raise ValidationError("phase escalation origin does not match the active worker phase")
-        target = _phase(value.get("target_phase"), "target_phase")
+        target = _bundle_phase(_phase(value.get("target_phase"), "target_phase"))
+        active_graph_phase = _bundle_phase(active_graph_phase)
         reason = _text(value.get("reason"), "reason")
         if target not in graph:
             raise ValidationError("phase escalation target is not in the selected graph")

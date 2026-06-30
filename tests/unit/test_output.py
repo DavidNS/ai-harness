@@ -13,11 +13,11 @@ class OutputTests(unittest.TestCase):
         result = RunResult(
             "run-1", RouteDecision("code", "modify_code", 0.9, "heuristic"),
             StrategyDecision("SDD", "LOW", 0, "small", ()),
-            ("INITIALIZING", "COMPLETED"), "T1=completed", ("state.json",),
+            ("EXPLORE_BUNDLE", "TDD_BUNDLE"), "T1=completed", ("state.json",),
             "success", Path("/tmp/run-1"),
         )
         output = render_result(result)
-        headings = ["## Router", "## Strategy", "## Pipeline", "## Artifacts", "## Result"]
+        headings = ["## Router", "## Flow", "## Bundles", "## Artifacts", "## Result"]
         self.assertEqual(sorted(output.index(item) for item in headings), [output.index(item) for item in headings])
         self.assertIn("Run ID: run-1", output)
         self.assertIn("Snapshot: /tmp/run-1", output)

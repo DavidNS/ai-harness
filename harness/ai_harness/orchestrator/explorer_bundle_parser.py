@@ -49,7 +49,7 @@ class ExplorerBundleParser:
             artifact_kind,
             content,
         )
-        return ExplorerBundle(PhaseName.EXPLORER, (entry,), entry_id)
+        return ExplorerBundle(PhaseName.EXPLORE_BUNDLE, (entry,), entry_id)
 
     def _compact_from_legacy(self, output: str) -> str:
         problem = _markdown_section(output, "Problem") or self._state.load().user_input

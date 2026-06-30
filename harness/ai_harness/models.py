@@ -21,6 +21,12 @@ class Mode(StrEnum):
 
 class Strategy(StrEnum):
     SDD = "SDD"
+    EXPLORE_BUNDLE = "EXPLORE_BUNDLE"
+    PROPOSAL_BUNDLE = "PROPOSAL_BUNDLE"
+    SPEC_BUNDLE = "SPEC_BUNDLE"
+    DESIGN_BUNDLE = "DESIGN_BUNDLE"
+    TASKS_BUNDLE = "TASKS_BUNDLE"
+    TDD_BUNDLE = "TDD_BUNDLE"
     EXPLORER = "EXPLORER"
     NON_CODE_STUB = "NON_CODE_STUB"
 
@@ -76,7 +82,16 @@ class StrategyDecision:
     def __post_init__(self) -> None:
         if self.score < 0 or not self.reason.strip():
             raise ValidationError("strategy score and reason are required")
-        if self.strategy in {Strategy.NON_CODE_STUB, Strategy.EXPLORER}:
+        if self.strategy in {
+            Strategy.NON_CODE_STUB,
+            Strategy.EXPLORER,
+            Strategy.EXPLORE_BUNDLE,
+            Strategy.PROPOSAL_BUNDLE,
+            Strategy.SPEC_BUNDLE,
+            Strategy.DESIGN_BUNDLE,
+            Strategy.TASKS_BUNDLE,
+            Strategy.TDD_BUNDLE,
+        }:
             return
         if self.strategy is not Strategy.SDD:
             raise ValidationError("strategy is inconsistent with complexity")

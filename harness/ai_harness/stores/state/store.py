@@ -31,6 +31,30 @@ from .records import (
 )
 
 
+def _bundle_phase_for(phase: str) -> str:
+    mapping = {
+        "EXPLORE": "EXPLORE_BUNDLE",
+        "EXPLORER": "EXPLORE_BUNDLE",
+        "EXPLORER_INTAKE": "EXPLORE_BUNDLE",
+        "EXPLORER_DISCOVERY": "EXPLORE_BUNDLE",
+        "EXPLORER_DECISION": "EXPLORE_BUNDLE",
+        "EXPLORER_ARTIFACT": "EXPLORE_BUNDLE",
+        "EXPLORER_REVIEW": "EXPLORE_BUNDLE",
+        "PURPOSE": "PROPOSAL_BUNDLE",
+        "PROPOSAL": "PROPOSAL_BUNDLE",
+        "SPEC": "SPEC_BUNDLE",
+        "DESIGN": "DESIGN_BUNDLE",
+        "TASKS": "TASKS_BUNDLE",
+        "SIMPLE_TASK": "TASKS_BUNDLE",
+        "TDD_LOOP": "TDD_BUNDLE",
+        "IMPLEMENT": "TDD_BUNDLE",
+        "IMPLEMENTING": "TDD_BUNDLE",
+        "TEST": "TDD_BUNDLE",
+        "REVIEW": "TDD_BUNDLE",
+    }
+    return mapping.get(str(phase), str(phase))
+
+
 class StateStore:
     """The controller's sole mutable interface to operational state."""
 
@@ -95,15 +119,12 @@ class StateStore:
         """Build terminal state without exposing it as the live state yet."""
         state = self.load()
         graph = graph_for(state.strategy, state.complexity)
-        if state.current_phase != "SNAPSHOTTING" or list(graph[-2:]) != ["SNAPSHOTTING", "COMPLETED"]:
-            raise StateError("only the snapshotting phase can prepare completion")
-        if state.completed_phases != list(graph[:-2]):
-            raise StateError("completion requires every prior phase")
+        if state.completed_phases != list(graph):
+            raise StateError("completion requires every selected bundle phase")
         finished_at = utc_now()
         terminal = replace(
             state,
             current_phase="COMPLETED",
-            completed_phases=[*state.completed_phases, "SNAPSHOTTING", "COMPLETED"],
             status=RunStatus.COMPLETED,
             updated_at=finished_at,
             finished_at=finished_at,
@@ -199,14 +220,16 @@ class StateStore:
         if state.status is not RunStatus.ACTIVE:
             raise StateError("only an active run can escalate a phase")
         graph = graph_for(state.strategy, state.complexity)
-        if escalation.target_phase not in graph or active_graph_phase not in graph:
+        target_phase = _bundle_phase_for(escalation.target_phase)
+        active_graph_phase = _bundle_phase_for(active_graph_phase)
+        if target_phase not in graph or active_graph_phase not in graph:
             raise StateError("phase escalation references a phase outside the selected graph")
-        target_index = graph.index(escalation.target_phase)
+        target_index = graph.index(target_phase)
         active_index = graph.index(active_graph_phase)
         if target_index >= active_index:
             raise StateError("phase escalation target must be earlier than the active graph phase")
         name = f"escalations/{next_control_id(state, 'E', 'escalations')}.json"
-        payload = escalation.to_dict() | {"created_at": utc_now(), "active_graph_phase": active_graph_phase}
+        payload = escalation.to_dict() | {"created_at": utc_now(), "active_graph_phase": active_graph_phase, "target_bundle": target_phase}
         self.artifacts.write_json(name, payload)
         state.artifacts[name] = artifact_metadata(self.artifacts, name, "CONTROL")
 
@@ -218,8 +241,8 @@ class StateStore:
                 self.artifacts.delete(artifact)
                 del state.artifacts[artifact]
         state.completed_phases = list(graph[:target_index])
-        state.current_phase = escalation.target_phase
-        if {"SIMPLE_TASK", "TASKS", "TDD_LOOP"} & invalidated:
+        state.current_phase = target_phase
+        if {"TASKS_BUNDLE", "TDD_BUNDLE"} & invalidated:
             state.tasks = []
         self.save(state)
         return state
@@ -273,6 +296,6 @@ class StateStore:
         elif pending is not None:
             raise StateError("non-waiting state has a pending decision")
         in_progress = [task for task in state.tasks if task.status is TaskStatus.IN_PROGRESS]
-        if len(in_progress) > 1 or (state.current_phase != "TDD_LOOP" and in_progress):
+        if len(in_progress) > 1 or (state.current_phase != "TDD_BUNDLE" and in_progress):
             raise StateError("task status is inconsistent with the current phase")
         return state

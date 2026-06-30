@@ -75,7 +75,7 @@ def route_request(
 ) -> RouteDecision:
     text = " ".join(request.casefold().split())
     if _EXPLICIT_HIGH_SDD_PATTERN.search(text):
-        signals = ["explicit_sdd_high"]
+        signals = ["explicit_sdd"]
         if _ANALYSIS_REFERENCE_PATTERN.search(request):
             signals.append("explorer_scope_reference")
         return RouteDecision("code", "modify_code", 0.90, "heuristic", tuple(signals))

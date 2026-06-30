@@ -14,7 +14,7 @@ from .ui_primitives import _interactive_stdin, _line_prompt, _menu_prompt, _Menu
 ROOT = Path(__file__).resolve().parents[2]
 RUNNER = ROOT / "harness" / "run.py"
 _PROVIDERS = ("codex", "claude", "local", "unknown")
-ACTIONS = {"status", "runs", "resume", "archive", "install-ci", "install-packages", "raw"}
+ACTIONS = {"status", "runs", "resume", "archive", "install-ci", "install-packages", "raw", "sdd", "explore", "proposal", "spec", "design", "tasks", "tdd", "artifacts"}
 OPEN_STATUSES = {"active", "waiting_for_user"}
 CODEX_REASONING_EFFORTS = ("low", "medium", "high", "xhigh")
 GITHUB_CI_MODES = ("off", "baseline", "branch")
@@ -31,6 +31,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--model", help="model for live Codex or Claude runs")
     parser.add_argument("--reasoning-effort", choices=CODEX_REASONING_EFFORTS, help="Codex reasoning effort")
     parser.add_argument("--github-ci-mode", choices=GITHUB_CI_MODES, help="GitHub CI evidence mode: off, baseline, or branch")
+    parser.add_argument("--branch", choices=("current", "create-from-main"), help="git branch behavior for new runs")
     parser.add_argument("--file", dest="prompt_file", type=Path, help="read the request from a file")
     parser.add_argument("--verbose", action="store_true", help="print the delegated backend command")
     parser.add_argument("--dry-run", action="store_true", help="print the delegated command without running it")

@@ -77,6 +77,7 @@ class Orchestrator:
             self._ctx.warnings,
             self._results,
         )
+        self._source_run: str | None = None
         self._pex = PhaseExecution(self._ctx, PhaseExecutionCallbacks(
             load_knowledge=self._aqm._load_knowledge,
             persist_route=self._persist_route,
@@ -323,10 +324,12 @@ class Orchestrator:
         resume_run_id: str | None = None,
         decision_answer: str | None = None,
         strategy_decision: StrategyDecision | None = None,
+        source_run: str | None = None,
     ) -> RunResult:
         if not resume_run_id and not request.strip():
             raise ValidationError("request must not be empty")
         with self.lock:
+            self._source_run = source_run
             state = (
                 self._resume(resume_run_id, decision_answer)
                 if resume_run_id
@@ -345,6 +348,7 @@ class Orchestrator:
             artifacts=self.artifacts, state=self.state,
             resolve_fn=self._make_strategy_resolver().resolve,
             warnings=self.warnings,
+            source_run=self._source_run,
         )
 
     def _initialize(self, request: str, *, strategy_decision: StrategyDecision | None = None) -> RunState:

@@ -111,27 +111,12 @@ class PhaseExecution:
 
     def _phase_handlers(self) -> dict[str, Callable[[], None]]:
         return {
-            PhaseName.INITIALIZING: self._noop,
-            PhaseName.DETECTING_INTENT: self._noop,
-            PhaseName.LOADING_KNOWLEDGE: self._callbacks.load_knowledge,
-            PhaseName.ROUTING: self._callbacks.persist_route,
-            PhaseName.SELECTING_STRATEGY: self._callbacks.persist_strategy,
-            PhaseName.EXPLORE: self._explore,
-            PhaseName.PURPOSE: self._purpose,
-            PhaseName.SPEC: self._spec,
-            PhaseName.DESIGN: self._design,
-            PhaseName.TASKS: self._task_execution.tasks,
-            PhaseName.SIMPLE_TASK: self._task_execution.simple_task,
-            PhaseName.TDD_LOOP: self._task_execution.tdd,
-            PhaseName.EXPLORER: self._callbacks.explorer,
-            PhaseName.EXPLORER_INTAKE: self._callbacks.explorer_intake,
-            PhaseName.EXPLORER_DISCOVERY: self._callbacks.explorer_discovery,
-            PhaseName.EXPLORER_DECISION: self._callbacks.explorer_decision,
-            PhaseName.EXPLORER_ARTIFACT: self._callbacks.explorer_artifact,
-            PhaseName.EXPLORER_REVIEW: self._callbacks.explorer_review,
-            PhaseName.LEARNING: self._learning,
-            PhaseName.NON_CODE_STUB: self._non_code,
-            PhaseName.FINALIZING: self._callbacks.finalize,
+            PhaseName.EXPLORE_BUNDLE: self._explore_bundle,
+            PhaseName.PROPOSAL_BUNDLE: self._proposal_bundle,
+            PhaseName.SPEC_BUNDLE: self._spec_bundle,
+            PhaseName.DESIGN_BUNDLE: self._design_bundle,
+            PhaseName.TASKS_BUNDLE: self._tasks_bundle,
+            PhaseName.TDD_BUNDLE: self._tdd_bundle,
         }
 
     def known_phases(self) -> frozenset[str]:
@@ -143,6 +128,61 @@ class PhaseExecution:
     @staticmethod
     def _noop() -> None:
         return None
+
+    def _publish_handoff(self, bundle: str, payload: Mapping[str, object]) -> None:
+        artifact = f"published/{bundle}-handoff.json"
+        self.artifacts.write_json(artifact, {"schema_version": 1, "bundle": bundle, **dict(payload)})
+        self.state.record_artifact(artifact, bundle.upper() + "_BUNDLE")
+
+    def _archive_knowledge(self, phase: str) -> None:
+        archive_artifact = f"knowledge/{phase.lower()}-archive.json"
+        self.artifacts.write_json(archive_artifact, {
+            "schema_version": 1,
+            "phase": phase,
+            "source_artifacts": self.artifacts.list(),
+        })
+        self.state.record_artifact(archive_artifact, phase)
+        try:
+            output, synthesis_inputs = self._callbacks.invoke_learning_with_repair()
+            artifact = f"knowledge/{phase.lower()}.json"
+            self.artifacts.write(artifact, output)
+            self.state.record_artifact(artifact, phase)
+            self._callbacks.publish_learning_proposals(output, phase, synthesis_inputs=synthesis_inputs)
+        except ControlFlowSignal:
+            raise
+        except Exception as exc:
+            message = " ".join(str(exc).split())[:500] or type(exc).__name__
+            self.warnings.append(f"Knowledge archive failed for {phase}; proposal skipped: {message}")
+
+    def _explore_bundle(self) -> None:
+        self._explore()
+        if self.artifacts.exists("explore/outcome_bundle.json"):
+            self._publish_handoff("explore", {
+                "artifacts": ["explore/outcome_bundle.json", "explore/exploration_map.json", "explore/review.md"],
+                "next_bundle": "PROPOSAL_BUNDLE",
+            })
+        self._archive_knowledge("EXPLORE_BUNDLE")
+
+    def _proposal_bundle(self) -> None:
+        self._purpose()
+        self._publish_handoff("proposal", {"artifacts": ["purpose.md"], "next_bundle": "SPEC_BUNDLE"})
+
+    def _spec_bundle(self) -> None:
+        self._spec()
+        self._publish_handoff("spec", {"artifacts": ["spec.md"], "next_bundle": "DESIGN_BUNDLE"})
+
+    def _design_bundle(self) -> None:
+        self._design()
+        self._publish_handoff("design", {"artifacts": ["design.md"], "next_bundle": "TASKS_BUNDLE"})
+
+    def _tasks_bundle(self) -> None:
+        self._task_execution.tasks()
+        self._publish_handoff("tasks", {"artifacts": ["tasks.json"], "next_bundle": "TDD_BUNDLE"})
+
+    def _tdd_bundle(self) -> None:
+        self._task_execution.tdd()
+        self._publish_handoff("tdd", {"artifacts": ["review.md", "tasks.json"], "next_bundle": None})
+        self._archive_knowledge("TDD_BUNDLE")
 
     def _explore(self) -> None:
         ExplorePipelineService(self._ctx, self._callbacks, self._invoke_with_repair).run()
@@ -168,29 +208,6 @@ class PhaseExecution:
             progress=self.progress,
             clip_text=self._callbacks.clip_text,
         ).invoke(name, inputs, parse_control=parse_control)
-
-    def _learning(self) -> None:
-        try:
-            output, synthesis_inputs = self._callbacks.invoke_learning_with_repair()
-        except ControlFlowSignal:
-            raise
-        except Exception as exc:
-            message = " ".join(str(exc).split())[:500] or type(exc).__name__
-            self.warnings.append(f"Learning failed; knowledge proposal skipped: {message}")
-            return
-        try:
-            artifact = get_phase("learning").artifact
-            self.artifacts.write(artifact, output)
-            self.state.record_artifact(artifact, "LEARNING")
-            self._callbacks.publish_learning_proposals(output, "LEARNING", synthesis_inputs=synthesis_inputs)
-        except Exception as exc:
-            message = " ".join(str(exc).split())[:500] or type(exc).__name__
-            self.warnings.append(f"Learning failed; knowledge proposal skipped: {message}")
-            return
-
-    def _non_code(self) -> None:
-        self.artifacts.write("non_code.md", "# Non-Code Request v1\n\nNon-code orchestration is not implemented in v1.\nNo modifying worker was invoked.\n")
-        self.state.record_artifact("non_code.md", "NON_CODE_STUB")
 
     def _handle_control_output(self, output: ControlOutput, *, target_phase: str) -> RunResult | None:
         return self._control_output_handler.handle(output, target_phase=target_phase)

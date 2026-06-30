@@ -351,7 +351,7 @@ class ExplorerPublisher:
                 learning_service_fn=self._learning_service,
             ).synthesize_and_publish(
                 "explorer",
-                phase=PhaseName.EXPLORER,
+                phase=PhaseName.EXPLORE_BUNDLE,
                 context=extraction_context.synthesis_context(),
                 accepted_evidence=accepted,
                 rejected_evidence=rejected,
@@ -438,7 +438,7 @@ class ExplorerPublisher:
         bundle: ExplorerBundle,
         context: ExplorerContext,
         *,
-        target_phase: str = PhaseName.EXPLORER,
+        target_phase: str = PhaseName.EXPLORE_BUNDLE,
         split_bundle_rationale: str | None = None,
         pre_distilled_content: Mapping[str, str] | None = None,
     ) -> None:

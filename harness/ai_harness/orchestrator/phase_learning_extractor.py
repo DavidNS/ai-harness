@@ -57,7 +57,7 @@ class PhaseLearningExtractor:
         self,
         source: str,
         *,
-        phase: str = PhaseName.LEARNING,
+        phase: str = PhaseName.TDD_BUNDLE,
         context: Mapping[str, object],
         accepted_evidence: Sequence[Mapping[str, object]] = (),
         rejected_evidence: Sequence[Mapping[str, object]] = (),

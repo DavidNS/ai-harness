@@ -52,8 +52,8 @@ class ExplorerPhaseService:
         none_of_above_count = reader.none_of_above_count()
         if none_of_above_count > reader.refinement_escalation_count():
             raise ControlFlowSignal(PhaseEscalation(
-                PhaseName.EXPLORER_DECISION,
-                PhaseName.EXPLORER_DISCOVERY,
+                PhaseName.EXPLORE_BUNDLE,
+                PhaseName.EXPLORE_BUNDLE,
                 "none_of_above selected; rerun discovery with the user's refinement before choosing a direction.",
             ))
         context = self._artifacts.context_from_discovery()
@@ -68,8 +68,8 @@ class ExplorerPhaseService:
             raise ControlFlowSignal(decision_request_from_explorer_decision(decision))
         if outcome == "escalate_discovery":
             raise ControlFlowSignal(PhaseEscalation(
-                PhaseName.EXPLORER_DECISION,
-                PhaseName.EXPLORER_DISCOVERY,
+                PhaseName.EXPLORE_BUNDLE,
+                PhaseName.EXPLORE_BUNDLE,
                 str(decision.get("rediscovery_reason", "Discovery needs more evidence.")),
             ))
         validate_explorer_value_gate(decision, self._artifacts.stage_json("explorer_discovery"))

@@ -22,7 +22,7 @@ class StrategyResolver:
         self._warnings = warnings
 
     def resolve(self, request: str, gate: ExplorerGateDecision) -> StrategyDecision:
-        if gate.path == "explorer":
+        if gate.path == "explore_bundle":
             assert self._route is not None
             return self._from_user_gate(
                 explorer_strategy_decision(
@@ -31,19 +31,17 @@ class StrategyResolver:
                 ),
                 gate,
             )
-        if gate.path in {"sdd_low", "sdd_medium", "sdd_high"}:
-            levels = {"sdd_low": "LOW", "sdd_medium": "MEDIUM", "sdd_high": "HIGH"}
-            complexity = levels[gate.path]
+        if gate.path == "sdd":
             recommendation = select_strategy(request)
             return self._from_user_gate(
                 StrategyDecision(
                     "SDD",
-                    complexity,
+                    "HIGH",
                     max(recommendation.score, gate.scores.get(gate.path, 1)),
                     gate.reason,
                     tuple(dict.fromkeys((*recommendation.matched_signals, *gate.matched_signals))),
                     "SDD",
-                    complexity,
+                    "HIGH",
                     False,
                 ),
                 gate,

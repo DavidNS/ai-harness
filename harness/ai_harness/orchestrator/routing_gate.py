@@ -52,30 +52,20 @@ class RoutingGate:
     def decision_request(self, gate: ExplorerGateDecision) -> DecisionRequest:
         options = [
             DecisionOption(
-                "explorer",
-                "Explorer only",
-                "Run the explorer pipeline and stop after producing run-local explorer artifacts.",
+                "sdd",
+                "Full SDD",
+                "Run EXPLORE_BUNDLE, PROPOSAL_BUNDLE, SPEC_BUNDLE, DESIGN_BUNDLE, TASKS_BUNDLE, and TDD_BUNDLE.",
             ),
             DecisionOption(
-                "sdd_low",
-                "SDD low",
-                "Use the lightweight SDD path for a small implementation.",
-            ),
-            DecisionOption(
-                "sdd_medium",
-                "SDD medium",
-                "Use the standard SDD path with purpose, spec, design, tasks, and implementation.",
-            ),
-            DecisionOption(
-                "sdd_high",
-                "SDD high",
-                "Use the high-resolution SDD path for broad or risky work.",
+                "explore_bundle",
+                "Explore bundle",
+                "Run EXPLORE_BUNDLE only and stop after publishing exploration handoff artifacts.",
             ),
         ]
         return DecisionRequest(
             "SELECTING_STRATEGY",
             gate.reason,
-            "Which path should the harness take for this request?",
+            "Which bundle flow should the harness run for this request?",
             self.context_lines(gate),
             tuple(options),
             True,
@@ -98,17 +88,19 @@ class RoutingGate:
             if not isinstance(answer, dict):
                 continue
             selected = answer.get("selected_option")
-            if selected in {"explorer", "sdd_low", "sdd_medium", "sdd_high"}:
+            if selected in {"explore_bundle", "sdd"}:
                 return str(selected)
+            if selected == "explorer":
+                return "explore_bundle"
             text = str(answer.get("answer", "")).casefold()
             if "explor" in text or "analysis" in text or "investigat" in text:
-                return "explorer"
+                return "explore_bundle"
             if "high" in text or "hard" in text or "full" in text:
-                return "sdd_high"
+                return "sdd"
             if "low" in text or "simple" in text or "lightweight" in text or "easy" in text:
-                return "sdd_low"
+                return "sdd"
             if "medium" in text or "sdd" in text:
-                return "sdd_medium"
+                return "sdd"
         return None
 
     # ------------------------------------------------------------------ #

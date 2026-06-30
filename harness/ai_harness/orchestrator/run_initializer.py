@@ -14,12 +14,14 @@ from typing import Callable
 from ..explorer_gate import ExplorerGateDecision, classify_explorer_gate
 from ..config import HarnessConfig
 from ..ci_support import record_ci_and_git_artifacts
-from ..models import Complexity, Mode, RunState, Strategy
+from ..bundle_inputs import import_source_run_artifacts
+from ..models import Complexity, Mode, RunState, RunStatus, Strategy
 from ..providers.base import Provider
 from ..router import RouteDecision, route_request
 from ..stores.artifact import ArtifactStore
 from ..stores.state import StateStore
-from ..strategy import StrategyDecision, explorer_strategy_decision
+from ..strategy import StrategyDecision, explorer_strategy_decision, strategy_audit
+from ..pipeline.state_machine import graph_for
 
 
 def _routing_permissions(timeout_seconds: float) -> dict[str, object]:
@@ -57,6 +59,7 @@ class RunInitializer:
         state: StateStore,
         resolve_fn: Callable[[str, ExplorerGateDecision], StrategyDecision],
         warnings: list[str],
+        source_run: str | None = None,
     ) -> None:
         self._target = target
         self._provider = provider
@@ -66,6 +69,7 @@ class RunInitializer:
         self._state = state
         self._resolve_fn = resolve_fn
         self._warnings = warnings
+        self._source_run = source_run
 
     def initialize(self, request: str, *, strategy_decision: StrategyDecision | None = None) -> InitResult:
         run_id = uuid.uuid4().hex
@@ -93,13 +97,41 @@ class RunInitializer:
                 strategy = explorer_strategy_decision(request, explorer_gate.matched_signals)
             else:
                 strategy = self._resolve_fn(request, explorer_gate)
+        selected_strategy = Strategy(strategy.strategy)
+        graph = graph_for(selected_strategy, strategy.complexity)
+        current_phase = graph[0] if graph else "COMPLETED"
+        status = RunStatus.ACTIVE if graph else RunStatus.COMPLETED
         run_state = RunState(
-            run_id, request, "INITIALIZING",
-            Strategy(strategy.strategy), Mode(route.mode), route.intent,
+            run_id, request, current_phase,
+            selected_strategy, Mode(route.mode), route.intent,
             Complexity(strategy.complexity),
             self._config.provider, tuple(self._config.provider_command), self._config.model,
+            status=status,
         )
         self._state.save(run_state)
+        self._artifacts.write_json("route.json", {
+            "mode": route.mode,
+            "intent": route.intent,
+            "confidence": route.confidence,
+            "source": route.source,
+            "matched_signals": list(route.matched_signals),
+            "error": route.error,
+        })
+        self._state.record_artifact("route.json", current_phase)
+        self._artifacts.write_json("strategy.json", {
+            "strategy": strategy.strategy,
+            "complexity": strategy.complexity,
+            "score": strategy.score,
+            "reason": strategy.reason,
+            "matched_signals": list(strategy.matched_signals),
+            **strategy_audit(strategy),
+        })
+        self._state.record_artifact("strategy.json", current_phase)
+        if explorer_gate is not None:
+            self._artifacts.write_json("explorer_gate.json", explorer_gate.to_dict())
+            self._state.record_artifact("explorer_gate.json", current_phase)
+        if self._source_run:
+            import_source_run_artifacts(self._target, self._artifacts, self._state, self._source_run)
         record_ci_and_git_artifacts(
             self._target,
             self._artifacts,

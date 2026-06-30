@@ -214,7 +214,18 @@ class ExplorerScopeResolver:
     def resolve(self, request: str) -> dict[str, object]:
         targets = explorer_scope_target_tokens(request)
         if not targets:
-            raise HarnessError("full SDD requires an explorer scope target under docs/explorer/improvements or published/explorer.json")
+            return {
+                "schema_version": 1,
+                "kind": "explorer_scope",
+                "input_targets": [],
+                "primary_artifact": None,
+                "artifacts": [],
+                "limits": {
+                    "max_artifacts": _ANALYSIS_SCOPE_MAX_ARTIFACTS,
+                    "max_artifact_bytes": _ANALYSIS_SCOPE_ARTIFACT_BYTES,
+                    "max_total_bytes": _ANALYSIS_SCOPE_TOTAL_BYTES,
+                },
+            }
         paths: list[str] = []
         primary: str | None = None
         for target in targets:

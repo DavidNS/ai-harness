@@ -60,7 +60,7 @@ class RunProgression:
                 raise StateError("only an active run can execute")
             graph = graph_for(state.strategy, state.complexity)
             if len(state.completed_phases) >= len(graph):
-                raise StateError("pipeline ended without a snapshot")
+                return self._completion.complete(state)
             phase = graph[len(state.completed_phases)]
             validate_phase_preconditions(state.strategy, phase, state.completed_phases, state.tasks, state.complexity)
             self._host.state.validate_resume(state.run_id)
@@ -68,8 +68,6 @@ class RunProgression:
             if state.current_phase != phase:
                 state = self._host.state.mark_phase_started(phase)
             self._host.progress(f"Running {phase}")
-            if phase == "SNAPSHOTTING":
-                return self._completion.complete(state)
             try:
                 self._host._phase(phase)
             except ControlFlowSignal as signal:

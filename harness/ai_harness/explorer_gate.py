@@ -8,7 +8,7 @@ from pathlib import Path
 
 from .strategy import select_strategy
 
-GATE_PATHS = ("explorer", "sdd_low", "sdd_medium", "sdd_high")
+GATE_PATHS = ("explore_bundle", "sdd")
 
 
 ANALYSIS_ARTIFACT_PATTERN = re.compile(r"(?<![\w/.-])(docs/explorer/improvements/(?:[\w.-]+/)*[\w.-]+(?:/improvement\.md)?)(?![\w/.-])")
@@ -79,29 +79,28 @@ def _score_gate(request: str, intent_text: str, supplied: str | None) -> tuple[d
     scores = {path: 0 for path in GATE_PATHS}
     signals: dict[str, list[str]] = {path: [] for path in GATE_PATHS}
     if supplied is not None:
-        _add_score(scores, signals, "sdd_high", 5, "explorer_scope_supplied")
+        _add_score(scores, signals, "sdd", 5, "explorer_scope_supplied")
         if ANALYSIS_TERMS.search(intent_text):
-            _add_score(scores, signals, "explorer", 5, "explore_existing_scope")
+            _add_score(scores, signals, "explore_bundle", 5, "explore_existing_scope")
     has_draft = DRAFT_IMPROVEMENT_PATTERN.search(request) is not None
     explorer_context = supplied is not None or has_draft or "improvement" in intent_text or "artifact" in intent_text or "document" in intent_text
     if has_draft:
-        _add_score(scores, signals, "explorer", 5, "draft_improvement_reference")
+        _add_score(scores, signals, "explore_bundle", 5, "draft_improvement_reference")
     if ANALYSIS_TERMS.search(intent_text) and explorer_context:
-        _add_score(scores, signals, "explorer", 4, "explorer_language")
+        _add_score(scores, signals, "explore_bundle", 4, "explorer_language")
     if "improvement" in intent_text:
-        _add_score(scores, signals, "explorer", 3, "improvement_language")
+        _add_score(scores, signals, "explore_bundle", 3, "improvement_language")
     if "artifact" in intent_text or "document" in intent_text:
-        _add_score(scores, signals, "explorer", 1, "artifact_language")
+        _add_score(scores, signals, "explore_bundle", 1, "artifact_language")
     if BUG_TERMS.search(text):
-        _add_score(scores, signals, "sdd_low", 3, "bug_or_failure_language")
+        _add_score(scores, signals, "sdd", 3, "bug_or_failure_language")
     if TRIVIAL_TERMS.search(text):
-        _add_score(scores, signals, "sdd_low", 4, "trivial_change_language")
+        _add_score(scores, signals, "sdd", 4, "trivial_change_language")
     if FULL_TERMS.search(text):
-        _add_score(scores, signals, "sdd_high", 4, "full_implementation_language")
+        _add_score(scores, signals, "sdd", 4, "full_implementation_language")
     strategy = select_strategy(request)
     if strategy.strategy == "SDD":
-        path = "sdd_low" if strategy.complexity == "LOW" else ("sdd_high" if strategy.complexity == "HIGH" else "sdd_medium")
-        _add_score(scores, signals, path, max(strategy.score, 1), "strategy_sdd")
+        _add_score(scores, signals, "sdd", max(strategy.score, 1), "strategy_sdd")
     return scores, {key: tuple(value) for key, value in signals.items()}
 
 
@@ -113,7 +112,7 @@ def _signals(score_signals: dict[str, tuple[str, ...]], *paths: str) -> tuple[st
 
 
 def _contested(scores: dict[str, int]) -> bool:
-    return scores.get("explorer", 0) > 0 and scores.get("sdd_low", 0) > 0
+    return scores.get("explore_bundle", 0) > 0 and scores.get("sdd", 0) > 0
 
 
 def _existing_analysis_artifact(request: str, repository: Path | None) -> str | None:
@@ -152,9 +151,9 @@ def classify_explorer_gate(request: str, *, repository: Path | None = None) -> E
 
     if supplied is not None and EXPLICIT_FULL_PATTERN.search(request.casefold()):
         return ExplorerGateDecision(
-            "sdd_high",
+            "sdd",
             f"Explicit high-resolution SDD requested with supplied {supplied}",
-            _signals(score_signals, "sdd_high") or ("explicit_sdd_high",),
+            _signals(score_signals, "sdd") or ("explicit_sdd",),
             supplied_artifact=supplied,
             scores=scores,
             score_signals=score_signals,

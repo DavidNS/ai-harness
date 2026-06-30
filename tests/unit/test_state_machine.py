@@ -12,17 +12,19 @@ class StateMachineTests(unittest.TestCase):
             for phase in phases[:-1]:
                 validate_transition(strategy, phase, "FAILED")
 
-    def test_explorer_graph_contains_only_analysis_phases(self):
-        graph = GRAPHS[Strategy.EXPLORER]
-        self.assertIn("EXPLORER_INTAKE", graph)
-        self.assertIn("EXPLORER_DISCOVERY", graph)
-        self.assertIn("EXPLORER_DECISION", graph)
-        self.assertIn("EXPLORER_ARTIFACT", graph)
-        self.assertIn("EXPLORER_REVIEW", graph)
-        self.assertNotIn("EXPLORER", graph)
-        self.assertNotIn("TDD_LOOP", graph)
-        self.assertNotIn("LEARNING", graph)
+    def test_explorer_graph_is_single_explore_bundle(self):
+        self.assertEqual(("EXPLORE_BUNDLE",), tuple(str(item) for item in GRAPHS[Strategy.EXPLORER]))
+
+    def test_full_sdd_graph_contains_only_bundle_phases(self):
+        self.assertEqual((
+            "EXPLORE_BUNDLE",
+            "PROPOSAL_BUNDLE",
+            "SPEC_BUNDLE",
+            "DESIGN_BUNDLE",
+            "TASKS_BUNDLE",
+            "TDD_BUNDLE",
+        ), tuple(str(item) for item in GRAPHS[Strategy.SDD]))
 
     def test_skipping_a_phase_fails_closed(self):
         with self.assertRaises(TransitionError):
-            validate_transition(Strategy.SDD, "INITIALIZING", "ROUTING")
+            validate_transition(Strategy.SDD, "EXPLORE_BUNDLE", "SPEC_BUNDLE")

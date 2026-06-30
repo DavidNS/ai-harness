@@ -9,6 +9,7 @@ import sys
 from dataclasses import dataclass
 
 from ai_harness.ci_support import ci_preflight
+from ai_harness.bundle_inputs import compatible_runs
 from ai_harness.recommended_packages import load_recommended_package_groups
 
 from .bootstrap import ACTIONS, GITHUB_CI_MODES, RUNNER, _default_provider, _parser, _prompt_for_model, _prompt_for_reasoning_effort
@@ -124,6 +125,9 @@ _CONSOLE_ACTIONS = (
     _ConsoleAction("resume", "Resume run", "u"),
     _ConsoleAction("archive", "Archive run", "a"),
     _ConsoleAction("start", "Start request", "n", ("new",)),
+    _ConsoleAction("sdd", "Start full SDD", "f"),
+    _ConsoleAction("explore", "Run explore bundle", "e"),
+    _ConsoleAction("proposal", "Run proposal bundle", "o"),
     _ConsoleAction("model", "Select model", "m"),
     _ConsoleAction("ci-mode", "Select GitHub CI mode", "g", ("ci", "github-ci")),
     _ConsoleAction("install-ci", "Install CI", "c"),
@@ -261,6 +265,50 @@ def _console_action_menu(namespace: argparse.Namespace) -> int:
     return _dispatch_console_action(namespace, selected, [], selected)
 
 
+def _branch_args(namespace: argparse.Namespace) -> list[str]:
+    selected = getattr(namespace, "branch", None)
+    if selected in {"current", "create-from-main"}:
+        return ["--branch", selected]
+    if not sys.stdin.isatty():
+        return ["--branch", "current"]
+    selected = _menu_prompt(
+        ["Git branch"],
+        [
+            _MenuItem("c", "Use current branch", "current", ("current",)),
+            _MenuItem("n", "Create run branch from main", "create-from-main", ("create", "new")),
+        ],
+        help_kind="console",
+        default_index=0,
+    ).value
+    setattr(namespace, "branch", selected)
+    return ["--branch", selected]
+
+
+def _source_run_for_bundle(namespace: argparse.Namespace, bundle: str, args: list[str]) -> str | None:
+    if args:
+        if args[0] == "--from-run" and len(args) > 1:
+            return args[1]
+        return args[0]
+    required = {
+        "proposal": "published/explore-handoff.json",
+        "spec": "published/proposal-handoff.json",
+        "design": "published/spec-handoff.json",
+        "tasks": "published/design-handoff.json",
+        "tdd": "published/tasks-handoff.json",
+    }.get(bundle)
+    if required is None or not sys.stdin.isatty():
+        return None
+    runs = compatible_runs(namespace.cwd.resolve(), required)[:10]
+    if not runs:
+        return _line_prompt("Source run id/path: ", help_kind="console").strip() or None
+    items = [_MenuItem(str(index), f"{item['run_id']} - has {required}", str(item["run_id"]), (str(item["run_id"]),)) for index, item in enumerate(runs, 1)]
+    items.append(_MenuItem("m", "Enter run id/path", "__manual__", ("manual",)))
+    selected = _menu_prompt([f"Source run for {bundle}"], items, help_kind="console").value
+    if selected == "__manual__":
+        return _line_prompt("Source run id/path: ", help_kind="console").strip() or None
+    return selected
+
+
 def _dispatch_console_action(namespace: argparse.Namespace, command: str, args: list[str], raw_line: str) -> int:
     repository = str(namespace.cwd.resolve())
     if command == "exit":
@@ -285,6 +333,19 @@ def _dispatch_console_action(namespace: argparse.Namespace, command: str, args: 
             print("error: request is empty", file=sys.stderr)
             return 2
         return _start(namespace, [], request_override=request)
+    if command in {"sdd", "explore", "proposal", "spec", "design", "tasks", "tdd"}:
+        request = raw_line.split(None, 1)[1].strip() if args and command in {"sdd", "explore"} else None
+        source_run = _source_run_for_bundle(namespace, command, args) if command not in {"sdd", "explore"} else None
+        return _start(namespace, [], request_override=request, flow=command, source_run=source_run)
+    if command == "artifacts":
+        run_id = args[0] if args else _line_prompt("Run id: ", help_kind="console").strip()
+        root = namespace.cwd.resolve() / ".ai-harness" / "artifacts" / "runs" / run_id
+        if not root.is_dir():
+            print(f"error: run not found: {run_id}", file=sys.stderr)
+            return 1
+        for item in sorted(path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_file()):
+            print(item)
+        return 0
     if command == "ci-mode":
         return _select_github_ci_mode(namespace, args)
     if command == "install-ci":
@@ -391,9 +452,14 @@ def _console_loop(namespace: argparse.Namespace) -> int:
             return 0
 
 
-def _start(namespace: argparse.Namespace, prompt_args: list[str], *, request_override: str | None = None) -> int:
+def _start(namespace: argparse.Namespace, prompt_args: list[str], *, request_override: str | None = None, flow: str | None = None, source_run: str | None = None) -> int:
     provider = _default_provider(namespace.provider)
     backend = ["--cwd", str(namespace.cwd.resolve()), "--provider", provider, "--activated"]
+    backend.extend(_branch_args(namespace))
+    if flow:
+        backend.extend(["--flow", flow])
+    if source_run:
+        backend.extend(["--from-run", source_run])
     model = getattr(namespace, "model", None)
     if model:
         backend.extend(["--model", model])
@@ -414,10 +480,13 @@ def _start(namespace: argparse.Namespace, prompt_args: list[str], *, request_ove
         if not request and not sys.stdin.isatty():
             request = sys.stdin.read().strip()
     if namespace.prompt_file is None and not request:
-        if sys.stdin.isatty():
+        if source_run and flow:
+            request = f"Run {flow} bundle from {source_run}"
+        elif sys.stdin.isatty():
             return _console_loop(namespace)
-        print("error: a request is required", file=sys.stderr)
-        return 2
+        else:
+            print("error: a request is required", file=sys.stderr)
+            return 2
     if sys.stdin.isatty():
         _startup_ci_preflight(namespace)
     if namespace.prompt_file is None and request and sys.stdin.isatty():
@@ -495,6 +564,8 @@ def main(argv: list[str] | None = None) -> int:
             return _dispatch_console_action(namespace, "install-ci", args, "install-ci " + " ".join(args))
         if action == "install-packages":
             return _dispatch_console_action(namespace, "install-packages", args, "install-packages " + " ".join(args))
+        if action in {"sdd", "explore", "proposal", "spec", "design", "tasks", "tdd", "artifacts"}:
+            return _dispatch_console_action(namespace, action, args, action + " " + " ".join(args))
         if action == "raw":
             raw = args[1:] if args[:1] == ["--"] else args
             return _run(raw, verbose=namespace.verbose, dry_run=namespace.dry_run)

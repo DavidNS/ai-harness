@@ -30,28 +30,27 @@ class StrategyTests(unittest.TestCase):
   self.assertFalse(d.confirmation_required)
  def test_draft_improvement_path_uses_explorer_by_default(self):
   d=select_strategy("Implement draft-improvements/strategy-selection-robustness.md")
-  self.assertEqual(("MEDIUM","EXPLORER"),(d.complexity,d.strategy))
+  self.assertEqual(("HIGH","EXPLORE_BUNDLE"),(d.complexity,d.strategy))
   self.assertIn("explorer_request",d.matched_signals)
  def test_trivial_draft_edit_can_remain_simple(self):
   d=select_strategy("Fix a typo in draft-improvements/strategy-selection-robustness.md")
   self.assertEqual(("LOW","SDD"),(d.complexity,d.strategy))
  def test_override_aliases(self):
-  self.assertEqual("SDD_LOW",parse_strategy_override("simple"))
-  self.assertEqual("SDD_MEDIUM",parse_strategy_override("sdd"))
-  self.assertEqual("SDD_MEDIUM",parse_strategy_override("sdd"))
-  self.assertEqual("EXPLORER",parse_strategy_override("explorer"))
+  self.assertEqual("SDD",parse_strategy_override("sdd"))
+  self.assertEqual("EXPLORE_BUNDLE",parse_strategy_override("explorer"))
+  self.assertEqual("PROPOSAL_BUNDLE",parse_strategy_override("proposal"))
   self.assertIsNone(parse_strategy_override("\n"))
   with self.assertRaises(StrategyOverrideError):
    parse_strategy_override("maybe")
  def test_finalize_records_simple_override_audit(self):
   recommendation=select_strategy("Update orchestrator routing")
-  final=finalize_strategy_decision(recommendation,answer="simple",prompted=True)
-  self.assertEqual(("LOW","SDD"),(final.complexity,final.strategy))
+  final=finalize_strategy_decision(recommendation,answer="explore",prompted=True)
+  self.assertEqual(("HIGH","EXPLORE_BUNDLE"),(final.complexity,final.strategy))
   self.assertEqual("SDD",final.recommended_strategy)
   self.assertEqual("MEDIUM",final.recommended_complexity)
   self.assertTrue(final.overridden)
   self.assertEqual("prompt_override",final.selection_source)
-  self.assertEqual("simple",final.override_text)
+  self.assertEqual("explore",final.override_text)
 
 if __name__ == "__main__":
  unittest.main()
