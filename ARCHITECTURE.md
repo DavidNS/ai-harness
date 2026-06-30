@@ -1,41 +1,29 @@
 # Architecture
 
-This repository is an AI coding harness.
+This repository is an AI coding harness, written to be readable by software
+engineers and agents.
 
-It must be readable for both software engineers and machines.
+The harness favors small, explicit boundaries. We split by domain so ownership,
+context, and validation stay local: a domain should be inspectable, changeable,
+testable, and reviewable without loading the whole system.
 
-The harness is designed around small, explicit boundaries. A smaller file is only
-better when it clarifies ownership, reduces context load, and makes validation
-more local.
-
-We split by domain so ownership, context, and validation stay local. A domain is
-the unit that should be possible to inspect, change, test, and review without
-loading the whole harness.
-
-At the edges of each domain, dependencies are explicit. The backend uses
-hexagonal architecture to keep orchestration isolated from adapters, tools,
-storage, and user interfaces. The command frontend uses a command-driven
-Model-View-Update architecture so user intent, state transitions, and backend
-effects remain separate and inspectable.
-
-We try to keep agent context as small and isolated as possible.
+Dependencies are explicit at domain edges. The backend uses hexagonal
+architecture to isolate orchestration from adapters, tools, storage, and user
+interfaces. The command frontend uses command-driven Model-View-Update so user
+intent, state transitions, and backend effects stay separate and inspectable.
 
 ## Purpose
 
-We are building a portable tool, as plug and play as possible, that automates the
-full software engineering release lifecycle.
+We are building a portable tool that automates the full software engineering
+release lifecycle through a CLI and UI.
 
-The tool includes a CLI and a UI.
+The harness triggers pipelines composed of Python code, Codex/Claude, and git CI.
+It orchestrates deterministic code and AI workers: deterministic steps enforce
+structure, validation, state transitions, and repeatability; AI workers handle
+interpretation, exploration, judgment, and code generation.
 
-The tool triggers pipelines composed of Python code, Codex/Claude, and git CI.
-
-The harness orchestrates steps made up of deterministic code and AI workers. The
-deterministic parts enforce structure, validation, state transitions, and
-repeatability. The AI workers handle the nondeterministic parts that require
-interpretation, exploration, judgment, or code generation.
-
-We try to make the pipelines as reproducible as possible, so each AI step has one
-clear task and one limited context.
+Pipelines should be reproducible. Each AI step should have one clear task and one
+limited context.
 
 The harness learns---not the model.
 
