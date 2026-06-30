@@ -8,13 +8,14 @@ import shutil
 import sys
 from pathlib import Path
 
+from .console_actions import top_level_action_names
 from .model_discovery import ModelChoice, model_choices
 from .ui_primitives import _interactive_stdin, _line_prompt, _menu_prompt, _MenuItem
 
 ROOT = Path(__file__).resolve().parents[2]
 RUNNER = ROOT / "harness" / "run.py"
 _PROVIDERS = ("codex", "claude", "local", "unknown")
-ACTIONS = {"status", "runs", "resume", "archive", "install-ci", "install-packages", "raw", "sdd", "explore", "proposal", "spec", "design", "tasks", "tdd", "artifacts"}
+ACTIONS = top_level_action_names() | {"raw"}
 OPEN_STATUSES = {"active", "waiting_for_user"}
 CODEX_REASONING_EFFORTS = ("low", "medium", "high", "xhigh")
 GITHUB_CI_MODES = ("off", "baseline", "branch")

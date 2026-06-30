@@ -700,6 +700,67 @@ class DecisionMenuTests(unittest.TestCase):
         self.assertEqual("/status", line)
         self.assertIn("/status", stderr.getvalue())
 
+    def test_console_prompt_slash_enter_opens_menu_contract(self) -> None:
+        launcher = load_launcher()
+
+        class DummyRawTerminal:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return None
+
+        keys = iter(["/", "\n"])
+        with mock.patch.object(launcher, "_interactive_stdin", return_value=True), \
+            mock.patch.object(launcher, "_RawTerminal", DummyRawTerminal), \
+            mock.patch.object(launcher, "_read_key", side_effect=lambda: next(keys)), \
+            contextlib.redirect_stderr(io.StringIO()):
+            line = launcher._interactive_console_line()
+
+        self.assertEqual("/", line)
+
+    def test_console_prompt_menu_literal_opens_menu_contract(self) -> None:
+        launcher = load_launcher()
+
+        class DummyRawTerminal:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return None
+
+        keys = iter(["/", "m", "e", "n", "u", "\n"])
+        with mock.patch.object(launcher, "_interactive_stdin", return_value=True), \
+            mock.patch.object(launcher, "_RawTerminal", DummyRawTerminal), \
+            mock.patch.object(launcher, "_read_key", side_effect=lambda: next(keys)), \
+            contextlib.redirect_stderr(io.StringIO()):
+            line = launcher._interactive_console_line()
+
+        self.assertEqual("/menu", line)
+
+    def test_console_prompt_render_clears_stale_suggestion_rows(self) -> None:
+        launcher = load_launcher()
+        stderr = io.StringIO()
+
+        with contextlib.redirect_stderr(stderr):
+            previous = launcher._render_console_prompt(["/"], True, 0, 0)
+            current = launcher._render_console_prompt(["/", "z", "z"], True, 0, previous)
+
+        output = stderr.getvalue()
+        self.assertEqual(previous, current)
+        self.assertIn(f"\x1b[{previous}F", output)
+        self.assertGreaterEqual(output.count("\x1b[2K"), previous + current)
+
+    def test_bootstrap_actions_are_derived_from_top_level_registry(self) -> None:
+        bootstrap = load_bootstrap()
+
+        self.assertIn("status", bootstrap.ACTIONS)
+        self.assertIn("artifacts", bootstrap.ACTIONS)
+        self.assertIn("raw", bootstrap.ACTIONS)
+        self.assertIn("tdd", bootstrap.ACTIONS)
+        self.assertNotIn("start", bootstrap.ACTIONS)
+        self.assertNotIn("model", bootstrap.ACTIONS)
+
     def test_console_blocks_plain_request_when_unfinished_runs_require_selection(self) -> None:
         launcher = load_launcher()
         namespace = launcher.argparse.Namespace(cwd=Path("/repo"), provider="local", verbose=False, dry_run=False)

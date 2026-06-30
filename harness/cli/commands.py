@@ -370,6 +370,8 @@ def _console_suggestion_label(action: ConsoleAction) -> str:
 def _render_console_prompt(buffer: list[str], slash_mode: bool, selected: int, previous_lines: int) -> int:
     query = "".join(buffer)[1:] if slash_mode else ""
     suggestions = suggest_console_actions(query) if slash_mode else []
+    rendered = 1 + len(suggestions) + 1
+    rows = max(previous_lines, rendered)
     if previous_lines:
         print(f"\x1b[{previous_lines}F", end="", file=sys.stderr)
     prompt = "aih> "
@@ -381,14 +383,13 @@ def _render_console_prompt(buffer: list[str], slash_mode: bool, selected: int, p
     else:
         line = f"{prompt}{value}"
     print(f"\x1b[2K{line}", file=sys.stderr)
-    rendered = 1
     for index, action in enumerate(suggestions):
         marker = ">" if index == selected else " "
         print(f"\x1b[2K{marker} {_console_suggestion_label(action)}", file=sys.stderr)
-        rendered += 1
+    for _ in range(rows - rendered):
+        print("\x1b[2K", file=sys.stderr)
     print("\x1b[2K", end="", file=sys.stderr)
-    rendered += 1
-    return rendered
+    return rows
 
 
 def _interactive_console_line() -> str | None:
@@ -410,13 +411,18 @@ def _interactive_console_line() -> str | None:
                     print(file=sys.stderr)
                     return None
                 if key in {"\r", "\n"}:
+                    value = "".join(buffer).strip()
                     if slash_mode:
-                        suggestions = suggest_console_actions("".join(buffer)[1:])
+                        query = value[1:] if value.startswith("/") else value
+                        if not query:
+                            print(file=sys.stderr)
+                            return "/"
+                        suggestions = suggest_console_actions(query)
                         if suggestions:
                             print(file=sys.stderr)
                             return "/" + suggestions[min(selected, len(suggestions) - 1)].name
                     print(file=sys.stderr)
-                    return "".join(buffer).strip()
+                    return value
                 if key == "up" and slash_mode:
                     suggestions = suggest_console_actions("".join(buffer)[1:])
                     if suggestions:
