@@ -178,7 +178,7 @@ class DecisionGateIntegrationTests(unittest.TestCase):
             self.assertEqual("waiting_for_user", waiting.outcome)
             state = StateStore(repository).load()
             self.assertEqual("waiting_for_user", state.status.value)
-            self.assertEqual("DESIGN", state.current_phase)
+            self.assertEqual("DESIGN_BUNDLE", state.current_phase)
             assert state.pending_decision is not None
             decision_id = state.pending_decision.id
             self.assertIn(f"decisions/{decision_id}/request.json", waiting.artifacts)
@@ -279,12 +279,12 @@ class DecisionGateIntegrationTests(unittest.TestCase):
             regenerated_tasks_prompt = provider.tasks_prompts[1]
             self.assertIn('"escalation_history"', regenerated_tasks_prompt)
             self.assertIn('"origin_phase": "IMPLEMENT"', regenerated_tasks_prompt)
-            self.assertIn('"target_phase": "TASKS"', regenerated_tasks_prompt)
+            self.assertIn('"target_phase": "TASKS_BUNDLE"', regenerated_tasks_prompt)
             self.assertIn('The task scope is missing a required file.', regenerated_tasks_prompt)
             repair_prompt = provider.implement_prompts[1]
             self.assertIn('\"repair\"', repair_prompt)
             self.assertIn('\"expected_origin\": \"IMPLEMENT\"', repair_prompt)
-            self.assertIn('\"TASKS\"', repair_prompt)
+            self.assertIn('\"TASKS_BUNDLE\"', repair_prompt)
             self.assertEqual("ready\n", (repository / "feature.py").read_text(encoding="utf-8"))
 
     def test_implement_impossible_is_failed_and_rolls_back_partial_edit(self) -> None:
@@ -294,8 +294,8 @@ class DecisionGateIntegrationTests(unittest.TestCase):
             with self.assertRaisesRegex(Exception, "impossible is only valid"):
                 run_with_flow(
                     Orchestrator(repository, HarnessConfig(provider="local"), provider),
-                    "Fix typo in README.md",
-                    "sdd_low",
+                    f"Implement {write_analysis_artifact(repository)}",
+                    "sdd",
                 )
 
             self.assertFalse((repository / "feature.py").exists())

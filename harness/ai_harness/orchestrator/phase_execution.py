@@ -13,6 +13,7 @@ from ..control_outputs import (
     ControlOutput,
 )
 from ..models import KnowledgeEntry
+from ..pipeline.state_machine import graph_for
 from ..output import RunResult
 from ..phases import get_phase
 from ..stores.artifact import ArtifactStore
@@ -123,6 +124,14 @@ class PhaseExecution:
         return frozenset(self._phase_handlers())
 
     def _phase(self, phase: str) -> None:
+        self._callbacks.persist_route()
+        state = self.state.load()
+        if phase not in graph_for(state.strategy, state.complexity):
+            return
+        self._callbacks.persist_strategy()
+        state = self.state.load()
+        if phase not in graph_for(state.strategy, state.complexity):
+            return
         PhaseExecutor(self._phase_handlers()).execute(phase)
 
     @staticmethod

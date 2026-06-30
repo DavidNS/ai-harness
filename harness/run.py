@@ -21,6 +21,7 @@ from ai_harness.launcher.status import render_status
 from ai_harness.models import RunStatus
 from ai_harness.orchestrator import Orchestrator
 from ai_harness.output import render_result
+from ai_harness.router import RouteDecision
 from ai_harness.stores.artifact import ArtifactStore, cleanup_terminal_live_artifacts
 from ai_harness.strategy import StrategyDecision
 
@@ -39,6 +40,7 @@ def _parser() -> argparse.ArgumentParser:
     recovery.add_argument("--install-packages", action="store_true")
     parser.add_argument("--ci-target", choices=("github", "gitlab", "both"))
     parser.add_argument("--github-ci-mode", choices=("off", "baseline", "branch"), help="GitHub CI evidence mode for harness runs")
+    parser.add_argument("--route", choices=("code", "non-code", "non_code"), help="route selection for a new run")
     parser.add_argument("--flow", choices=("sdd", "explore", "proposal", "spec", "design", "tasks", "tdd"), help="bundle flow to run")
     parser.add_argument("--from-run", help="completed run id or artifact directory to import before running one bundle")
     parser.add_argument("--branch", choices=("current", "create-from-main"), help="git branch behavior for a new run")
@@ -123,6 +125,15 @@ def _strategy_from_flow(flow: str | None) -> StrategyDecision | None:
     strategy = mapping[flow]
     return StrategyDecision(strategy, "HIGH", 0, f"CLI selected {flow} bundle flow", ("cli_flow",), strategy, "HIGH", False, True, False, "cli", flow)
 
+
+def _route_from_cli(route: str | None, flow: str | None) -> RouteDecision | None:
+    if route is None and flow is None:
+        return None
+    selected = (route or "code").replace("-", "_")
+    if selected == "non_code":
+        return RouteDecision("non_code", "unknown", 1.0, "cli_route", ("cli_route",))
+    return RouteDecision("code", "modify_code", 1.0, "cli_route", ("cli_route",))
+
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     request = _request_from_args(args)
@@ -194,6 +205,12 @@ def main(argv: list[str] | None = None) -> int:
         if not request:
             print("error: a request is required", file=sys.stderr)
             return 2
+        if args.route is not None and args.route.replace("-", "_") == "non_code" and args.flow is not None:
+            print("error: --route non-code cannot be combined with --flow", file=sys.stderr)
+            return 2
+        if args.flow in {"proposal", "spec", "design", "tasks", "tdd"} and not args.from_run:
+            print(f"error: --flow {args.flow} requires --from-run", file=sys.stderr)
+            return 2
         result = Orchestrator(
             repository,
             config,
@@ -204,6 +221,7 @@ def main(argv: list[str] | None = None) -> int:
             request,
             resume_run_id=args.resume,
             decision_answer=decision_answer,
+            route_decision=_route_from_cli(args.route, args.flow),
             strategy_decision=_strategy_from_flow(args.flow),
             source_run=args.from_run,
         )

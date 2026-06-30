@@ -1,14 +1,67 @@
 # Architecture
 
-This repository is an AI coding harness. Has to be readable for both humans and machines.
+This repository is an AI coding harness.
+
+Has to be readable for both software engineers and machines.
 
 A smaller file is only better when it clarifies
 ownership, reduces context load, and makes validation more local.
 
+We divide by domain to clarify boundaries and we apply hexagonal architecture to increase the isolation. 
+
+
+## Purpose and core ideas of this repo
+
+We are building a portable tool (as plug and play as possible) that automates the full software engineering loop release lifecycle.
+
+In order to do that we use building a harness for AI.
+
+The idea is we run a pipeline that orchestates steps composed by deterministic code and by AI focused workers in charge of the indetermisistic steps.
+
+We try the pipelines to be as reproducible as possible so each AI indeterminisic step has to have a single clear task.
+
+Harness will act as an orchestator and will guide along each step of the pipelines.
+
+### The lifecycle of the SE
+
+Main phases of our SE lifecycle are based on the current SDD lierature:
+
+- `EXPLORE`, `PROPOSAL`, `SPEC`, `DESIGN`, `TASKS`, `IMPLEMENT`, `TEST`, `REVIEW`, `ARCHIVE`
+
+But we do some modifications.
+
+We perform what we call a `TDD_LOOP`. 
+
+TDD loop loops over tdd standards
+
+- Create required test code. Test that are going to fail but describes the expected behaviur.
+- Create the code that makes that test works.
+- Review checks all criteria are right: All test for the described behaviur. All code for test. All test green...
+- Iterate until reviewer gives the approval.
+
+Also we extract learning at the end of EXPLORER phases and at the end of TDD_LOOP. 
+
+So real harness lifecycle is a simplified steps is more like:
+
+- `EXPLORE`, `KNOWLEADGE_PHASE_EXTRACTOR`, `PROPOSAL`, `SPEC`, `DESIGN`, `TASKS`, `TDD_LOOP`, `KNOWLEADGE_PHASE_EXTRACTOR`
+
+
+### The learning phases purpose
+
+Problem learning phases are trying to solve is not about to create a jira.
+
+What we actually want to 
+
+
+## Agents as software engineer problem
+
+The main problem of using agents 
+
+- Agents learn from any prompt
+
 ## Purpose
 
-The harness should turn a user request into a recoverable, evidence-backed
-pipeline run.
+The harness shouls help you to create code in the best way possible.
 
 - Every phase must have a bounded responsibility.
 - Every important decision must leave an artifact or state record.

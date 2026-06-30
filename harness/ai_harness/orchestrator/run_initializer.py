@@ -71,12 +71,18 @@ class RunInitializer:
         self._warnings = warnings
         self._source_run = source_run
 
-    def initialize(self, request: str, *, strategy_decision: StrategyDecision | None = None) -> InitResult:
+    def initialize(
+        self,
+        request: str,
+        *,
+        route_decision: RouteDecision | None = None,
+        strategy_decision: StrategyDecision | None = None,
+    ) -> InitResult:
         run_id = uuid.uuid4().hex
         if not self._external_runtime:
             self._artifacts = ArtifactStore.for_run(self._target, run_id)
             self._state = StateStore(self._target, self._artifacts)
-        route = route_request(
+        route = route_decision or route_request(
             request,
             provider=self._provider,
             cwd=self._target,
@@ -86,8 +92,6 @@ class RunInitializer:
         if strategy_decision is not None:
             strategy = strategy_decision
         elif route.source == "needs_user":
-            route_intent = route.intent if route.mode == "code" else "modify_code"
-            route = RouteDecision("code", route_intent, 0.0, "needs_user", route.matched_signals, route.error)
             strategy = explorer_strategy_decision(request, route.matched_signals)
         elif route.mode == "non_code":
             strategy = StrategyDecision("NON_CODE_STUB", "LOW", 0, "Non-code requests use the v1 stub", ())
@@ -100,7 +104,7 @@ class RunInitializer:
         selected_strategy = Strategy(strategy.strategy)
         graph = graph_for(selected_strategy, strategy.complexity)
         current_phase = graph[0] if graph else "COMPLETED"
-        status = RunStatus.ACTIVE if graph else RunStatus.COMPLETED
+        status = RunStatus.ACTIVE
         run_state = RunState(
             run_id, request, current_phase,
             selected_strategy, Mode(route.mode), route.intent,

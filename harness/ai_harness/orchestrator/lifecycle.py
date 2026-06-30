@@ -323,6 +323,7 @@ class Orchestrator:
         *,
         resume_run_id: str | None = None,
         decision_answer: str | None = None,
+        route_decision: RouteDecision | None = None,
         strategy_decision: StrategyDecision | None = None,
         source_run: str | None = None,
     ) -> RunResult:
@@ -333,7 +334,7 @@ class Orchestrator:
             state = (
                 self._resume(resume_run_id, decision_answer)
                 if resume_run_id
-                else self._initialize(request, strategy_decision=strategy_decision)
+                else self._initialize(request, route_decision=route_decision, strategy_decision=strategy_decision)
             )
             try:
                 return self._execute(state)
@@ -351,8 +352,16 @@ class Orchestrator:
             source_run=self._source_run,
         )
 
-    def _initialize(self, request: str, *, strategy_decision: StrategyDecision | None = None) -> RunState:
-        result = self._make_run_initializer().initialize(request, strategy_decision=strategy_decision)
+    def _initialize(
+        self,
+        request: str,
+        *,
+        route_decision: RouteDecision | None = None,
+        strategy_decision: StrategyDecision | None = None,
+    ) -> RunState:
+        result = self._make_run_initializer().initialize(
+            request, route_decision=route_decision, strategy_decision=strategy_decision
+        )
         self.route = result.route
         self.strategy = result.strategy
         self.explorer_gate = result.explorer_gate

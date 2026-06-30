@@ -10,7 +10,7 @@ from dataclasses import replace
 
 from ..explorer_gate import ExplorerGateDecision
 from ..router import RouteDecision
-from ..strategy import StrategyDecision, explorer_strategy_decision, select_strategy
+from ..strategy import StrategyDecision, select_strategy
 from .explorer_scope import explorer_scope_target_tokens
 
 
@@ -22,12 +22,27 @@ class StrategyResolver:
         self._warnings = warnings
 
     def resolve(self, request: str, gate: ExplorerGateDecision) -> StrategyDecision:
-        if gate.path == "explore_bundle":
+        bundle_paths = {
+            "explore_bundle": "EXPLORE_BUNDLE",
+            "proposal_bundle": "PROPOSAL_BUNDLE",
+            "spec_bundle": "SPEC_BUNDLE",
+            "design_bundle": "DESIGN_BUNDLE",
+            "tasks_bundle": "TASKS_BUNDLE",
+            "tdd_bundle": "TDD_BUNDLE",
+        }
+        if gate.path in bundle_paths:
             assert self._route is not None
+            strategy = bundle_paths[gate.path]
             return self._from_user_gate(
-                explorer_strategy_decision(
-                    request,
+                StrategyDecision(
+                    strategy,
+                    "HIGH",
+                    max(gate.scores.get(gate.path, 1), 1),
+                    f"User selected {strategy} bundle flow",
                     tuple(dict.fromkeys((*self._route.matched_signals, *gate.matched_signals))),
+                    strategy,
+                    "HIGH",
+                    False,
                 ),
                 gate,
             )

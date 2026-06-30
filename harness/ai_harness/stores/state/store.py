@@ -206,7 +206,19 @@ class StateStore:
         options = request.get("options", []) if isinstance(request, dict) else []
         option_ids = {item.get("id") for item in options if isinstance(item, dict)}
         if answer.selected_option is not None and answer.selected_option not in option_ids:
-            raise StateError("selected option does not match the pending decision")
+            aliases = {
+                "explorer": "explore_bundle",
+                "explore": "explore_bundle",
+                "sdd_high": "sdd",
+                "sdd_low": "sdd",
+                "full_implementation": "sdd",
+                "easy_implementation": "sdd",
+            }
+            normalized = aliases.get(answer.selected_option)
+            if normalized in option_ids:
+                answer = replace(answer, selected_option=normalized)
+            else:
+                raise StateError("selected option does not match the pending decision")
         self.artifacts.write_json(name, answer.to_dict())
         state.artifacts[name] = artifact_metadata(self.artifacts, name, pending.origin_phase)
         state.status = RunStatus.ACTIVE

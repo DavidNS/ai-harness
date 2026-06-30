@@ -184,6 +184,9 @@ class RootLauncherIntegrationTests(unittest.TestCase):
                 os.close(slave)
                 output = bytearray()
                 sent_continue = False
+                sent_branch = False
+                selected_route = False
+                selected_flow = False
                 deadline = time.time() + 5
                 while time.time() < deadline and process.poll() is None:
                     ready, _, _ = select.select([master], [], [], 0.1)
@@ -197,6 +200,15 @@ class RootLauncherIntegrationTests(unittest.TestCase):
                     if not sent_continue and b"CI setup check" in output:
                         os.write(master, b"c")
                         sent_continue = True
+                    elif sent_continue and not sent_branch and b"Git branch" in output:
+                        os.write(master, b"c")
+                        sent_branch = True
+                    elif sent_branch and not selected_route and b"Request route" in output:
+                        os.write(master, b"c")
+                        selected_route = True
+                    elif selected_route and not selected_flow and b"Code flow" in output:
+                        os.write(master, b"f")
+                        selected_flow = True
                 try:
                     process.communicate(timeout=2)
                 except subprocess.TimeoutExpired:
@@ -230,6 +242,9 @@ class RootLauncherIntegrationTests(unittest.TestCase):
                 )
                 os.close(slave)
                 output = bytearray()
+                sent_branch = False
+                selected_route = False
+                selected_flow = False
                 deadline = time.time() + 5
                 while time.time() < deadline and process.poll() is None:
                     ready, _, _ = select.select([master], [], [], 0.1)
@@ -239,6 +254,15 @@ class RootLauncherIntegrationTests(unittest.TestCase):
                         output.extend(os.read(master, 4096))
                     except OSError:
                         break
+                    if not sent_branch and b"Git branch" in output:
+                        os.write(master, b"c")
+                        sent_branch = True
+                    elif sent_branch and not selected_route and b"Request route" in output:
+                        os.write(master, b"c")
+                        selected_route = True
+                    elif selected_route and not selected_flow and b"Code flow" in output:
+                        os.write(master, b"f")
+                        selected_flow = True
                 try:
                     process.communicate(timeout=2)
                 except subprocess.TimeoutExpired:
@@ -365,6 +389,7 @@ class RootLauncherIntegrationTests(unittest.TestCase):
                 output = bytearray()
                 sent_request = False
                 sent_ci_continue = False
+                sent_branch = False
                 selected_code = False
                 sent_exit = False
                 deadline = time.time() + 8
@@ -380,13 +405,16 @@ class RootLauncherIntegrationTests(unittest.TestCase):
                     if not sent_request and b"aih>" in output:
                         os.write(master, b"I want to add autocompletion to console\r")
                         sent_request = True
-                    elif sent_request and not sent_ci_continue and b"CI setup check" in output:
+                    if sent_request and not sent_ci_continue and b"CI setup check" in output:
                         os.write(master, b"c")
                         sent_ci_continue = True
-                    elif sent_ci_continue and not selected_code and b"[code]" in output and b"[non_code]" in output:
-                        os.write(master, b"1")
+                    if sent_ci_continue and not sent_branch and b"Git branch" in output:
+                        os.write(master, b"c")
+                        sent_branch = True
+                    if sent_branch and not selected_code and b"Request route" in output:
+                        os.write(master, b"c")
                         selected_code = True
-                    elif selected_code and not sent_exit and b"[explorer]" in output and b"[sdd_high]" in output:
+                    if selected_code and not sent_exit and b"Code flow" in output:
                         os.write(master, b"/exit\r")
                         sent_exit = True
                 try:
@@ -401,9 +429,9 @@ class RootLauncherIntegrationTests(unittest.TestCase):
                 self.assertTrue(selected_code, decoded)
                 self.assertTrue(sent_exit, decoded)
                 self.assertEqual(0, process.returncode, decoded)
-                self.assertIn("[explorer]", decoded)
-                self.assertIn("[sdd_low]", decoded)
-                self.assertIn("[sdd_high]", decoded)
+                self.assertIn("EXPLORE_BUNDLE", decoded)
+                self.assertIn("Full SDD", decoded)
+                self.assertIn("TDD_BUNDLE", decoded)
             finally:
                 try:
                     os.close(master)
@@ -487,7 +515,10 @@ class RootLauncherIntegrationTests(unittest.TestCase):
                 output = bytearray()
                 sent_request = False
                 sent_ci_continue = False
+                sent_branch = False
                 sent_scope = False
+                selected_route = False
+                selected_flow = False
                 sent_exit = False
                 deadline = time.time() + 5
                 while time.time() < deadline and process.poll() is None:
@@ -502,13 +533,22 @@ class RootLauncherIntegrationTests(unittest.TestCase):
                     if not sent_request and b"aih>" in output:
                         os.write(master, b"Full implementation for console flow\r")
                         sent_request = True
-                    elif sent_request and not sent_ci_continue and b"CI setup check" in output:
+                    if sent_request and not sent_ci_continue and b"CI setup check" in output:
                         os.write(master, b"c")
                         sent_ci_continue = True
-                    elif sent_ci_continue and not sent_scope and b"Explorer scope" in output:
+                    if sent_ci_continue and not sent_branch and b"Git branch" in output:
+                        os.write(master, b"c")
+                        sent_branch = True
+                    if sent_branch and not sent_scope and b"Explorer scope" in output:
                         os.write(master, b"1\r")
                         sent_scope = True
-                    elif sent_scope and not sent_exit and output.count(b"aih>") >= 2:
+                    if sent_scope and not selected_route and b"Request route" in output:
+                        os.write(master, b"c")
+                        selected_route = True
+                    if selected_route and not selected_flow and b"Code flow" in output:
+                        os.write(master, b"f")
+                        selected_flow = True
+                    if selected_flow and not sent_exit and output.count(b"aih>") >= 2:
                         os.write(master, b"exit\r")
                         sent_exit = True
                 try:

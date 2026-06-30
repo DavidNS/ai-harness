@@ -58,9 +58,14 @@ class RoutingGate:
             ),
             DecisionOption(
                 "explore_bundle",
-                "Explore bundle",
+                "EXPLORE_BUNDLE",
                 "Run EXPLORE_BUNDLE only and stop after publishing exploration handoff artifacts.",
             ),
+            DecisionOption("proposal_bundle", "PROPOSAL_BUNDLE", "Run PROPOSAL_BUNDLE from imported source-run artifacts."),
+            DecisionOption("spec_bundle", "SPEC_BUNDLE", "Run SPEC_BUNDLE from imported source-run artifacts."),
+            DecisionOption("design_bundle", "DESIGN_BUNDLE", "Run DESIGN_BUNDLE from imported source-run artifacts."),
+            DecisionOption("tasks_bundle", "TASKS_BUNDLE", "Run TASKS_BUNDLE from imported source-run artifacts."),
+            DecisionOption("tdd_bundle", "TDD_BUNDLE", "Run TDD_BUNDLE from imported source-run artifacts."),
         ]
         return DecisionRequest(
             "SELECTING_STRATEGY",
@@ -88,10 +93,23 @@ class RoutingGate:
             if not isinstance(answer, dict):
                 continue
             selected = answer.get("selected_option")
-            if selected in {"explore_bundle", "sdd"}:
+            bundle_options = {"explore_bundle", "proposal_bundle", "spec_bundle", "design_bundle", "tasks_bundle", "tdd_bundle", "sdd"}
+            if selected in bundle_options:
                 return str(selected)
-            if selected == "explorer":
-                return "explore_bundle"
+            aliases = {
+                "explorer": "explore_bundle",
+                "explore": "explore_bundle",
+                "proposal": "proposal_bundle",
+                "purpose": "proposal_bundle",
+                "spec": "spec_bundle",
+                "design": "design_bundle",
+                "tasks": "tasks_bundle",
+                "tdd": "tdd_bundle",
+                "sdd_high": "sdd",
+                "sdd_low": "sdd",
+            }
+            if selected in aliases:
+                return aliases[str(selected)]
             text = str(answer.get("answer", "")).casefold()
             if "explor" in text or "analysis" in text or "investigat" in text:
                 return "explore_bundle"

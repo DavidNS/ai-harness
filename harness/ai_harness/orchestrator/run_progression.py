@@ -75,4 +75,7 @@ class RunProgression:
                 if result is not None:
                     return result
                 continue
-            self._host.state.mark_phase_completed(phase)
+            state = self._host.state.load()
+            graph = graph_for(state.strategy, state.complexity)
+            if state.status is RunStatus.ACTIVE and phase in graph and phase not in state.completed_phases:
+                self._host.state.mark_phase_completed(phase)

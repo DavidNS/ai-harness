@@ -284,6 +284,35 @@ def _branch_args(namespace: argparse.Namespace) -> list[str]:
     return ["--branch", selected]
 
 
+def _select_route_for_start() -> str:
+    return _menu_prompt(
+        ["Request route"],
+        [
+            _MenuItem("c", "Code harness", "code", ("code",)),
+            _MenuItem("n", "Non-code", "non-code", ("non_code", "non-code")),
+        ],
+        help_kind="console",
+        default_index=0,
+    ).value
+
+
+def _select_code_flow() -> str:
+    return _menu_prompt(
+        ["Code flow"],
+        [
+            _MenuItem("f", "Full SDD", "sdd", ("sdd", "full")),
+            _MenuItem("e", "EXPLORE_BUNDLE", "explore", ("explore", "explore_bundle")),
+            _MenuItem("o", "PROPOSAL_BUNDLE", "proposal", ("proposal", "proposal_bundle")),
+            _MenuItem("s", "SPEC_BUNDLE", "spec", ("spec", "spec_bundle")),
+            _MenuItem("d", "DESIGN_BUNDLE", "design", ("design", "design_bundle")),
+            _MenuItem("t", "TASKS_BUNDLE", "tasks", ("tasks", "tasks_bundle")),
+            _MenuItem("r", "TDD_BUNDLE", "tdd", ("tdd", "tdd_bundle")),
+        ],
+        help_kind="console",
+        default_index=0,
+    ).value
+
+
 def _source_run_for_bundle(namespace: argparse.Namespace, bundle: str, args: list[str]) -> str | None:
     if args:
         if args[0] == "--from-run" and len(args) > 1:
@@ -452,14 +481,17 @@ def _console_loop(namespace: argparse.Namespace) -> int:
             return 0
 
 
-def _start(namespace: argparse.Namespace, prompt_args: list[str], *, request_override: str | None = None, flow: str | None = None, source_run: str | None = None) -> int:
+def _start(
+    namespace: argparse.Namespace,
+    prompt_args: list[str],
+    *,
+    request_override: str | None = None,
+    route: str | None = None,
+    flow: str | None = None,
+    source_run: str | None = None,
+) -> int:
     provider = _default_provider(namespace.provider)
     backend = ["--cwd", str(namespace.cwd.resolve()), "--provider", provider, "--activated"]
-    backend.extend(_branch_args(namespace))
-    if flow:
-        backend.extend(["--flow", flow])
-    if source_run:
-        backend.extend(["--from-run", source_run])
     model = getattr(namespace, "model", None)
     if model:
         backend.extend(["--model", model])
@@ -489,8 +521,23 @@ def _start(namespace: argparse.Namespace, prompt_args: list[str], *, request_ove
             return 2
     if sys.stdin.isatty():
         _startup_ci_preflight(namespace)
+    backend.extend(_branch_args(namespace))
     if namespace.prompt_file is None and request and sys.stdin.isatty():
         request = _prepare_console_request(namespace, request)
+    if route is None and flow is not None:
+        route = "code"
+    if route is None and sys.stdin.isatty():
+        route = _select_route_for_start()
+    if route:
+        backend.extend(["--route", route])
+    if route in {"code", None} and flow is None and sys.stdin.isatty():
+        flow = _select_code_flow()
+    if flow:
+        backend.extend(["--flow", flow])
+    if source_run is None and flow in {"proposal", "spec", "design", "tasks", "tdd"}:
+        source_run = _source_run_for_bundle(namespace, flow, [])
+    if source_run:
+        backend.extend(["--from-run", source_run])
     return _run_and_follow_decisions(namespace, backend, request=request)
 
 

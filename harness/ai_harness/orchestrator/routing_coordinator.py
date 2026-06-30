@@ -55,12 +55,27 @@ class RoutingCoordinator:
         self._target = target
 
     def coordinate(self) -> RoutingResolution | None:
+        if self._route.source in {"cli_route", "user_decision"}:
+            self._artifacts.write_json(
+                "route.json",
+                {
+                    "mode": self._route.mode,
+                    "intent": self._route.intent,
+                    "confidence": self._route.confidence,
+                    "source": self._route.source,
+                    "matched_signals": list(self._route.matched_signals),
+                    "error": self._route.error,
+                },
+            )
+            self._state.record_artifact("route.json", "ROUTING")
+            return None
         choice = self._routing_answer_choice()
         user_input = self._state.load().user_input
+        explicit_route = self._route.source in {"cli", "cli_route", "user_decision"}
         requires_route_choice = (
             self._route.source == "needs_user"
             or bool(_explorer_scope_target_tokens(user_input))
-            or self._strategy.prompted
+            or (self._strategy.prompted and not explicit_route)
         )
         if choice is None and requires_route_choice:
             self._artifacts.write_json(
