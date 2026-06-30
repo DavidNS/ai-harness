@@ -43,10 +43,20 @@ def explore_bundle():
         "entries": [{"id": "entry-1", "classification": "improvement", "title": "Implement the request", "problem": "The bounded request should be implemented.", "evidence_refs": ["E1"], "constraints": ["Offline fixture."], "unknowns": []}],
     }, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
 
+def explore_synthesis():
+    return json.dumps({
+        "schema_version": 1,
+        "kind": "explore_outcome_synthesis",
+        "status": "ready_for_purpose",
+        "normalized_request": {"summary": "Implement the request."},
+        "triage": {"complexity": "local_change", "ambiguity": "clear", "risk": "low", "evidence_depth": "standard"},
+        "entries": [{"id": "entry-1", "classification": "improvement", "title": "Implement the request", "problem": "The bounded request should be implemented.", "evidence_refs": ["E1"], "constraints": ["Offline fixture."], "unknowns": []}],
+    }, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+
 stage_outputs = {
     "explore_request_profile": json.dumps({"schema_version": 1, "phase": "explore_request_profile", "summary": "Implement the request.", "request_type": "feature", "complexity": "local_change", "ambiguity": "clear", "risk": "low", "evidence_depth": "standard", "request_parts": ["Implement the request."], "constraints": [], "evidence_questions": ["Is the request bounded?"], "gatherers": ["code", "knowledge", "ci"], "clarification_questions": []}),
     "explore_evidence_digest": json.dumps({"schema_version": 1, "phase": "explore_evidence_digest", "evidence": [{"id": "E1", "kind": "knowledge", "claim": "The fixture request is bounded.", "status": "supported", "confidence": "high", "severity": "info", "sources": [{"type": "knowledge", "description": "Fixture evidence."}]}], "blockers": []}),
-    "explore_outcome_synthesis": explore_bundle(),
+    "explore_outcome_synthesis": explore_synthesis(),
 }
 
 outputs = {

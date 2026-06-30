@@ -17,6 +17,7 @@ from .validators.explore import (
     validate_explore_delta,
     validate_explore_evidence_digest,
     validate_explore_outcome_bundle,
+    validate_explore_outcome_synthesis,
     validate_explore_request_profile,
     validate_purpose_bundle,
 )
@@ -47,7 +48,7 @@ PHASE_DEFINITIONS = {
     "explore_request_profile": _definition("explore_request_profile", "explore/request_profile.json", ("request", "knowledge", "repository", "explorer_scope"), "Explore Request Profile", (), validate_explore_request_profile),
     "explore_evidence_digest": _definition("explore_evidence_digest", "explore/evidence_digest.json", ("request_profile", "context_pack", "controller_evidence"), "Explore Evidence Digest", (), validate_explore_evidence_digest),
     "explore_delta": _definition("explore_delta", "explore/delta.json", ("evidence_request", "context_pack", "controller_evidence"), "Explore Delta", (), validate_explore_delta),
-    "explore_outcome_synthesis": _definition("explore_outcome_synthesis", "explore/outcome_bundle.json", ("request", "request_profile", "context_pack", "evidence", "exploration_map"), "Explore Outcome Synthesis", (), validate_explore_outcome_bundle),
+    "explore_outcome_synthesis": _definition("explore_outcome_synthesis", "explore/outcome_synthesis.json", ("request", "request_profile", "context_pack", "evidence", "exploration_map"), "Explore Outcome Synthesis", (), validate_explore_outcome_synthesis),
     "explorer": _definition("explorer", "explorer/bundle.json", ("request", "knowledge", "repository", "runtime_context", "related_improvements", "repository_observations", "repair"), "Explorer Bundle", (), validate_explorer),
     "explorer_intake": _definition("explorer_intake", "explorer/intake.json", ("request", "knowledge", "repository", "runtime_context"), "Explorer Intake", (), validate_explorer_intake),
     "explorer_discovery": _definition("explorer_discovery", "explorer/discovery.json", ("request", "knowledge", "repository", "runtime_context", "intake", "related_improvements", "repository_observations", "refinement"), "Explorer Discovery", (), validate_explorer_discovery),

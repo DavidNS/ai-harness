@@ -21,7 +21,7 @@ from ai_harness.pipeline.state_machine import GRAPHS  # noqa: E402
 
 NOOP_PHASES = {"COMPLETED"}
 EXTRA_DISPATCH_PHASES = set()
-REGISTRY_ONLY_PHASES = {"explore", "purpose", "spec", "design", "tasks", "learning", "explorer", "explorer_intake", "explorer_discovery", "explorer_decision", "explorer_artifact", "explorer_review", "explorer_distill", "implement", "test", "review", "knowledge_synthesis", "knowledge_review", "explore_request_understanding", "explore_clarification_gate", "explore_triage", "explore_evidence_plan", "explore_evidence_collection", "explore_ci_barrier", "explore_evidence_normalization", "explore_outcome_synthesis", "explore_review"}
+REGISTRY_ONLY_PHASES = {"explore", "purpose", "spec", "design", "tasks", "learning", "explorer", "explorer_intake", "explorer_discovery", "explorer_decision", "explorer_artifact", "explorer_review", "explorer_distill", "implement", "test", "review", "knowledge_synthesis", "knowledge_review", "explore_request_profile", "explore_evidence_digest", "explore_delta", "explore_request_understanding", "explore_clarification_gate", "explore_triage", "explore_evidence_plan", "explore_evidence_collection", "explore_ci_barrier", "explore_evidence_normalization", "explore_outcome_synthesis", "explore_review"}
 ORCHESTRATOR_IMPORT_ALLOWLIST = {Path("harness/run.py")}
 RUN_CONTEXT_CONSUMERS = {
     Path("harness/ai_harness/orchestrator/context.py"),

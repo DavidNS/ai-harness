@@ -359,6 +359,27 @@ def validate_explore_outcome_bundle(candidate: str) -> dict[str, Any]:
     value = _document(candidate)
     if value.get("schema_version") != 1 or value.get("kind") != "explore_outcome_bundle":
         raise _validation_error("explore outcome bundle version or kind is invalid")
+    _validate_outcome_synthesis_fields(value, evidence_ids=None)
+    evidence = _validate_evidence_items(value.get("evidence", []), "evidence", allow_empty=True)
+    evidence_ids = {str(item["id"]) for item in evidence}
+    _validate_exploration_map(value.get("exploration_map"), evidence_ids)
+    _validate_entry_evidence_refs(value.get("entries", []), evidence_ids)
+    return value
+
+
+def validate_explore_outcome_synthesis(candidate: str) -> dict[str, Any]:
+    value = _document(candidate)
+    if value.get("schema_version") != 1 or value.get("kind") != "explore_outcome_synthesis":
+        raise _validation_error("explore outcome synthesis version or kind is invalid")
+    if "evidence" in value:
+        raise _validation_error("explore outcome synthesis must not include evidence")
+    if "exploration_map" in value:
+        raise _validation_error("explore outcome synthesis must not include exploration_map")
+    _validate_outcome_synthesis_fields(value, evidence_ids=None)
+    return value
+
+
+def _validate_outcome_synthesis_fields(value: Mapping[str, object], evidence_ids: set[str] | None) -> None:
     status = _enum(value.get("status"), "status", _BUNDLE_STATUSES)
     normalized_request = _mapping(value.get("normalized_request"), "normalized_request")
     _text(normalized_request.get("summary"), "normalized_request summary")
@@ -368,9 +389,6 @@ def validate_explore_outcome_bundle(candidate: str) -> dict[str, Any]:
     _enum(triage.get("risk"), "triage risk", _RISKS)
     if "evidence_depth" in triage:
         _enum(triage.get("evidence_depth"), "triage evidence_depth", _EVIDENCE_DEPTHS)
-    evidence = _validate_evidence_items(value.get("evidence", []), "evidence", allow_empty=True)
-    evidence_ids = {str(item["id"]) for item in evidence}
-    _validate_exploration_map(value.get("exploration_map"), evidence_ids)
     entries = _object_list(value.get("entries", []), "entries")
     entry_ids: set[str] = set()
     for entry in entries:
@@ -381,9 +399,7 @@ def validate_explore_outcome_bundle(candidate: str) -> dict[str, Any]:
         _enum(entry.get("classification"), "entry classification", _ENTRY_CLASSIFICATIONS)
         _text(entry.get("title"), "entry title")
         _text(entry.get("problem"), "entry problem")
-        for evidence_ref in _text_list(entry.get("evidence_refs", []), "entry evidence_refs"):
-            if evidence_ids and evidence_ref not in evidence_ids:
-                raise _validation_error("entry evidence_refs must reference evidence IDs")
+        _text_list(entry.get("evidence_refs", []), "entry evidence_refs")
         _text_list(entry.get("constraints", []), "entry constraints")
         _text_list(entry.get("unknowns", []), "entry unknowns")
     clarification_questions = _optional_text_list(value.get("clarification_questions"), "clarification_questions")
@@ -397,7 +413,15 @@ def validate_explore_outcome_bundle(candidate: str) -> dict[str, Any]:
             raise _validation_error("needs_clarification must not include classified entries")
     if status == "problem_gathering_info" and not operational_blockers:
         raise _validation_error("problem_gathering_info requires operational_blockers")
-    return value
+    if evidence_ids is not None:
+        _validate_entry_evidence_refs(entries, evidence_ids)
+
+
+def _validate_entry_evidence_refs(value: object, evidence_ids: set[str]) -> None:
+    for entry in _object_list(value, "entries"):
+        for evidence_ref in _text_list(entry.get("evidence_refs", []), "entry evidence_refs"):
+            if evidence_ids and evidence_ref not in evidence_ids:
+                raise _validation_error("entry evidence_refs must reference evidence IDs")
 
 
 def validate_purpose_bundle(candidate: str) -> dict[str, Any]:

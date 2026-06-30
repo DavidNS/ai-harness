@@ -148,6 +148,18 @@ def explore_outcome_bundle() -> str:
 
 
 
+def explore_outcome_synthesis() -> str:
+    bundle = json.loads(explore_outcome_bundle())
+    return json.dumps({
+        "schema_version": 1,
+        "kind": "explore_outcome_synthesis",
+        "status": bundle["status"],
+        "normalized_request": bundle["normalized_request"],
+        "triage": bundle["triage"],
+        "entries": bundle["entries"],
+    }, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+
+
 
 def explorer_discovery_output(payload: dict[str, object]) -> str:
     claims = payload.get("claims", [])
@@ -380,12 +392,7 @@ class ScriptedProvider:
                 }],
             })
         elif phase == "explore_outcome_synthesis":
-            document = json.loads(explore_outcome_bundle())
-            if isinstance(inputs.get("exploration_map"), dict):
-                document["exploration_map"] = inputs["exploration_map"]
-            if isinstance(inputs.get("evidence"), list):
-                document["evidence"] = inputs["evidence"] or document["evidence"]
-            output = json.dumps(document, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+            output = explore_outcome_synthesis()
         elif phase == "knowledge_synthesis":
             if inputs.get("source") == "explorer":
                 output = synthesized_explorer_output(inputs)

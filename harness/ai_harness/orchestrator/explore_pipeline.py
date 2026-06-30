@@ -73,19 +73,30 @@ class ExplorePipelineService:
         ).build()
         self._ctx.artifacts.write_json("explore/exploration_map.json", exploration_map)
         self._ctx.state.record_artifact("explore/exploration_map.json", "EXPLORE")
-        outcome_bundle = self._invoke_json("explore_outcome_synthesis", {
+        synthesis = self._invoke_json("explore_outcome_synthesis", {
             "request": self._callbacks.request_brief(),
             "request_profile": profile,
             "context_pack": prompt_pack,
             "evidence": evidence,
             "exploration_map": exploration_map,
         })
-        outcome_bundle["evidence"] = evidence
-        outcome_bundle["exploration_map"] = exploration_map
+        outcome_bundle = self._outcome_bundle_from_synthesis(synthesis, evidence, exploration_map)
         self._repair_entry_evidence_refs(outcome_bundle, evidence)
-        get_phase("explore_outcome_synthesis").validate(json.dumps(outcome_bundle))
+        get_phase("explore").validate(json.dumps(outcome_bundle))
         self._ctx.artifacts.write_json("explore/outcome_bundle.json", outcome_bundle)
         self._ctx.state.record_artifact("explore/outcome_bundle.json", "EXPLORE_OUTCOME_SYNTHESIS")
+
+    @staticmethod
+    def _outcome_bundle_from_synthesis(
+        synthesis: Mapping[str, object],
+        evidence: Sequence[Mapping[str, object]],
+        exploration_map: Mapping[str, object],
+    ) -> dict[str, object]:
+        outcome_bundle = dict(synthesis)
+        outcome_bundle["kind"] = "explore_outcome_bundle"
+        outcome_bundle["evidence"] = list(evidence)
+        outcome_bundle["exploration_map"] = dict(exploration_map)
+        return outcome_bundle
 
     @staticmethod
     def _repair_entry_evidence_refs(outcome_bundle: dict[str, object], evidence: Sequence[Mapping[str, object]]) -> None:

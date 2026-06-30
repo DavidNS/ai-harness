@@ -10,7 +10,7 @@ sys.path.insert(0, str(PACKAGE))
 
 from ai_harness.orchestrator.exploration_map import ExplorationMapBuilder
 from ai_harness.phases import PHASE_DEFINITIONS, PhaseValidationError, get_phase
-from tests.fixtures.scripted_provider import explore_outcome_bundle, learning_output
+from tests.fixtures.scripted_provider import explore_outcome_bundle, explore_outcome_synthesis, learning_output
 
 
 class PhaseContractTests(unittest.TestCase):
@@ -67,10 +67,34 @@ class PhaseContractTests(unittest.TestCase):
         self.assertLessEqual(len(exploration_map["verification_surfaces"]), 12)
         self.assertEqual([], exploration_map["security_signals"])
 
+    def test_explore_outcome_synthesis_accepts_partial_worker_output(self) -> None:
+        document = json.loads(explore_outcome_synthesis())
+
+        validated = get_phase("explore_outcome_synthesis").validate(json.dumps(document))
+
+        self.assertEqual("explore_outcome_synthesis", validated["kind"])
+        self.assertNotIn("evidence", validated)
+        self.assertNotIn("exploration_map", validated)
+
+    def test_explore_outcome_synthesis_rejects_controller_owned_fields(self) -> None:
+        invalid = json.loads(explore_outcome_synthesis())
+        invalid["evidence"] = []
+        with self.assertRaises(PhaseValidationError):
+            get_phase("explore_outcome_synthesis").validate(json.dumps(invalid))
+
+        invalid = json.loads(explore_outcome_synthesis())
+        invalid["exploration_map"] = {}
+        with self.assertRaises(PhaseValidationError):
+            get_phase("explore_outcome_synthesis").validate(json.dumps(invalid))
+
+        invalid = json.loads(explore_outcome_bundle())
+        with self.assertRaises(PhaseValidationError):
+            get_phase("explore_outcome_synthesis").validate(json.dumps(invalid))
+
     def test_explore_outcome_bundle_accepts_exploration_map(self) -> None:
         document = json.loads(explore_outcome_bundle())
 
-        validated = get_phase("explore_outcome_synthesis").validate(json.dumps(document))
+        validated = get_phase("explore").validate(json.dumps(document))
 
         self.assertEqual("exploration_map", validated["exploration_map"]["kind"])
         self.assertEqual("direct_change", validated["exploration_map"]["candidate_work_shapes"][0]["shape"])
@@ -79,12 +103,12 @@ class PhaseContractTests(unittest.TestCase):
         invalid_shape = json.loads(explore_outcome_bundle())
         invalid_shape["exploration_map"]["candidate_work_shapes"][0]["shape"] = "refactor_required"
         with self.assertRaises(PhaseValidationError):
-            get_phase("explore_outcome_synthesis").validate(json.dumps(invalid_shape))
+            get_phase("explore").validate(json.dumps(invalid_shape))
 
         invalid_ref = json.loads(explore_outcome_bundle())
         invalid_ref["exploration_map"]["behaviors"][0]["evidence_refs"] = ["missing"]
         with self.assertRaises(PhaseValidationError):
-            get_phase("explore_outcome_synthesis").validate(json.dumps(invalid_ref))
+            get_phase("explore").validate(json.dumps(invalid_ref))
 
     def test_explore_prompts_name_allowed_source_types(self) -> None:
         for name in ("explore_evidence_digest.md", "explore_delta.md"):

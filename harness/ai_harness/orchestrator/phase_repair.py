@@ -85,6 +85,21 @@ def phase_contract_summary(definition) -> dict[str, object]:
     """Return a structured contract summary for error reporting."""
     summary: dict[str, object] = {"artifact": definition.artifact}
 
+    if definition.name == "explore_outcome_synthesis":
+        summary.update({
+            "format": "json",
+            "required_document_fields": [
+                "schema_version", "kind", "status", "normalized_request",
+                "triage", "entries",
+            ],
+            "optional_document_fields": ["clarification_questions", "operational_blockers"],
+            "forbidden_document_fields": ["evidence", "exploration_map"],
+            "required_values": {"schema_version": 1, "kind": "explore_outcome_synthesis"},
+            "status": ["ready_for_purpose", "needs_clarification", "problem_gathering_info"],
+            "classification": ["improvement", "limitation", "bullshit"],
+            "note": "Controller injects evidence and exploration_map into the final explore_outcome_bundle.",
+        })
+        return summary
     if definition.name == "purpose":
         summary.update({
             "format": "json",
