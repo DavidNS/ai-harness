@@ -29,6 +29,45 @@ _TASKS_CONTRACT_SUMMARY = {
 }
 
 
+
+def _compact_sequence(value: object, limit: int) -> object:
+    if isinstance(value, list):
+        return value[:limit]
+    if isinstance(value, tuple):
+        return list(value[:limit])
+    return value
+
+
+def _compact_context_pack(value: object) -> object:
+    if not isinstance(value, Mapping):
+        return value
+    compact: dict[str, object] = {
+        "schema_version": value.get("schema_version"),
+        "kind": value.get("kind"),
+        "request": value.get("request"),
+        "profile": value.get("profile"),
+        "ci_digest": value.get("ci_digest"),
+        "git": value.get("git"),
+        "explorer_scope": value.get("explorer_scope"),
+    }
+    compact["knowledge"] = _compact_sequence(value.get("knowledge", []), 3)
+    compact["related_improvements"] = _compact_sequence(value.get("related_improvements", []), 5)
+    compact["repository_observations"] = _compact_sequence(value.get("repository_observations", []), 8)
+    if "evidence_request" in value:
+        compact["evidence_request"] = value.get("evidence_request")
+    return {key: item for key, item in compact.items() if item not in (None, [], {})}
+
+
+def _compact_repair_inputs(inputs: Mapping[str, object]) -> dict[str, object]:
+    compact = dict(inputs)
+    if "context_pack" in compact:
+        compact["context_pack"] = _compact_context_pack(compact["context_pack"])
+    if "controller_evidence" in compact:
+        compact["controller_evidence"] = _compact_sequence(compact["controller_evidence"], 8)
+    if "evidence" in compact:
+        compact["evidence"] = _compact_sequence(compact["evidence"], 16)
+    return compact
+
 class _ArtifactRecorder(Protocol):
     def write_json(self, path: str, data: object) -> None:
         ...
@@ -67,6 +106,7 @@ def phase_contract_summary(definition) -> dict[str, object]:
             "artifact": definition.artifact,
             "evidence_item_fields": ["id", "kind", "claim", "status", "confidence", "severity", "sources"],
             "source_requires_one_of": ["path", "artifact", "url", "description"],
+            "allowed_source_types": ["file", "artifact", "git", "gitlab", "web", "knowledge", "ci"],
         })
         return summary
     if definition.name == "tasks":
@@ -190,7 +230,7 @@ class PhaseRepairRunner:
             repair = self._generic_repair_payload(name, first)
             self._progress(f"{name.title()} candidate failed contract validation; invoking one repair attempt")
             try:
-                return self._invoke(name, inputs, repair=repair, parse_control=parse_control)
+                return self._invoke(name, _compact_repair_inputs(inputs), repair=repair, parse_control=parse_control)
             except PhaseValidationError as second:
                 self._record_phase_validation_exhaustion(name, first, second)
                 raise PhaseRepairExhaustedError(f"{name} repair exhausted: {second}") from second

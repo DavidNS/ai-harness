@@ -21,4 +21,6 @@ Return JSON only:
   ]
 }
 
+Allowed source type: file, artifact, git, gitlab, web, knowledge, ci. Do not invent source types. For facts derived from request_profile, context_pack, ci_digest, or controller artifacts, use source type artifact with artifact set to the artifact name.
+
 Use blocked evidence when the requested fact cannot be gathered from supplied context.

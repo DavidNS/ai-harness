@@ -44,7 +44,9 @@ class ExploreDeltaService:
             explorer_scope=self._explorer_scope(),
         )
         pack["evidence_request"] = request.to_dict() | {"request_id": request_id}
-        controller_evidence = ci_evidence_from_artifacts(self._ctx.artifacts)
+        ci_digest = pack.get("ci_digest", {}) if isinstance(pack.get("ci_digest"), dict) else {}
+        relevant_paths = set(ci_digest.get("relevant_paths", [])) if isinstance(ci_digest.get("relevant_paths"), list) else set()
+        controller_evidence = ci_evidence_from_artifacts(self._ctx.artifacts, relevant_paths=relevant_paths)
         output = self._invoke_with_repair("explore_delta", {
             "evidence_request": request.to_dict() | {"request_id": request_id},
             "context_pack": pack,

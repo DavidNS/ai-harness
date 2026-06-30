@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +30,154 @@ def _safe_artifact_json(artifacts: ArtifactStore, name: str) -> dict[str, object
         return {}
     return value if isinstance(value, dict) else {}
 
+
+
+def _path(value: object) -> str:
+    text = _text(value)
+    if not text or Path(text).is_absolute():
+        return ""
+    return text
+
+
+def _source_path(value: Mapping[str, object]) -> str:
+    return _path(value.get("path")) or _path(value.get("raw_path"))
+
+
+def _severity_rank(value: object) -> int:
+    return _SEVERITY_ORDER.get(_severity(value), 0)
+
+
+def _signal_key(signal: Mapping[str, object]) -> tuple[int, str, str, str]:
+    return (
+        _severity_rank(signal.get("severity")),
+        _text(signal.get("tool")),
+        _source_path(signal),
+        _text(signal.get("summary")),
+    )
+
+
+def _candidate_paths(*groups: Sequence[Mapping[str, object]]) -> set[str]:
+    paths: set[str] = set()
+    for group in groups:
+        for item in group:
+            path = _path(item.get("path"))
+            if path:
+                paths.add(path)
+            for source in _list(item.get("sources")):
+                if isinstance(source, Mapping):
+                    source_path = _path(source.get("path"))
+                    if source_path:
+                        paths.add(source_path)
+    return paths
+
+
+def _path_parts(path: str) -> tuple[str, ...]:
+    return tuple(part for part in Path(path).parts if part not in {".", ""})
+
+
+def _same_area(path: str, candidate: str) -> bool:
+    parts = _path_parts(path)
+    candidate_parts = _path_parts(candidate)
+    if not parts or not candidate_parts:
+        return False
+    if path == candidate:
+        return True
+    if len(parts) >= 2 and len(candidate_parts) >= 2 and parts[:2] == candidate_parts[:2]:
+        return True
+    return False
+
+
+def _is_relevant_or_adjacent(path: str, relevant_paths: set[str]) -> bool:
+    if not path or not relevant_paths:
+        return False
+    return any(_same_area(path, candidate) for candidate in relevant_paths)
+
+
+def _signal_summary(signal: Mapping[str, object]) -> dict[str, object]:
+    item: dict[str, object] = {
+        "tool": _text(signal.get("tool")) or "unknown",
+        "category": _text(signal.get("category")) or "unknown",
+        "severity": _severity(signal.get("severity")),
+        "summary": _text(signal.get("summary")) or _text(signal.get("evidence")) or "CI signal was reported.",
+    }
+    path = _source_path(signal)
+    if path:
+        item["path"] = path
+    evidence = _text(signal.get("evidence"))
+    if evidence and len(evidence) <= 240:
+        item["evidence"] = evidence
+    return item
+
+
+def _count_by(signals: Sequence[Mapping[str, object]], key: str) -> dict[str, int]:
+    counter = Counter(_text(signal.get(key)) or "unknown" for signal in signals)
+    return dict(sorted(counter.items()))
+
+
+def ci_digest_from_artifacts(
+    artifacts: ArtifactStore,
+    *,
+    relevant_paths: set[str] | None = None,
+) -> dict[str, object]:
+    """Return compact CI context for prompts and PURPOSE/DESIGN handoff."""
+    relevant_paths = relevant_paths or set()
+    status = _safe_artifact_json(artifacts, "ci-status.json")
+    signals_payload = _safe_artifact_json(artifacts, "ci-signals.json")
+    raw_signals = [item for item in _list(signals_payload.get("signals")) if isinstance(item, Mapping)]
+    provider_summary = {
+        name: dict(provider.get("summary", {}))
+        for name, provider in signals_payload.get("providers", {}).items()
+        if isinstance(name, str) and isinstance(provider, Mapping)
+    } if isinstance(signals_payload.get("providers"), Mapping) else {}
+    health = _text(signals_payload.get("status")) or "unavailable"
+    blocking = [signal for signal in raw_signals if _severity(signal.get("severity")) in {"error", "critical"}]
+    relevant = [
+        signal for signal in raw_signals
+        if _is_relevant_or_adjacent(_source_path(signal), relevant_paths)
+    ]
+    structural = [
+        signal for signal in relevant
+        if _text(signal.get("category")) in {"budget", "coupling", "contract", "architecture"}
+        or _text(signal.get("tool")) == "check_architecture"
+    ]
+    security = [
+        signal for signal in relevant
+        if _text(signal.get("category")) == "security" or _text(signal.get("tool")) == "semgrep"
+    ]
+    verification = [
+        signal for signal in raw_signals
+        if _text(signal.get("category")) in {"tests", "test"} or _text(signal.get("tool")) in {"pytest", "unittest"}
+    ]
+    highlighted = {id(signal) for signal in [*blocking, *relevant]}
+    unrelated = [signal for signal in raw_signals if id(signal) not in highlighted]
+    digest: dict[str, object] = {
+        "schema_version": 1,
+        "kind": "ci_digest",
+        "health": health,
+        "provider_summary": provider_summary,
+        "ci_status": {
+            "providers": status.get("providers", []),
+            "warnings": status.get("warnings", []),
+        },
+        "signal_count": len(raw_signals),
+        "relevant_paths": sorted(relevant_paths),
+        "blocking_findings": [_signal_summary(signal) for signal in sorted(blocking, key=_signal_key, reverse=True)[:8]],
+        "relevant_findings": [_signal_summary(signal) for signal in sorted(relevant, key=_signal_key, reverse=True)[:10]],
+        "structural_refactor_hints": [_signal_summary(signal) for signal in sorted(structural, key=_signal_key, reverse=True)[:8]],
+        "security_hints": [_signal_summary(signal) for signal in sorted(security, key=_signal_key, reverse=True)[:8]],
+        "verification_hints": [_signal_summary(signal) for signal in sorted(verification, key=_signal_key, reverse=True)[:6]],
+        "baseline_noise": {
+            "signal_count": len(unrelated),
+            "by_tool": _count_by(unrelated, "tool"),
+            "by_category": _count_by(unrelated, "category"),
+            "by_severity": _count_by(unrelated, "severity"),
+            "examples": [_signal_summary(signal) for signal in sorted(unrelated, key=_signal_key, reverse=True)[:5]],
+        },
+    }
+    reason = _text(signals_payload.get("reason"))
+    if reason:
+        digest["reason"] = reason
+    return digest
 
 def _severity(value: object) -> str:
     text = _text(value).casefold()
@@ -60,34 +209,41 @@ def _source_for_signal(signal: Mapping[str, object]) -> dict[str, object]:
     return source
 
 
-def ci_evidence_from_artifacts(artifacts: ArtifactStore) -> list[dict[str, object]]:
-    """Return canonical evidence items derived from normalized CI artifacts."""
-    signals = _safe_artifact_json(artifacts, "ci-signals.json")
+def ci_evidence_from_artifacts(
+    artifacts: ArtifactStore,
+    *,
+    relevant_paths: set[str] | None = None,
+) -> list[dict[str, object]]:
+    """Return compact canonical evidence derived from normalized CI artifacts."""
+    digest = ci_digest_from_artifacts(artifacts, relevant_paths=relevant_paths)
     evidence: list[dict[str, object]] = []
-    status = _text(signals.get("status"))
-    reason = _text(signals.get("reason"))
-    if status and status not in {"ready", "partial"}:
-        evidence.append({
-            "id": "CI1",
-            "kind": "ci",
-            "claim": reason or f"CI evidence is {status}.",
-            "status": "blocked",
-            "confidence": "high",
-            "severity": "warning",
-            "sources": [{"type": "artifact", "artifact": "ci-signals.json", "description": "Normalized CI signals artifact."}],
-        })
-        return evidence
-    raw_signals = [item for item in _list(signals.get("signals")) if isinstance(item, Mapping)]
-    for index, signal in enumerate(raw_signals[:20], start=1):
-        summary = _text(signal.get("summary")) or _text(signal.get("evidence")) or "CI signal was reported."
+    health = _text(digest.get("health")) or "unavailable"
+    signal_count = digest.get("signal_count", 0)
+    evidence.append({
+        "id": "CI1",
+        "kind": "ci",
+        "claim": f"CI digest status is {health} with {signal_count} normalized signal(s).",
+        "status": "supported" if health in {"ready", "partial"} else "blocked",
+        "confidence": "high",
+        "severity": "warning" if digest.get("blocking_findings") else "info",
+        "sources": [{"type": "artifact", "artifact": "ci-signals.json", "description": "Compacted CI digest from normalized CI signals."}],
+    })
+    for index, finding in enumerate(digest.get("blocking_findings", [])[:6], start=2):
+        if not isinstance(finding, Mapping):
+            continue
         evidence.append({
             "id": f"CI{index}",
-            "kind": _evidence_kind(signal),
-            "claim": summary,
+            "kind": _evidence_kind(finding),
+            "claim": _text(finding.get("summary")) or "Blocking CI finding was reported.",
             "status": "supported",
-            "confidence": _text(signal.get("confidence")) or "high",
-            "severity": _severity(signal.get("severity")),
-            "sources": [_source_for_signal(signal)],
+            "confidence": "high",
+            "severity": _severity(finding.get("severity")),
+            "sources": [{
+                "type": "ci",
+                "artifact": "ci-signals.json",
+                **({"path": _path(finding.get("path"))} if _path(finding.get("path")) else {}),
+                "description": f"{_text(finding.get('tool')) or 'CI'} {_text(finding.get('category')) or 'finding'} from compact CI digest.",
+            }],
         })
     return evidence
 
@@ -135,6 +291,9 @@ def context_pack(
         "repository_observations": [dict(item) for item in repository_observations],
         "git": _safe_artifact_json(artifacts, "git-run.json"),
         "ci_status": _safe_artifact_json(artifacts, "ci-status.json"),
-        "ci_signals": _safe_artifact_json(artifacts, "ci-signals.json"),
+        "ci_digest": ci_digest_from_artifacts(
+            artifacts,
+            relevant_paths=_candidate_paths(repository_observations, related_improvements),
+        ),
         "explorer_scope": dict(explorer_scope),
     }

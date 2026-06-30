@@ -21,5 +21,6 @@ Return JSON only:
 }
 
 Allowed evidence kind: code, test, documentation, knowledge, ci, git, structure, security, scope, external.
+Allowed source type: file, artifact, git, gitlab, web, knowledge, ci. Do not invent source types. For facts derived from request_profile, context_pack, ci_digest, or controller artifacts, use source type artifact with artifact set to the artifact name.
 Allowed status: supported, contradicted, partial, partially_supported, unresolved, not_applicable, blocked.
 Allowed severity: info, warning, error, critical. Preserve controller_evidence facts unless they are irrelevant duplicates. Use blocked evidence for required information that is unavailable.

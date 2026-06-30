@@ -48,7 +48,9 @@ class ExplorePipelineService:
         )
         self._ctx.artifacts.write_json("explore/context_pack.json", pack)
         self._ctx.state.record_artifact("explore/context_pack.json", "EXPLORE")
-        controller_evidence = ci_evidence_from_artifacts(self._ctx.artifacts)
+        ci_digest = pack.get("ci_digest", {}) if isinstance(pack.get("ci_digest"), dict) else {}
+        relevant_paths = set(ci_digest.get("relevant_paths", [])) if isinstance(ci_digest.get("relevant_paths"), list) else set()
+        controller_evidence = ci_evidence_from_artifacts(self._ctx.artifacts, relevant_paths=relevant_paths)
         digest = self._invoke_json("explore_evidence_digest", {
             "request_profile": profile,
             "context_pack": pack,

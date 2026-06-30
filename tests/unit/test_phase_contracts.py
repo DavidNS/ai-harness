@@ -51,6 +51,13 @@ class PhaseContractTests(unittest.TestCase):
         with self.assertRaises(PhaseValidationError):
             get_phase("explore_outcome_synthesis").validate(json.dumps(invalid_ref))
 
+    def test_explore_prompts_name_allowed_source_types(self) -> None:
+        for name in ("explore_evidence_digest.md", "explore_delta.md"):
+            prompt = (self.harness / "prompts" / name).read_text(encoding="utf-8")
+            self.assertIn("Allowed source type: file, artifact, git, gitlab, web, knowledge, ci", prompt)
+            self.assertIn("Do not invent source types", prompt)
+            self.assertIn("use source type artifact", prompt)
+
     def test_implement_prompt_names_required_markdown_contract(self) -> None:
         prompt = (self.harness / "prompts" / "implement.md").read_text(encoding="utf-8")
         for heading in ("# Implementation v1", "## Changes", "## Evidence"):

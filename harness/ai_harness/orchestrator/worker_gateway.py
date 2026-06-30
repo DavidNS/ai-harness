@@ -178,7 +178,6 @@ class WorkerGateway:
             + json.dumps(bounded, ensure_ascii=False, indent=2, sort_keys=True, default=str)
         )
         provider_permissions = dict(permissions)
-        provider_permissions["timeout_seconds"] = None
         state = self._state.load()
         job_id = self.next_job_id()
         temp_dir = self._artifacts.phase_temp_dir(state.run_id, name, job_id)
@@ -194,7 +193,7 @@ class WorkerGateway:
         })
         self._state.record_artifact(f"jobs/{job_id}/request.json", name.upper())
         self._progress(
-            f"Invoking {name} worker: job={job_id} timeout=unbounded prompt_chars={len(worker_prompt)}"
+            f"Invoking {name} worker: job={job_id} timeout={provider_permissions.get('timeout_seconds')}s prompt_chars={len(worker_prompt)}"
         )
 
         def provider_progress(stream: str, chunk: str) -> None:
