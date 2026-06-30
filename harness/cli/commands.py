@@ -5,23 +5,24 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-import termios
 from pathlib import Path
 
 from ai_harness.ci_support import ci_preflight
-from ai_harness.bundle_inputs import compatible_runs
-from ai_harness.recommended_packages import load_recommended_package_groups
-
-from .backend_client import BackendClient
-from .bootstrap import ACTIONS, GITHUB_CI_MODES, RUNNER, _default_provider, _parser, _prompt_for_model, _prompt_for_reasoning_effort
+from .backend_client import BackendClient, ResumeBackendRequest, StartBackendRequest
+from .bootstrap import ACTIONS, RUNNER, _default_provider, _parser, _prompt_for_model, _prompt_for_reasoning_effort
 from .console_actions import (
     CONSOLE_ACTIONS,
-    ConsoleAction,
-    action_names,
-    actions_by_name,
     parse_console_line,
     suggest_console_actions,
-    visible_actions,
+)
+from .console_controller import (
+    ConsoleController,
+    ConsoleControllerDependencies,
+    console_suggestion_label as _controller_console_suggestion_label,
+    interactive_console_line as _controller_interactive_console_line,
+    package_group_items as _controller_package_group_items,
+    package_install_args as _controller_package_install_args,
+    render_console_prompt as _controller_render_console_prompt,
 )
 from .runtime import (
     _completed_runs,
@@ -55,15 +56,34 @@ from .ui_primitives import (
 )
 
 _CONSOLE_ACTIONS = CONSOLE_ACTIONS
-_CONSOLE_ACTION_BY_NAME = actions_by_name(CONSOLE_ACTIONS)
-_REQUEST_PROMPT_ACTIONS = {"model", "ci-mode"}
-
-
 def _backend_client(namespace: argparse.Namespace) -> BackendClient:
     def run_backend(args: list[str]) -> int:
         return _run(args, verbose=namespace.verbose, dry_run=namespace.dry_run)
 
     return BackendClient(namespace.cwd.resolve(), run_backend)
+
+
+def _controller_dependencies() -> ConsoleControllerDependencies:
+    return ConsoleControllerDependencies(
+        start=_start,
+        resume=_resume,
+        archive=_archive,
+        refresh_recovery_block=_refresh_recovery_block,
+        prompt_for_model=_prompt_for_model,
+        prompt_for_reasoning_effort=_prompt_for_reasoning_effort,
+        menu_prompt=_menu_prompt,
+        multi_select_prompt=_multi_select_prompt,
+        line_prompt=_line_prompt,
+        interactive_request=_interactive_request,
+        interactive_stdin=_interactive_stdin,
+        raw_terminal=_RawTerminal,
+        read_key=_read_key,
+        launcher_exit=_LauncherExit,
+    )
+
+
+def _controller(namespace: argparse.Namespace) -> ConsoleController:
+    return ConsoleController(namespace, _backend_client(namespace), _controller_dependencies())
 
 
 def _waiting_run_ids(repository) -> set[str]:
@@ -239,53 +259,15 @@ def _startup_recovery(namespace: argparse.Namespace) -> int | None:
 
 
 def _package_group_items() -> list[_MenuItem]:
-    optional_groups = [group for group in load_recommended_package_groups() if not group.required]
-    return [
-        _MenuItem(str(index), f"{group.label} [{group.id}] - {group.description}", group.id, (group.id,))
-        for index, group in enumerate(optional_groups, 1)
-    ]
+    return _controller_package_group_items()
 
 
 def _package_install_args(args: list[str]) -> tuple[list[str], bool, bool]:
-    all_optional = False
-    dry_install = False
-    optionals: list[str] = []
-    for arg in args:
-        if arg in {"--all", "--all-optional"}:
-            all_optional = True
-        elif arg == "--dry-install":
-            dry_install = True
-        elif arg.startswith("--"):
-            raise ValueError(f"unknown install-packages option: {arg}")
-        else:
-            optionals.append(arg)
-    return optionals, all_optional, dry_install
+    return _controller_package_install_args(args)
 
 
 def _select_github_ci_mode(namespace: argparse.Namespace, args: list[str]) -> int:
-    if len(args) > 1:
-        print("error: ci-mode accepts at most one mode", file=sys.stderr)
-        return 2
-    current = getattr(namespace, "github_ci_mode", None) or "baseline"
-    if args:
-        selected = args[0].strip().lower()
-        if selected not in GITHUB_CI_MODES:
-            print("error: GitHub CI mode must be off, baseline, or branch", file=sys.stderr)
-            return 2
-    else:
-        selected = _menu_prompt(
-            ["GitHub CI mode", f"Current: {current}"],
-            [
-                _MenuItem("o", "Off", "off", ("off",)),
-                _MenuItem("b", "Baseline", "baseline", ("baseline",)),
-                _MenuItem("r", "Branch", "branch", ("branch",)),
-            ],
-            help_kind="console",
-            default_index=GITHUB_CI_MODES.index(current),
-        ).value
-    setattr(namespace, "github_ci_mode", selected)
-    print(f"Selected GitHub CI mode: {selected}", file=sys.stderr)
-    return 0
+    return _controller(namespace).select_github_ci_mode(args)
 
 
 def _startup_ci_preflight(namespace: argparse.Namespace) -> None:
@@ -343,126 +325,72 @@ def _startup_ci_preflight(namespace: argparse.Namespace) -> None:
 
 
 def _console_help() -> None:
-    print("Controls:", file=sys.stderr)
-    print("  / or /menu: open the action menu", file=sys.stderr)
-    for action in visible_actions(_CONSOLE_ACTIONS):
-        aliases = ", ".join(f"/{alias}" for alias in action.aliases)
-        suffix = f" ({aliases})" if aliases else ""
-        print(f"  /{action.name}: {action.label}{suffix}", file=sys.stderr)
-    print("  Any other text starts a harness run", file=sys.stderr)
+    namespace = argparse.Namespace(cwd=Path.cwd(), provider=None, verbose=False, dry_run=True)
+    _controller(namespace).console_help()
 
 
 def _console_action_menu(namespace: argparse.Namespace) -> int:
-    items = [
-        _MenuItem(action.key, action.label, action.name, action_names(action))
-        for action in visible_actions(_CONSOLE_ACTIONS)
-    ]
-    selected = _menu_prompt(["Console actions"], items, help_kind="console").value
-    return _dispatch_console_action(namespace, selected, [], selected)
+    return _controller(namespace).console_action_menu()
 
 
-def _console_suggestion_label(action: ConsoleAction) -> str:
-    aliases = ", ".join(f"/{alias}" for alias in action.aliases[:2])
-    suffix = f"  {aliases}" if aliases else ""
-    return f"/{action.name:<16} {action.label}{suffix}"
+def _console_suggestion_label(action) -> str:
+    return _controller_console_suggestion_label(action)
 
 
 def _render_console_prompt(buffer: list[str], slash_mode: bool, selected: int, previous_lines: int) -> int:
-    query = "".join(buffer)[1:] if slash_mode else ""
-    suggestions = suggest_console_actions(query) if slash_mode else []
-    rendered = 1 + len(suggestions) + 1
-    rows = max(previous_lines, rendered)
-    if previous_lines:
-        print(f"\x1b[{previous_lines}F", end="", file=sys.stderr)
-    prompt = "aih> "
-    value = "".join(buffer)
-    if slash_mode:
-        if not value.startswith("/"):
-            value = "/" + value
-        line = f"{prompt}\x1b[36m{value}\x1b[0m"
-    else:
-        line = f"{prompt}{value}"
-    print(f"\x1b[2K{line}", file=sys.stderr)
-    for index, action in enumerate(suggestions):
-        marker = ">" if index == selected else " "
-        print(f"\x1b[2K{marker} {_console_suggestion_label(action)}", file=sys.stderr)
-    for _ in range(rows - rendered):
-        print("\x1b[2K", file=sys.stderr)
-    print("\x1b[2K", end="", file=sys.stderr)
-    return rows
+    return _controller_render_console_prompt(buffer, slash_mode, selected, previous_lines)
 
 
 def _interactive_console_line() -> str | None:
-    if not _interactive_stdin():
-        try:
-            print("aih> ", end="", file=sys.stderr, flush=True)
-            return input().strip()
-        except EOFError:
-            return None
+    return _controller_interactive_console_line(_controller_dependencies())
+
+
+def _source_run_for_bundle(namespace: argparse.Namespace, bundle: str, args: list[str]) -> str | None:
+    return _controller(namespace).source_run_for_bundle(bundle, args)
+
+
+def _dispatch_console_action(namespace: argparse.Namespace, command: str, args: list[str], raw_line: str) -> int:
+    return _controller(namespace).dispatch_console_action(command, args, raw_line)
+
+
+def _interactive_start_request(namespace: argparse.Namespace) -> str:
+    return _controller(namespace).interactive_start_request()
+
+
+def _console_command(namespace: argparse.Namespace, line: str) -> int:
+    return _controller(namespace).console_command(line)
+
+
+def _console_loop(namespace: argparse.Namespace) -> int:
+    print("AI Code Harness console. Type `/` for actions or enter a request.", file=sys.stderr)
+    last_status = 0
     try:
-        with _RawTerminal():
-            buffer: list[str] = []
-            slash_mode = False
-            selected = 0
-            rendered_lines = _render_console_prompt(buffer, slash_mode, selected, 0)
-            while True:
-                key = _read_key()
-                if key == "\x04":
-                    print(file=sys.stderr)
-                    return None
-                if key in {"\r", "\n"}:
-                    value = "".join(buffer).strip()
-                    if slash_mode:
-                        query = value[1:] if value.startswith("/") else value
-                        if not query:
-                            print(file=sys.stderr)
-                            return "/"
-                        suggestions = suggest_console_actions(query)
-                        if suggestions:
-                            print(file=sys.stderr)
-                            return "/" + suggestions[min(selected, len(suggestions) - 1)].name
-                    print(file=sys.stderr)
-                    return value
-                if key == "up" and slash_mode:
-                    suggestions = suggest_console_actions("".join(buffer)[1:])
-                    if suggestions:
-                        selected = (selected - 1) % len(suggestions)
-                        rendered_lines = _render_console_prompt(buffer, slash_mode, selected, rendered_lines)
-                    continue
-                if key == "down" and slash_mode:
-                    suggestions = suggest_console_actions("".join(buffer)[1:])
-                    if suggestions:
-                        selected = (selected + 1) % len(suggestions)
-                        rendered_lines = _render_console_prompt(buffer, slash_mode, selected, rendered_lines)
-                    continue
-                if key.startswith("\x1b"):
-                    if slash_mode:
-                        buffer.clear()
-                        slash_mode = False
-                        selected = 0
-                        rendered_lines = _render_console_prompt(buffer, slash_mode, selected, rendered_lines)
-                    continue
-                if key in {"\x7f", "\b"}:
-                    if buffer:
-                        buffer.pop()
-                        if not buffer:
-                            slash_mode = False
-                        selected = 0
-                        rendered_lines = _render_console_prompt(buffer, slash_mode, selected, rendered_lines)
-                    continue
-                if len(key) == 1 and key.isprintable():
-                    if not buffer and key == "/":
-                        slash_mode = True
-                    buffer.append(key)
-                    selected = 0
-                    rendered_lines = _render_console_prompt(buffer, slash_mode, selected, rendered_lines)
-                    continue
-    except (OSError, termios.error):
+        recovered = _startup_recovery(namespace)
+        if recovered is not None:
+            last_status = recovered
+    except KeyboardInterrupt:
+        print("\nPrompt cancelled.", file=sys.stderr)
+    while True:
         try:
-            print("aih> ", end="", file=sys.stderr, flush=True)
-            return input().strip()
+            line = _interactive_console_line()
+            if line is None:
+                print(file=sys.stderr)
+                return last_status
+            if not line:
+                continue
+            try:
+                last_status = _console_command(namespace, line)
+            except ValueError as exc:
+                print(f"error: {exc}", file=sys.stderr)
+                last_status = 1
         except EOFError:
-            return None
+            print(file=sys.stderr)
+            return last_status
+        except KeyboardInterrupt:
+            print("\nPrompt cancelled.", file=sys.stderr)
+            last_status = 130
+        except _LauncherExit:
+            return 0
 
 
 def _branch_args(namespace: argparse.Namespace) -> list[str]:
@@ -513,180 +441,6 @@ def _select_code_flow() -> str:
     ).value
 
 
-def _source_run_for_bundle(namespace: argparse.Namespace, bundle: str, args: list[str]) -> str | None:
-    if args:
-        if args[0] == "--from-run" and len(args) > 1:
-            return args[1]
-        return args[0]
-    required = {
-        "proposal": "published/explore-handoff.json",
-        "spec": "published/proposal-handoff.json",
-        "design": "published/spec-handoff.json",
-        "tasks": "published/design-handoff.json",
-        "tdd": "published/tasks-handoff.json",
-    }.get(bundle)
-    if required is None or not sys.stdin.isatty():
-        return None
-    runs = compatible_runs(namespace.cwd.resolve(), required)[:10]
-    if not runs:
-        return _line_prompt("Source run id/path: ", help_kind="console").strip() or None
-    items = [_MenuItem(str(index), f"{item['run_id']} - has {required}", str(item["run_id"]), (str(item["run_id"]),)) for index, item in enumerate(runs, 1)]
-    items.append(_MenuItem("m", "Enter run id/path", "__manual__", ("manual",)))
-    selected = _menu_prompt([f"Source run for {bundle}"], items, help_kind="console").value
-    if selected == "__manual__":
-        return _line_prompt("Source run id/path: ", help_kind="console").strip() or None
-    return selected
-
-
-def _dispatch_console_action(namespace: argparse.Namespace, command: str, args: list[str], raw_line: str) -> int:
-    repository = str(namespace.cwd.resolve())
-    if command == "exit":
-        raise _LauncherExit
-    if command == "help":
-        _console_help()
-        return 0
-    client = _backend_client(namespace)
-    if command == "status":
-        return client.status()
-    if command == "runs":
-        return client.runs()
-    if command == "resume":
-        return _resume(namespace, args[0] if args else None)
-    if command == "archive":
-        return _archive(namespace, args[0] if args else None)
-    if command == "start":
-        _refresh_recovery_block(namespace)
-        if getattr(namespace, "_recovery_blocked", False):
-            print("error: resolve unfinished runs with resume <RUN_ID> or archive <RUN_ID> before starting new work", file=sys.stderr)
-            return 1
-        request = raw_line.split(None, 1)[1].strip() if args else _interactive_start_request(namespace)
-        if not request:
-            print("error: request is empty", file=sys.stderr)
-            return 2
-        return _start(namespace, [], request_override=request)
-    if command in {"sdd", "explore", "proposal", "spec", "design", "tasks", "tdd"}:
-        _refresh_recovery_block(namespace)
-        if getattr(namespace, "_recovery_blocked", False):
-            print("error: resolve unfinished runs with resume <RUN_ID> or archive <RUN_ID> before starting new work", file=sys.stderr)
-            return 1
-        request = raw_line.split(None, 1)[1].strip() if args and command in {"sdd", "explore"} else None
-        source_run = _source_run_for_bundle(namespace, command, args) if command not in {"sdd", "explore"} else None
-        return _start(namespace, [], request_override=request, flow=command, source_run=source_run)
-    if command == "artifacts":
-        run_id = args[0] if args else _line_prompt("Run id: ", help_kind="console").strip()
-        root = namespace.cwd.resolve() / ".ai-harness" / "artifacts" / "runs" / run_id
-        if not root.is_dir():
-            print(f"error: run not found: {run_id}", file=sys.stderr)
-            return 1
-        for item in sorted(path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_file()):
-            print(item)
-        return 0
-    if command == "ci-mode":
-        return _select_github_ci_mode(namespace, args)
-    if command == "install-ci":
-        force = "--force" in args
-        targets = [item for item in args if item != "--force"]
-        target = targets[0] if targets else None
-        if len(targets) > 1:
-            print("error: install-ci accepts at most one target", file=sys.stderr)
-            return 2
-        if target is None and sys.stdin.isatty():
-            target = _menu_prompt(
-                ["Install CI templates"],
-                [
-                    _MenuItem("g", "GitHub Actions", "github", ("github",)),
-                    _MenuItem("l", "GitLab CI", "gitlab", ("gitlab",)),
-                    _MenuItem("b", "Both", "both", ("both",)),
-                ],
-                help_kind="console",
-            ).value
-        return client.install_ci(target=target, force=force)
-    if command == "install-packages":
-        optionals, all_optional, dry_install = _package_install_args(args)
-        if not optionals and not all_optional and sys.stdin.isatty():
-            selected = _multi_select_prompt(["Optional recommended packages", "Required groups are always included."], _package_group_items(), help_kind="multi")
-            optionals = [item.value for item in selected]
-        return client.install_packages(optionals=optionals, all_optional=all_optional, dry_install=dry_install)
-    if command == "model":
-        provider = _default_provider(namespace.provider)
-        selected = _prompt_for_model(provider)
-        setattr(namespace, "model", selected)
-        print(f"Selected model: {selected or 'provider default'}", file=sys.stderr)
-        effort = _prompt_for_reasoning_effort(provider)
-        if effort is not None:
-            setattr(namespace, "reasoning_effort", effort)
-            print(f"Selected reasoning effort: {effort or 'provider default'}", file=sys.stderr)
-        return 0
-    raise ValueError(f"unsupported console action: {command}")
-
-
-def _interactive_start_request(namespace: argparse.Namespace) -> str:
-    def handle_request_command(value: str) -> bool:
-        parsed = parse_console_line(value, context="request")
-        if parsed.kind == "error":
-            print(f"error: {parsed.error}", file=sys.stderr)
-            return True
-        if parsed.kind != "action" or parsed.action is None or parsed.action.name not in _REQUEST_PROMPT_ACTIONS:
-            return False
-        _dispatch_console_action(namespace, parsed.action.name, list(parsed.args), parsed.raw_line.lstrip("/"))
-        return True
-
-    return _interactive_request(slash_handler=handle_request_command)
-
-
-def _console_command(namespace: argparse.Namespace, line: str) -> int:
-    parsed = parse_console_line(line)
-    if parsed.kind == "menu":
-        return _console_action_menu(namespace)
-    if parsed.kind == "empty":
-        return 0
-    if parsed.kind == "error":
-        print(f"error: {parsed.error}", file=sys.stderr)
-        return 2
-    if parsed.kind == "action" and parsed.action is not None:
-        return _dispatch_console_action(namespace, parsed.action.name, list(parsed.args), parsed.raw_line.lstrip("/"))
-    if parsed.kind == "unknown_slash":
-        print(parsed.error, file=sys.stderr)
-        return 0
-    _refresh_recovery_block(namespace)
-    if getattr(namespace, "_recovery_blocked", False):
-        print("error: resolve unfinished runs with resume <RUN_ID> or archive <RUN_ID> before starting new work", file=sys.stderr)
-        return 1
-    return _start(namespace, [], request_override=parsed.request or line)
-
-
-def _console_loop(namespace: argparse.Namespace) -> int:
-    print("AI Code Harness console. Type `/` for actions or enter a request.", file=sys.stderr)
-    last_status = 0
-    try:
-        recovered = _startup_recovery(namespace)
-        if recovered is not None:
-            last_status = recovered
-    except KeyboardInterrupt:
-        print("\nPrompt cancelled.", file=sys.stderr)
-    while True:
-        try:
-            line = _interactive_console_line()
-            if line is None:
-                print(file=sys.stderr)
-                return last_status
-            if not line:
-                continue
-            try:
-                last_status = _console_command(namespace, line)
-            except ValueError as exc:
-                print(f"error: {exc}", file=sys.stderr)
-                last_status = 1
-        except EOFError:
-            print(file=sys.stderr)
-            return last_status
-        except KeyboardInterrupt:
-            print("\nPrompt cancelled.", file=sys.stderr)
-            last_status = 130
-        except _LauncherExit:
-            return 0
-
-
 def _start(
     namespace: argparse.Namespace,
     prompt_args: list[str],
@@ -697,22 +451,11 @@ def _start(
     source_run: str | None = None,
 ) -> int:
     provider = _default_provider(namespace.provider)
-    backend = ["--cwd", str(namespace.cwd.resolve()), "--provider", provider, "--activated"]
-    model = getattr(namespace, "model", None)
-    if model:
-        backend.extend(["--model", model])
-    reasoning_effort = getattr(namespace, "reasoning_effort", None)
-    if reasoning_effort:
-        backend.extend(["--reasoning-effort", reasoning_effort])
-    github_ci_mode = getattr(namespace, "github_ci_mode", None)
-    if github_ci_mode:
-        backend.extend(["--github-ci-mode", github_ci_mode])
     request: str | None = request_override
     if namespace.prompt_file is not None:
         if prompt_args or request_override is not None:
             print("error: --file cannot be combined with an inline request", file=sys.stderr)
             return 2
-        backend.extend(["--prompt-file", str(namespace.prompt_file.expanduser())])
     elif request is None:
         request = " ".join(prompt_args).strip()
         if not request and not sys.stdin.isatty():
@@ -727,23 +470,31 @@ def _start(
             return 2
     if sys.stdin.isatty():
         _startup_ci_preflight(namespace)
-    backend.extend(_branch_args(namespace))
+    branch_args = _branch_args(namespace)
+    branch = branch_args[1] if len(branch_args) == 2 and branch_args[0] == "--branch" else None
     if namespace.prompt_file is None and request and sys.stdin.isatty():
         request = _prepare_console_request(namespace, request)
     if route is None and flow is not None:
         route = "code"
     if route is None and sys.stdin.isatty():
         route = _select_route_for_start()
-    if route:
-        backend.extend(["--route", route])
     if route in {"code", None} and flow is None and sys.stdin.isatty():
         flow = _select_code_flow()
-    if flow:
-        backend.extend(["--flow", flow])
     if source_run is None and flow in {"proposal", "spec", "design", "tasks", "tdd"}:
         source_run = _source_run_for_bundle(namespace, flow, [])
-    if source_run:
-        backend.extend(["--from-run", source_run])
+    backend = _backend_client(namespace).start_args(
+        StartBackendRequest(
+            provider=provider,
+            model=getattr(namespace, "model", None),
+            reasoning_effort=getattr(namespace, "reasoning_effort", None),
+            github_ci_mode=getattr(namespace, "github_ci_mode", None),
+            branch=branch,
+            route=route,
+            flow=flow,
+            source_run=source_run,
+            prompt_file=namespace.prompt_file,
+        )
+    )
     return _run_and_follow_decisions(namespace, backend, request=request)
 
 
@@ -758,26 +509,26 @@ def _resume(namespace: argparse.Namespace, run_id: str | None, *, follow_decisio
         return 1
     current, state = selected_run
     actual_run_id = str(state["run_id"])
-    backend = ["--cwd", str(repository), "--provider", _default_provider(namespace.provider), "--activated", "--resume", actual_run_id]
     model = getattr(namespace, "model", None)
     if model is None and isinstance(state, dict):
         model = state.get("selected_model") or None
-    if model:
-        backend.extend(["--model", model])
-    reasoning_effort = getattr(namespace, "reasoning_effort", None)
-    if reasoning_effort:
-        backend.extend(["--reasoning-effort", reasoning_effort])
-    github_ci_mode = getattr(namespace, "github_ci_mode", None)
-    if github_ci_mode:
-        backend.extend(["--github-ci-mode", github_ci_mode])
+    answer: str | None = None
+    selected: str | None = None
     if state.get("status") == "waiting_for_user" and sys.stdin.isatty():
         request = _decision_request(current, state)
         if request is not None:
             answer, selected = _prompt_for_decision(actual_run_id, request)
-            if answer is not None:
-                backend.extend(["--answer", answer])
-            if selected is not None:
-                backend.extend(["--selected-option", selected])
+    backend = _backend_client(namespace).resume_args(
+        ResumeBackendRequest(
+            provider=_default_provider(namespace.provider),
+            run_id=actual_run_id,
+            model=model,
+            reasoning_effort=getattr(namespace, "reasoning_effort", None),
+            github_ci_mode=getattr(namespace, "github_ci_mode", None),
+            answer=answer,
+            selected_option=selected,
+        )
+    )
     code = _run(backend, verbose=namespace.verbose, dry_run=namespace.dry_run)
     if follow_decisions:
         _refresh_recovery_block(namespace)
@@ -793,7 +544,7 @@ def _archive(namespace: argparse.Namespace, run_id: str | None) -> int:
             print("error: no unfinished run found", file=sys.stderr)
             return 1
         run_id = str(selected[1]["run_id"])
-    code = _run(["--cwd", str(namespace.cwd.resolve()), "--archive", run_id], verbose=namespace.verbose, dry_run=namespace.dry_run)
+    code = _backend_client(namespace).archive(run_id)
     _refresh_recovery_block(namespace)
     return code
 
