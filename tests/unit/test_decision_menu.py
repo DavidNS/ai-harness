@@ -334,6 +334,23 @@ class DecisionMenuTests(unittest.TestCase):
         self.assertEqual("gpt-5", namespace.model)
         self.assertIn("Selected model: gpt-5", stderr.getvalue())
 
+    def test_start_request_prompt_accepts_model_command_before_request(self) -> None:
+        launcher = load_launcher()
+        namespace = launcher.argparse.Namespace(cwd=Path("/repo"), provider="codex", verbose=False, dry_run=False)
+        stderr = io.StringIO()
+        choices = iter(["/model", "Fix tests", "."])
+
+        with mock.patch("builtins.input", side_effect=lambda _prompt="": next(choices)), \
+            mock.patch.object(launcher, "_prompt_for_model", return_value="gpt-5"), \
+            mock.patch.object(launcher, "_prompt_for_reasoning_effort", return_value="high"), \
+            contextlib.redirect_stderr(stderr):
+            request = launcher._interactive_start_request(namespace)
+
+        self.assertEqual("Fix tests", request)
+        self.assertEqual("gpt-5", namespace.model)
+        self.assertEqual("high", namespace.reasoning_effort)
+        self.assertIn("Selected model: gpt-5", stderr.getvalue())
+
     def test_console_ci_mode_command_stores_selected_mode(self) -> None:
         launcher = load_launcher()
         namespace = launcher.argparse.Namespace(cwd=Path("/repo"), provider="local", verbose=False, dry_run=False)

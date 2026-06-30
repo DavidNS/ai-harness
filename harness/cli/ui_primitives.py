@@ -7,7 +7,7 @@ import select
 import sys
 import termios
 import tty
-from typing import NamedTuple
+from typing import Callable, NamedTuple
 
 
 class _LauncherExit(Exception):
@@ -34,6 +34,9 @@ def _print_prompt_help(kind: str) -> None:
     if kind in {"request", "answer"}:
         print("  Enter: submit", file=sys.stderr)
         print("  Alt+Enter: insert newline when supported by the terminal", file=sys.stderr)
+    if kind == "request":
+        print("  /model: select the model before submitting the request", file=sys.stderr)
+        print("  /ci-mode: select the GitHub CI mode before submitting the request", file=sys.stderr)
     if kind == "model":
         print("  Enter: select the highlighted model", file=sys.stderr)
     if kind == "scope":
@@ -272,7 +275,13 @@ def _multi_select_prompt(title_lines: list[str], items: list[_MenuItem], *, help
             return [item for index, item in enumerate(items) if index in indexes]
         print("Enter listed numbers separated by commas.", file=sys.stderr)
 
-def _text_prompt(prompt: str, *, help_kind: str, multiline_fallback_terminator: str | None = None) -> str:
+def _text_prompt(
+    prompt: str,
+    *,
+    help_kind: str,
+    multiline_fallback_terminator: str | None = None,
+    slash_handler: Callable[[str], bool] | None = None,
+) -> str:
     if _interactive_stdin():
         try:
             with _RawTerminal():
@@ -283,6 +292,10 @@ def _text_prompt(prompt: str, *, help_kind: str, multiline_fallback_terminator: 
                     if key in {"\r", "\n"}:
                         print(file=sys.stderr)
                         value = "".join(buffer).strip()
+                        if slash_handler is not None and slash_handler(value):
+                            buffer.clear()
+                            print(prompt, end="", file=sys.stderr, flush=True)
+                            continue
                         if _handle_slash_command(value, kind=help_kind):
                             buffer.clear()
                             print(prompt, end="", file=sys.stderr, flush=True)
@@ -317,13 +330,18 @@ def _text_prompt(prompt: str, *, help_kind: str, multiline_fallback_terminator: 
                     return "\n".join(lines).strip()
                 if line == multiline_fallback_terminator:
                     break
-                if _handle_slash_command(line.strip(), kind=help_kind):
+                stripped = line.strip()
+                if slash_handler is not None and slash_handler(stripped):
+                    continue
+                if _handle_slash_command(stripped, kind=help_kind):
                     continue
                 lines.append(line)
             if lines:
                 return "\n".join(lines).strip()
     while True:
         value = input(prompt).strip()
+        if slash_handler is not None and slash_handler(value):
+            continue
         if _handle_slash_command(value, kind=help_kind):
             continue
         return value

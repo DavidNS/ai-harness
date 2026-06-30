@@ -248,6 +248,7 @@ _CONSOLE_ACTION_BY_NAME = {
     for action in _CONSOLE_ACTIONS
     for value in (action.name, *action.shortcuts)
 }
+_REQUEST_PROMPT_ACTIONS = {"model", "ci-mode"}
 
 
 def _package_group_items() -> list[_MenuItem]:
@@ -466,7 +467,7 @@ def _dispatch_console_action(namespace: argparse.Namespace, command: str, args: 
         if getattr(namespace, "_recovery_blocked", False):
             print("error: resolve unfinished runs with resume <RUN_ID> or archive <RUN_ID> before starting new work", file=sys.stderr)
             return 1
-        request = raw_line.split(None, 1)[1].strip() if args else _interactive_request()
+        request = raw_line.split(None, 1)[1].strip() if args else _interactive_start_request(namespace)
         if not request:
             print("error: request is empty", file=sys.stderr)
             return 2
@@ -537,6 +538,27 @@ def _dispatch_console_action(namespace: argparse.Namespace, command: str, args: 
             print(f"Selected reasoning effort: {effort or 'provider default'}", file=sys.stderr)
         return 0
     raise ValueError(f"unsupported console action: {command}")
+
+
+def _interactive_start_request(namespace: argparse.Namespace) -> str:
+    def handle_request_command(value: str) -> bool:
+        command_line = value.strip()
+        if not command_line.startswith("/"):
+            return False
+        try:
+            parts = shlex.split(command_line[1:])
+        except ValueError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return True
+        if not parts:
+            return False
+        action = _CONSOLE_ACTION_BY_NAME.get(parts[0].casefold())
+        if action is None or action.name not in _REQUEST_PROMPT_ACTIONS:
+            return False
+        _dispatch_console_action(namespace, action.name, parts[1:], command_line[1:])
+        return True
+
+    return _interactive_request(slash_handler=handle_request_command)
 
 
 def _console_command(namespace: argparse.Namespace, line: str) -> int:

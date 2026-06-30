@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from . import ui_primitives as _ui_primitives
 from .ui_primitives import (
@@ -60,12 +60,19 @@ def _menu_prompt(title_lines: list[str], items: list[_MenuItem], *, help_kind: s
     )
 
 
-def _text_prompt(prompt: str, *, help_kind: str, multiline_fallback_terminator: str | None = None) -> str:
+def _text_prompt(
+    prompt: str,
+    *,
+    help_kind: str,
+    multiline_fallback_terminator: str | None = None,
+    slash_handler: Callable[[str], bool] | None = None,
+) -> str:
     _sync_primitive_hooks()
     return _ui_primitives._text_prompt(
         prompt,
         help_kind=help_kind,
         multiline_fallback_terminator=multiline_fallback_terminator,
+        slash_handler=slash_handler,
     )
 
 
@@ -207,5 +214,5 @@ def _prompt_for_decision(run_id: str, request: dict[str, Any]) -> tuple[str | No
         return None, selected
 
 
-def _interactive_request() -> str:
-    return _text_prompt("Request: ", help_kind="request", multiline_fallback_terminator=".")
+def _interactive_request(slash_handler: Callable[[str], bool] | None = None) -> str:
+    return _text_prompt("Request: ", help_kind="request", multiline_fallback_terminator=".", slash_handler=slash_handler)
