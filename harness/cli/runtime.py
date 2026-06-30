@@ -6,6 +6,7 @@ import json
 import shlex
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -32,15 +33,46 @@ def _run(args: list[str], *, request: str | None = None, verbose: bool = False, 
         print(shlex.join(command), file=sys.stderr)
     if dry_run:
         return 0
+    interactive = sys.stdin.isatty()
+    if interactive:
+        print("Backend run started; console input will resume when it finishes.", file=sys.stderr)
+    started = time.monotonic()
+    next_notice = started + 30
+    process: subprocess.Popen[str] | None = None
     try:
-        completed = subprocess.run(command, input=request or "", text=True, check=False)
+        process = subprocess.Popen(command, stdin=subprocess.PIPE, text=True)
+        if process.stdin is not None:
+            try:
+                process.stdin.write(request or "")
+            except BrokenPipeError:
+                pass
+            finally:
+                process.stdin.close()
+        while True:
+            code = process.poll()
+            if code is not None:
+                if interactive:
+                    elapsed = int(time.monotonic() - started)
+                    print(f"Backend run finished in {elapsed}s with exit code {code}.", file=sys.stderr)
+                return code
+            if interactive and time.monotonic() >= next_notice:
+                elapsed = int(time.monotonic() - started)
+                print(f"Backend still running after {elapsed}s...", file=sys.stderr)
+                next_notice += 30
+            time.sleep(0.2)
     except KeyboardInterrupt:
+        if process is not None and process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
         print("\nBackend run interrupted.", file=sys.stderr)
         repository = _repository_from_backend_args(args)
         if repository is not None:
             _print_recovery_actions(repository)
         return 130
-    return completed.returncode
 
 
 def _read_json(path: Path) -> dict[str, Any] | None:
