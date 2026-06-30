@@ -327,43 +327,123 @@ class RootLauncherIntegrationTests(unittest.TestCase):
                     close_fds=True,
                 )
                 os.close(slave)
+                self.assertIsNotNone(process.stdout)
                 output = bytearray()
+                stdout_output = bytearray()
                 sent_console = False
                 sent_status = False
                 sent_exit = False
+                saw_status = False
+                prompt_count_at_status = 0
                 deadline = time.time() + 5
                 while time.time() < deadline and process.poll() is None:
-                    ready, _, _ = select.select([master], [], [], 0.1)
-                    if not ready:
-                        continue
-                    try:
-                        chunk = os.read(master, 4096)
-                    except OSError:
-                        break
-                    output.extend(chunk)
-                    prompts = output.count(b"aih>")
+                    ready, _, _ = select.select([master, process.stdout], [], [], 0.1)
+                    for fd in ready:
+                        if fd is process.stdout:
+                            chunk = os.read(process.stdout.fileno(), 4096)
+                            stdout_output.extend(chunk)
+                            continue
+                        try:
+                            chunk = os.read(master, 4096)
+                        except OSError:
+                            continue
+                        output.extend(chunk)
                     if not sent_console and b"Open console" in output:
                         os.write(master, b"o")
                         sent_console = True
-                    elif sent_console and not sent_status and prompts >= 1:
+                    elif sent_console and not sent_status and b"aih>" in output:
                         os.write(master, b"status\r")
                         sent_status = True
-                    elif sent_status and not sent_exit and prompts >= 2:
+                    elif sent_status and not saw_status and b"Status: no run" in stdout_output:
+                        saw_status = True
+                        prompt_count_at_status = output.count(b"aih>")
+                    elif saw_status and not sent_exit and output.count(b"aih>") > prompt_count_at_status:
                         os.write(master, b"exit\r")
                         sent_exit = True
                 try:
                     stdout, _ = process.communicate(timeout=2)
+                    stdout_output.extend(stdout)
                 except subprocess.TimeoutExpired:
                     process.kill()
                     stdout, _ = process.communicate()
+                    stdout_output.extend(stdout)
 
                 decoded = output.decode("utf-8", errors="replace")
                 self.assertTrue(sent_console, decoded)
                 self.assertTrue(sent_status, decoded)
                 self.assertTrue(sent_exit, decoded)
                 self.assertEqual(0, process.returncode, decoded)
-                self.assertIn(b"Status: no run", stdout)
+                self.assertIn(b"Status: no run", stdout_output)
                 self.assertIn("AI Code Harness console", decoded)
+            finally:
+                try:
+                    os.close(master)
+                except OSError:
+                    pass
+
+    def test_interactive_console_slash_suggestions_execute_status(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            master, slave = pty.openpty()
+            try:
+                process = subprocess.Popen(
+                    [str(LAUNCHER), "--cwd", str(repository), "--provider", "local"],
+                    cwd=repository,
+                    stdin=slave,
+                    stdout=subprocess.PIPE,
+                    stderr=slave,
+                    text=False,
+                    close_fds=True,
+                )
+                os.close(slave)
+                self.assertIsNotNone(process.stdout)
+                output = bytearray()
+                stdout_output = bytearray()
+                sent_console = False
+                sent_slash_status = False
+                sent_exit = False
+                saw_status = False
+                prompt_count_at_status = 0
+                deadline = time.time() + 5
+                while time.time() < deadline and process.poll() is None:
+                    ready, _, _ = select.select([master, process.stdout], [], [], 0.1)
+                    for fd in ready:
+                        if fd is process.stdout:
+                            chunk = os.read(process.stdout.fileno(), 4096)
+                            stdout_output.extend(chunk)
+                            continue
+                        try:
+                            chunk = os.read(master, 4096)
+                        except OSError:
+                            continue
+                        output.extend(chunk)
+                    if not sent_console and b"Open console" in output:
+                        os.write(master, b"o")
+                        sent_console = True
+                    elif sent_console and not sent_slash_status and b"aih>" in output:
+                        os.write(master, b"/sta\r")
+                        sent_slash_status = True
+                    elif sent_slash_status and not saw_status and b"Status: no run" in stdout_output:
+                        saw_status = True
+                        prompt_count_at_status = output.count(b"aih>")
+                    elif saw_status and not sent_exit and output.count(b"aih>") > prompt_count_at_status:
+                        os.write(master, b"exit\r")
+                        sent_exit = True
+                try:
+                    stdout, _ = process.communicate(timeout=2)
+                    stdout_output.extend(stdout)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    stdout, _ = process.communicate()
+                    stdout_output.extend(stdout)
+
+                decoded = output.decode("utf-8", errors="replace")
+                self.assertTrue(sent_console, decoded)
+                self.assertTrue(sent_slash_status, decoded)
+                self.assertTrue(sent_exit, decoded)
+                self.assertEqual(0, process.returncode, decoded)
+                self.assertIn("/status", decoded)
+                self.assertIn(b"Status: no run", stdout_output)
             finally:
                 try:
                     os.close(master)

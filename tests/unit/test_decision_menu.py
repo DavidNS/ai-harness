@@ -644,6 +644,62 @@ class DecisionMenuTests(unittest.TestCase):
         self.assertEqual("run-1", kwargs["source_run"])
         self.assertIn("Explore launcher recovery", kwargs["request_override"])
 
+
+    def test_console_help_is_rendered_from_action_registry(self) -> None:
+        launcher = load_launcher()
+        stderr = io.StringIO()
+
+        with contextlib.redirect_stderr(stderr):
+            launcher._console_help()
+
+        output = stderr.getvalue()
+        self.assertIn("/status: Show status", output)
+        self.assertIn("/ci-mode: Select GitHub CI mode", output)
+        self.assertIn("/tdd: Run TDD bundle", output)
+
+    def test_console_suggestions_filter_and_rank_actions(self) -> None:
+        launcher = load_launcher()
+
+        self.assertEqual("status", launcher.suggest_console_actions("st")[0].name)
+        self.assertEqual("ci-mode", launcher.suggest_console_actions("github")[0].name)
+        self.assertIn("start", [action.name for action in launcher.suggest_console_actions("")])
+
+    def test_parse_console_line_separates_actions_requests_and_errors(self) -> None:
+        launcher = load_launcher()
+
+        action = launcher.parse_console_line("/ci-mode branch")
+        request = launcher.parse_console_line("Fix tests")
+        unknown = launcher.parse_console_line("/wat")
+        broken = launcher.parse_console_line("/status '")
+
+        self.assertEqual("action", action.kind)
+        self.assertEqual("ci-mode", action.action.name)
+        self.assertEqual(("branch",), action.args)
+        self.assertEqual("request", request.kind)
+        self.assertEqual("Fix tests", request.request)
+        self.assertEqual("unknown_slash", unknown.kind)
+        self.assertEqual("error", broken.kind)
+
+    def test_console_prompt_slash_suggestions_select_filtered_action(self) -> None:
+        launcher = load_launcher()
+
+        class DummyRawTerminal:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return None
+
+        keys = iter(["/", "s", "t", "\n"])
+        with mock.patch.object(launcher, "_interactive_stdin", return_value=True), \
+            mock.patch.object(launcher, "_RawTerminal", DummyRawTerminal), \
+            mock.patch.object(launcher, "_read_key", side_effect=lambda: next(keys)), \
+            contextlib.redirect_stderr(io.StringIO()) as stderr:
+            line = launcher._interactive_console_line()
+
+        self.assertEqual("/status", line)
+        self.assertIn("/status", stderr.getvalue())
+
     def test_console_blocks_plain_request_when_unfinished_runs_require_selection(self) -> None:
         launcher = load_launcher()
         namespace = launcher.argparse.Namespace(cwd=Path("/repo"), provider="local", verbose=False, dry_run=False)

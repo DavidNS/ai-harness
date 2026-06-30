@@ -9,6 +9,8 @@ import termios
 import tty
 from typing import Callable, NamedTuple
 
+from .console_actions import visible_actions
+
 
 class _LauncherExit(Exception):
     """Clean cancellation from an interactive launcher prompt."""
@@ -35,15 +37,16 @@ def _print_prompt_help(kind: str) -> None:
         print("  Enter: submit", file=sys.stderr)
         print("  Alt+Enter: insert newline when supported by the terminal", file=sys.stderr)
     if kind == "request":
-        print("  /model: select the model before submitting the request", file=sys.stderr)
-        print("  /ci-mode: select the GitHub CI mode before submitting the request", file=sys.stderr)
+        for action in visible_actions(context="request"):
+            print(f"  /{action.name}: {action.label.lower()}", file=sys.stderr)
     if kind == "model":
         print("  Enter: select the highlighted model", file=sys.stderr)
     if kind == "scope":
         print("  Enter a menu number, repository-relative path, or blank for explorer-first", file=sys.stderr)
     if kind == "console":
         print("  / or /menu: open the action menu", file=sys.stderr)
-        print("  Slash actions include /status, /runs, /resume, /archive, /install-ci, /install-packages, /model, /help, and /exit", file=sys.stderr)
+        actions = ", ".join(f"/{action.name}" for action in visible_actions())
+        print(f"  Slash actions include {actions}", file=sys.stderr)
         print("  Any other text starts a harness run", file=sys.stderr)
     if kind == "multi":
         print("  Up/Down: move selection", file=sys.stderr)

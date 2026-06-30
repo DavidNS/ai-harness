@@ -4,16 +4,25 @@ from __future__ import annotations
 
 import argparse
 import os
-import shlex
 import sys
-from dataclasses import dataclass
+import termios
 from pathlib import Path
 
 from ai_harness.ci_support import ci_preflight
 from ai_harness.bundle_inputs import compatible_runs
 from ai_harness.recommended_packages import load_recommended_package_groups
 
+from .backend_client import BackendClient
 from .bootstrap import ACTIONS, GITHUB_CI_MODES, RUNNER, _default_provider, _parser, _prompt_for_model, _prompt_for_reasoning_effort
+from .console_actions import (
+    CONSOLE_ACTIONS,
+    ConsoleAction,
+    action_names,
+    actions_by_name,
+    parse_console_line,
+    suggest_console_actions,
+    visible_actions,
+)
 from .runtime import (
     _completed_runs,
     _decision_request,
@@ -44,6 +53,17 @@ from .ui_primitives import (
     _read_key,
     _text_prompt,
 )
+
+_CONSOLE_ACTIONS = CONSOLE_ACTIONS
+_CONSOLE_ACTION_BY_NAME = actions_by_name(CONSOLE_ACTIONS)
+_REQUEST_PROMPT_ACTIONS = {"model", "ci-mode"}
+
+
+def _backend_client(namespace: argparse.Namespace) -> BackendClient:
+    def run_backend(args: list[str]) -> int:
+        return _run(args, verbose=namespace.verbose, dry_run=namespace.dry_run)
+
+    return BackendClient(namespace.cwd.resolve(), run_backend)
 
 
 def _waiting_run_ids(repository) -> set[str]:
@@ -199,7 +219,7 @@ def _startup_recovery(namespace: argparse.Namespace) -> int | None:
         if selected == "exit":
             raise _LauncherExit
         if selected == "show":
-            _run(["--cwd", str(repository), "--show-runs"], verbose=namespace.verbose, dry_run=namespace.dry_run)
+            _backend_client(namespace).runs()
             continue
         if selected == "console":
             return None
@@ -216,39 +236,6 @@ def _startup_recovery(namespace: argparse.Namespace) -> int | None:
                 print("Resume or archive unfinished runs before starting unrelated work.", file=sys.stderr)
                 continue
             return _dispatch_console_action(namespace, "start", [], "start")
-
-
-@dataclass(frozen=True, slots=True)
-class _ConsoleAction:
-    name: str
-    label: str
-    key: str
-    shortcuts: tuple[str, ...] = ()
-    menu_visible: bool = True
-
-
-_CONSOLE_ACTIONS = (
-    _ConsoleAction("status", "Show status", "s"),
-    _ConsoleAction("runs", "Show live runs", "r"),
-    _ConsoleAction("resume", "Resume run", "u"),
-    _ConsoleAction("archive", "Archive run", "a"),
-    _ConsoleAction("start", "Start request", "n", ("new",)),
-    _ConsoleAction("sdd", "Start full SDD", "f"),
-    _ConsoleAction("explore", "Run explore bundle", "e"),
-    _ConsoleAction("proposal", "Run proposal bundle", "o"),
-    _ConsoleAction("model", "Select model", "m"),
-    _ConsoleAction("ci-mode", "Select GitHub CI mode", "g", ("ci", "github-ci")),
-    _ConsoleAction("install-ci", "Install CI", "c"),
-    _ConsoleAction("install-packages", "Install packages", "p", ("packages",)),
-    _ConsoleAction("help", "Show help", "h"),
-    _ConsoleAction("exit", "Exit launcher", "x", ("quit",)),
-)
-_CONSOLE_ACTION_BY_NAME = {
-    value: action
-    for action in _CONSOLE_ACTIONS
-    for value in (action.name, *action.shortcuts)
-}
-_REQUEST_PROMPT_ACTIONS = {"model", "ci-mode"}
 
 
 def _package_group_items() -> list[_MenuItem]:
@@ -358,20 +345,118 @@ def _startup_ci_preflight(namespace: argparse.Namespace) -> None:
 def _console_help() -> None:
     print("Controls:", file=sys.stderr)
     print("  / or /menu: open the action menu", file=sys.stderr)
-    for action in _CONSOLE_ACTIONS:
-        if action.menu_visible:
-            print(f"  /{action.name}: {action.label}", file=sys.stderr)
+    for action in visible_actions(_CONSOLE_ACTIONS):
+        aliases = ", ".join(f"/{alias}" for alias in action.aliases)
+        suffix = f" ({aliases})" if aliases else ""
+        print(f"  /{action.name}: {action.label}{suffix}", file=sys.stderr)
     print("  Any other text starts a harness run", file=sys.stderr)
 
 
 def _console_action_menu(namespace: argparse.Namespace) -> int:
     items = [
-        _MenuItem(action.key, action.label, action.name, (action.name, *action.shortcuts))
-        for action in _CONSOLE_ACTIONS
-        if action.menu_visible
+        _MenuItem(action.key, action.label, action.name, action_names(action))
+        for action in visible_actions(_CONSOLE_ACTIONS)
     ]
     selected = _menu_prompt(["Console actions"], items, help_kind="console").value
     return _dispatch_console_action(namespace, selected, [], selected)
+
+
+def _console_suggestion_label(action: ConsoleAction) -> str:
+    aliases = ", ".join(f"/{alias}" for alias in action.aliases[:2])
+    suffix = f"  {aliases}" if aliases else ""
+    return f"/{action.name:<16} {action.label}{suffix}"
+
+
+def _render_console_prompt(buffer: list[str], slash_mode: bool, selected: int, previous_lines: int) -> int:
+    query = "".join(buffer)[1:] if slash_mode else ""
+    suggestions = suggest_console_actions(query) if slash_mode else []
+    if previous_lines:
+        print(f"\x1b[{previous_lines}F", end="", file=sys.stderr)
+    prompt = "aih> "
+    value = "".join(buffer)
+    if slash_mode:
+        if not value.startswith("/"):
+            value = "/" + value
+        line = f"{prompt}\x1b[36m{value}\x1b[0m"
+    else:
+        line = f"{prompt}{value}"
+    print(f"\x1b[2K{line}", file=sys.stderr)
+    rendered = 1
+    for index, action in enumerate(suggestions):
+        marker = ">" if index == selected else " "
+        print(f"\x1b[2K{marker} {_console_suggestion_label(action)}", file=sys.stderr)
+        rendered += 1
+    print("\x1b[2K", end="", file=sys.stderr)
+    rendered += 1
+    return rendered
+
+
+def _interactive_console_line() -> str | None:
+    if not _interactive_stdin():
+        try:
+            print("aih> ", end="", file=sys.stderr, flush=True)
+            return input().strip()
+        except EOFError:
+            return None
+    try:
+        with _RawTerminal():
+            buffer: list[str] = []
+            slash_mode = False
+            selected = 0
+            rendered_lines = _render_console_prompt(buffer, slash_mode, selected, 0)
+            while True:
+                key = _read_key()
+                if key == "\x04":
+                    print(file=sys.stderr)
+                    return None
+                if key in {"\r", "\n"}:
+                    if slash_mode:
+                        suggestions = suggest_console_actions("".join(buffer)[1:])
+                        if suggestions:
+                            print(file=sys.stderr)
+                            return "/" + suggestions[min(selected, len(suggestions) - 1)].name
+                    print(file=sys.stderr)
+                    return "".join(buffer).strip()
+                if key == "up" and slash_mode:
+                    suggestions = suggest_console_actions("".join(buffer)[1:])
+                    if suggestions:
+                        selected = (selected - 1) % len(suggestions)
+                        rendered_lines = _render_console_prompt(buffer, slash_mode, selected, rendered_lines)
+                    continue
+                if key == "down" and slash_mode:
+                    suggestions = suggest_console_actions("".join(buffer)[1:])
+                    if suggestions:
+                        selected = (selected + 1) % len(suggestions)
+                        rendered_lines = _render_console_prompt(buffer, slash_mode, selected, rendered_lines)
+                    continue
+                if key.startswith("\x1b"):
+                    if slash_mode:
+                        buffer.clear()
+                        slash_mode = False
+                        selected = 0
+                        rendered_lines = _render_console_prompt(buffer, slash_mode, selected, rendered_lines)
+                    continue
+                if key in {"\x7f", "\b"}:
+                    if buffer:
+                        buffer.pop()
+                        if not buffer:
+                            slash_mode = False
+                        selected = 0
+                        rendered_lines = _render_console_prompt(buffer, slash_mode, selected, rendered_lines)
+                    continue
+                if len(key) == 1 and key.isprintable():
+                    if not buffer and key == "/":
+                        slash_mode = True
+                    buffer.append(key)
+                    selected = 0
+                    rendered_lines = _render_console_prompt(buffer, slash_mode, selected, rendered_lines)
+                    continue
+    except (OSError, termios.error):
+        try:
+            print("aih> ", end="", file=sys.stderr, flush=True)
+            return input().strip()
+        except EOFError:
+            return None
 
 
 def _branch_args(namespace: argparse.Namespace) -> list[str]:
@@ -454,10 +539,11 @@ def _dispatch_console_action(namespace: argparse.Namespace, command: str, args: 
     if command == "help":
         _console_help()
         return 0
+    client = _backend_client(namespace)
     if command == "status":
-        return _run(["--cwd", repository, "--status"], verbose=namespace.verbose, dry_run=namespace.dry_run)
+        return client.status()
     if command == "runs":
-        return _run(["--cwd", repository, "--show-runs"], verbose=namespace.verbose, dry_run=namespace.dry_run)
+        return client.runs()
     if command == "resume":
         return _resume(namespace, args[0] if args else None)
     if command == "archive":
@@ -508,25 +594,13 @@ def _dispatch_console_action(namespace: argparse.Namespace, command: str, args: 
                 ],
                 help_kind="console",
             ).value
-        backend = ["--cwd", repository, "--install-ci"]
-        if target:
-            backend.extend(["--ci-target", target])
-        if force:
-            backend.append("--force")
-        return _run(backend, verbose=namespace.verbose, dry_run=namespace.dry_run)
+        return client.install_ci(target=target, force=force)
     if command == "install-packages":
         optionals, all_optional, dry_install = _package_install_args(args)
         if not optionals and not all_optional and sys.stdin.isatty():
             selected = _multi_select_prompt(["Optional recommended packages", "Required groups are always included."], _package_group_items(), help_kind="multi")
             optionals = [item.value for item in selected]
-        backend = ["--cwd", repository, "--install-packages"]
-        for optional in optionals:
-            backend.extend(["--package", optional])
-        if all_optional:
-            backend.append("--all-packages")
-        if dry_install:
-            backend.append("--dry-install")
-        return _run(backend, verbose=namespace.verbose, dry_run=namespace.dry_run)
+        return client.install_packages(optionals=optionals, all_optional=all_optional, dry_install=dry_install)
     if command == "model":
         provider = _default_provider(namespace.provider)
         selected = _prompt_for_model(provider)
@@ -542,49 +616,37 @@ def _dispatch_console_action(namespace: argparse.Namespace, command: str, args: 
 
 def _interactive_start_request(namespace: argparse.Namespace) -> str:
     def handle_request_command(value: str) -> bool:
-        command_line = value.strip()
-        if not command_line.startswith("/"):
-            return False
-        try:
-            parts = shlex.split(command_line[1:])
-        except ValueError as exc:
-            print(f"error: {exc}", file=sys.stderr)
+        parsed = parse_console_line(value, context="request")
+        if parsed.kind == "error":
+            print(f"error: {parsed.error}", file=sys.stderr)
             return True
-        if not parts:
+        if parsed.kind != "action" or parsed.action is None or parsed.action.name not in _REQUEST_PROMPT_ACTIONS:
             return False
-        action = _CONSOLE_ACTION_BY_NAME.get(parts[0].casefold())
-        if action is None or action.name not in _REQUEST_PROMPT_ACTIONS:
-            return False
-        _dispatch_console_action(namespace, action.name, parts[1:], command_line[1:])
+        _dispatch_console_action(namespace, parsed.action.name, list(parsed.args), parsed.raw_line.lstrip("/"))
         return True
 
     return _interactive_request(slash_handler=handle_request_command)
 
 
 def _console_command(namespace: argparse.Namespace, line: str) -> int:
-    is_slash = line.startswith("/")
-    normalized_line = line[1:] if is_slash else line
-    if normalized_line in {"", "menu"}:
+    parsed = parse_console_line(line)
+    if parsed.kind == "menu":
         return _console_action_menu(namespace)
-    try:
-        parts = shlex.split(normalized_line)
-    except ValueError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 2
-    if not parts:
+    if parsed.kind == "empty":
         return 0
-    command = parts[0].casefold()
-    action = _CONSOLE_ACTION_BY_NAME.get(command)
-    if action is not None:
-        return _dispatch_console_action(namespace, action.name, parts[1:], normalized_line)
-    if is_slash:
-        print(f"Unknown slash command: /{command}", file=sys.stderr)
+    if parsed.kind == "error":
+        print(f"error: {parsed.error}", file=sys.stderr)
+        return 2
+    if parsed.kind == "action" and parsed.action is not None:
+        return _dispatch_console_action(namespace, parsed.action.name, list(parsed.args), parsed.raw_line.lstrip("/"))
+    if parsed.kind == "unknown_slash":
+        print(parsed.error, file=sys.stderr)
         return 0
     _refresh_recovery_block(namespace)
     if getattr(namespace, "_recovery_blocked", False):
         print("error: resolve unfinished runs with resume <RUN_ID> or archive <RUN_ID> before starting new work", file=sys.stderr)
         return 1
-    return _start(namespace, [], request_override=line)
+    return _start(namespace, [], request_override=parsed.request or line)
 
 
 def _console_loop(namespace: argparse.Namespace) -> int:
@@ -598,8 +660,10 @@ def _console_loop(namespace: argparse.Namespace) -> int:
         print("\nPrompt cancelled.", file=sys.stderr)
     while True:
         try:
-            print("aih> ", end="", file=sys.stderr, flush=True)
-            line = input().strip()
+            line = _interactive_console_line()
+            if line is None:
+                print(file=sys.stderr)
+                return last_status
             if not line:
                 continue
             try:
@@ -740,9 +804,9 @@ def main(argv: list[str] | None = None) -> int:
         action, args = "start", rest
     try:
         if action == "status":
-            return _run(["--cwd", str(namespace.cwd.resolve()), "--status"], verbose=namespace.verbose, dry_run=namespace.dry_run)
+            return _backend_client(namespace).status()
         if action == "runs":
-            return _run(["--cwd", str(namespace.cwd.resolve()), "--show-runs"], verbose=namespace.verbose, dry_run=namespace.dry_run)
+            return _backend_client(namespace).runs()
         if action == "resume":
             return _resume(namespace, args[0] if args else None)
         if action == "archive":
@@ -755,7 +819,7 @@ def main(argv: list[str] | None = None) -> int:
             return _dispatch_console_action(namespace, action, args, action + " " + " ".join(args))
         if action == "raw":
             raw = args[1:] if args[:1] == ["--"] else args
-            return _run(raw, verbose=namespace.verbose, dry_run=namespace.dry_run)
+            return _backend_client(namespace).raw(raw)
         return _start(namespace, args)
     except _LauncherExit:
         return 0

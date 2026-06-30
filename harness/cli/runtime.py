@@ -33,7 +33,7 @@ def _run(args: list[str], *, request: str | None = None, verbose: bool = False, 
     if dry_run:
         return 0
     try:
-        completed = subprocess.run(command, input=request, text=True, check=False)
+        completed = subprocess.run(command, input=request or "", text=True, check=False)
     except KeyboardInterrupt:
         print("\nBackend run interrupted.", file=sys.stderr)
         repository = _repository_from_backend_args(args)
