@@ -12,6 +12,7 @@ from ai_harness.bundle_inputs import compatible_runs
 from ai_harness.recommended_packages import load_recommended_package_groups
 
 from .backend_client import BackendClient
+from .job_runner import BackgroundJobRunner
 from .bootstrap import GITHUB_CI_MODES, _default_provider
 from .console_actions import (
     CONSOLE_ACTIONS,
@@ -25,6 +26,7 @@ from .ui_primitives import _MenuItem
 
 
 StartCallback = Callable[..., int]
+StartJobCallback = Callable[..., int]
 ResumeCallback = Callable[[argparse.Namespace, str | None], int]
 ArchiveCallback = Callable[[argparse.Namespace, str | None], int]
 RefreshCallback = Callable[[argparse.Namespace], None]
@@ -45,6 +47,7 @@ _REQUEST_PROMPT_ACTIONS = {"model", "ci-mode"}
 @dataclass(frozen=True, slots=True)
 class ConsoleControllerDependencies:
     start: StartCallback
+    start_job: StartJobCallback
     resume: ResumeCallback
     archive: ArchiveCallback
     refresh_recovery_block: RefreshCallback
@@ -61,10 +64,11 @@ class ConsoleControllerDependencies:
 
 
 class ConsoleController:
-    def __init__(self, namespace: argparse.Namespace, backend: BackendClient, deps: ConsoleControllerDependencies) -> None:
+    def __init__(self, namespace: argparse.Namespace, backend: BackendClient, deps: ConsoleControllerDependencies, jobs: BackgroundJobRunner | None = None) -> None:
         self.namespace = namespace
         self.backend = backend
         self.deps = deps
+        self.jobs = jobs or BackgroundJobRunner(namespace.cwd.resolve())
 
     def console_help(self) -> None:
         print("Controls:", file=sys.stderr)
@@ -93,6 +97,15 @@ class ConsoleController:
             return self.backend.status()
         if command == "runs":
             return self.backend.runs()
+        if command == "jobs":
+            return self.show_jobs()
+        if command == "attach":
+            return self.attach_job(args[0] if args else None)
+        if command == "detach":
+            print("No attached job.", file=sys.stderr)
+            return 0
+        if command == "cancel":
+            return self.cancel_job(args[0] if args else None)
         if command == "resume":
             return self.deps.resume(self.namespace, args[0] if args else None)
         if command == "archive":
@@ -106,7 +119,7 @@ class ConsoleController:
             if not request:
                 print("error: request is empty", file=sys.stderr)
                 return 2
-            return self.deps.start(self.namespace, [], request_override=request)
+            return self.deps.start_job(self.namespace, [], request_override=request)
         if command in {"sdd", "explore", "proposal", "spec", "design", "tasks", "tdd"}:
             self.deps.refresh_recovery_block(self.namespace)
             if getattr(self.namespace, "_recovery_blocked", False):
@@ -114,7 +127,7 @@ class ConsoleController:
                 return 1
             request = raw_line.split(None, 1)[1].strip() if args and command in {"sdd", "explore"} else None
             source_run = self.source_run_for_bundle(command, args) if command not in {"sdd", "explore"} else None
-            return self.deps.start(self.namespace, [], request_override=request, flow=command, source_run=source_run)
+            return self.deps.start_job(self.namespace, [], request_override=request, flow=command, source_run=source_run)
         if command == "artifacts":
             run_id = args[0] if args else (self.deps.line_prompt("Run id: ", help_kind="console") or "").strip()
             root = self.namespace.cwd.resolve() / ".ai-harness" / "artifacts" / "runs" / run_id
@@ -166,6 +179,88 @@ class ConsoleController:
             return 0
         raise ValueError(f"unsupported console action: {command}")
 
+
+    def show_jobs(self) -> int:
+        jobs = self.jobs.store.list_jobs()
+        if not jobs:
+            print("No background jobs.", file=sys.stderr)
+            return 0
+        for job in jobs[:20]:
+            job_id = str(job.get("job_id", ""))
+            status = str(job.get("status", "unknown"))
+            pid = job.get("pid")
+            exit_code = job.get("exit_code")
+            suffix = f" pid={pid}" if pid else ""
+            if exit_code is not None:
+                suffix += f" exit={exit_code}"
+            print(f"{job_id} [{status}]{suffix}", file=sys.stderr)
+        return 0
+
+    def _latest_job_id(self) -> str | None:
+        jobs = self.jobs.store.list_jobs()
+        if not jobs:
+            return None
+        value = jobs[0].get("job_id")
+        return str(value) if isinstance(value, str) else None
+
+    def attach_job(self, job_id: str | None) -> int:
+        selected = job_id or self._latest_job_id()
+        if not selected:
+            print("No background jobs.", file=sys.stderr)
+            return 1
+        metadata = self.jobs.store.read_metadata(selected)
+        if metadata is None:
+            print(f"error: job not found: {selected}", file=sys.stderr)
+            return 1
+        print(f"Attached to job {selected}. Ctrl-C detaches.", file=sys.stderr)
+        offset = 0
+        try:
+            while True:
+                offset, events = self.jobs.store.read_events(selected, start=offset)
+                for event in events:
+                    self._print_job_event(event)
+                metadata = self.jobs.store.read_metadata(selected) or metadata
+                if metadata.get("status") != "running":
+                    return int(metadata.get("exit_code") or 0)
+                import time
+
+                time.sleep(0.2)
+        except KeyboardInterrupt:
+            print("Detached.", file=sys.stderr)
+            return 0
+
+    def cancel_job(self, job_id: str | None) -> int:
+        selected = job_id or self._latest_job_id()
+        if not selected:
+            print("No background jobs.", file=sys.stderr)
+            return 1
+        if not self.jobs.cancel(selected):
+            print(f"error: job is not running in this console: {selected}", file=sys.stderr)
+            return 1
+        print(f"Cancelled job {selected}.", file=sys.stderr)
+        return 0
+
+    def _print_job_event(self, event: dict[str, object]) -> None:
+        kind = str(event.get("type", "event"))
+        if kind in {"stdout", "stderr", "progress"}:
+            text = str(event.get("text", ""))
+            if text:
+                print(text, file=sys.stderr)
+            return
+        if kind == "started":
+            print("job started", file=sys.stderr)
+            return
+        if kind == "decision_requested":
+            print(f"decision required for run {event.get('run_id')}", file=sys.stderr)
+            return
+        if kind == "finished":
+            print(f"job finished exit={event.get('exit_code')}", file=sys.stderr)
+            return
+        if kind == "cancelled":
+            print("job cancelled", file=sys.stderr)
+            return
+        print(kind, file=sys.stderr)
+
     def interactive_start_request(self) -> str:
         def handle_request_command(value: str) -> bool:
             parsed = parse_console_line(value, context="request")
@@ -197,7 +292,7 @@ class ConsoleController:
         if getattr(self.namespace, "_recovery_blocked", False):
             print("error: resolve unfinished runs with resume <RUN_ID> or archive <RUN_ID> before starting new work", file=sys.stderr)
             return 1
-        return self.deps.start(self.namespace, [], request_override=parsed.request or line)
+        return self.deps.start_job(self.namespace, [], request_override=parsed.request or line)
 
     def console_loop(self, startup_recovery: Callable[[argparse.Namespace], int | None]) -> int:
         print("AI Code Harness console. Type `/` for actions or enter a request.", file=sys.stderr)
@@ -208,6 +303,7 @@ class ConsoleController:
                 last_status = recovered
         except KeyboardInterrupt:
             print("\nPrompt cancelled.", file=sys.stderr)
+            return 130
         while True:
             try:
                 line = interactive_console_line(self.deps)
@@ -378,12 +474,14 @@ def interactive_console_line(deps: ConsoleControllerDependencies) -> str | None:
                         selected = (selected + 1) % len(suggestions)
                         rendered_lines = render_console_prompt(buffer, slash_mode, selected, rendered_lines)
                     continue
-                if key.startswith("\x1b"):
+                if key == "escape":
                     if slash_mode:
                         buffer.clear()
                         slash_mode = False
                         selected = 0
                         rendered_lines = render_console_prompt(buffer, slash_mode, selected, rendered_lines)
+                    continue
+                if key in {"left", "right", "home", "end", "delete", "unknown"}:
                     continue
                 if key in {"\x7f", "\b"}:
                     if buffer:

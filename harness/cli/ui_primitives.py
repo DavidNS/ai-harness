@@ -6,10 +6,10 @@ import os
 import select
 import sys
 import termios
-import tty
 from typing import Callable, NamedTuple
 
 from .console_actions import visible_actions
+from .terminal import KeyReader, RawTerminal
 
 
 class _LauncherExit(Exception):
@@ -72,15 +72,7 @@ def _handle_slash_command(value: str, *, kind: str) -> bool:
     return True
 
 
-class _RawTerminal:
-    def __enter__(self) -> "_RawTerminal":
-        self._fd = sys.stdin.fileno()
-        self._settings = termios.tcgetattr(self._fd)
-        tty.setcbreak(self._fd)
-        return self
-
-    def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
-        termios.tcsetattr(self._fd, termios.TCSADRAIN, self._settings)
+_RawTerminal = RawTerminal
 
 
 def _read_key_byte(timeout: float | None = None) -> str:
@@ -97,22 +89,7 @@ def _read_key_byte(timeout: float | None = None) -> str:
 
 
 def _read_key() -> str:
-    first = _read_key_byte()
-    if first == "\x03":
-        raise KeyboardInterrupt
-    if first != "\x1b":
-        return first
-    second = _read_key_byte(0.20)
-    if second in {"\r", "\n"}:
-        return "alt-enter"
-    if second in {"[", "O"}:
-        third = _read_key_byte(0.20)
-        if third == "A":
-            return "up"
-        if third == "B":
-            return "down"
-        return first + second + third
-    return first + second
+    return KeyReader().read_key()
 
 
 def _read_menu_command() -> str:
@@ -131,6 +108,17 @@ def _read_menu_command() -> str:
         if len(key) == 1 and key.isprintable():
             command.append(key)
             print(key, end="", file=sys.stderr, flush=True)
+
+
+def _menu_item_for_command(command: str, items: list[_MenuItem]) -> _MenuItem | None:
+    value = command.strip().lstrip("/").casefold()
+    if not value:
+        return None
+    for item in items:
+        names = {item.value.casefold(), item.key.casefold(), *(shortcut.casefold() for shortcut in item.shortcuts)}
+        if value in names:
+            return item
+    return None
 
 
 def _render_menu(title_lines: list[str], items: list[_MenuItem], selected: int) -> None:
@@ -170,8 +158,16 @@ def _menu_prompt(title_lines: list[str], items: list[_MenuItem], *, help_kind: s
                     if key in {"\r", "\n"}:
                         return items[selected]
                     if key == "/":
-                        if _handle_slash_command(_read_menu_command(), kind=help_kind):
+                        command = _read_menu_command()
+                        selected_item = _menu_item_for_command(command, items)
+                        if selected_item is not None:
+                            return selected_item
+                        if _handle_slash_command(command, kind=help_kind):
+                            _render_menu(title_lines, items, selected)
+                            print("Use Up/Down, Enter, number keys, /help, or /exit.", file=sys.stderr, flush=True)
                             continue
+                    if key in {"left", "right", "home", "end", "delete", "unknown"}:
+                        continue
                     if len(key) == 1:
                         lowered = key.casefold()
                         for index, item in enumerate(items, 1):
@@ -242,8 +238,19 @@ def _multi_select_prompt(title_lines: list[str], items: list[_MenuItem], *, help
                     if key in {"\r", "\n"}:
                         return [item for index, item in enumerate(items) if index in checked]
                     if key == "/":
-                        if _handle_slash_command(_read_menu_command(), kind=help_kind):
+                        command = _read_menu_command()
+                        selected_item = _menu_item_for_command(command, items)
+                        if selected_item is not None:
+                            checked.symmetric_difference_update({items.index(selected_item)})
+                            selected = items.index(selected_item)
+                            _redraw_multi_select(title_lines, items, selected, checked)
                             continue
+                        if _handle_slash_command(command, kind=help_kind):
+                            _render_multi_select(title_lines, items, selected, checked)
+                            print("Use Up/Down, Space, Enter, number keys, /help, or /exit.", file=sys.stderr, flush=True)
+                            continue
+                    if key in {"left", "right", "home", "end", "delete", "unknown"}:
+                        continue
                     if len(key) == 1:
                         lowered = key.casefold()
                         for index, item in enumerate(items, 1):
@@ -308,7 +315,7 @@ def _text_prompt(
                         buffer.append("\n")
                         print("\n... ", end="", file=sys.stderr, flush=True)
                         continue
-                    if key.startswith("\x1b"):
+                    if key in {"escape", "unknown", "left", "right", "home", "end", "delete"}:
                         continue
                     if key in {"\x7f", "\b"}:
                         if buffer:

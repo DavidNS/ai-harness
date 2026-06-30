@@ -10,11 +10,13 @@ from pathlib import Path
 from ai_harness.ci_support import ci_preflight
 from .backend_client import BackendClient, ResumeBackendRequest, StartBackendRequest
 from .bootstrap import ACTIONS, RUNNER, _default_provider, _parser, _prompt_for_model, _prompt_for_reasoning_effort
+from .console_session import ConsoleSession
 from .console_actions import (
     CONSOLE_ACTIONS,
     parse_console_line,
     suggest_console_actions,
 )
+from .job_runner import BackgroundJobRunner
 from .console_controller import (
     ConsoleController,
     ConsoleControllerDependencies,
@@ -66,6 +68,7 @@ def _backend_client(namespace: argparse.Namespace) -> BackendClient:
 def _controller_dependencies() -> ConsoleControllerDependencies:
     return ConsoleControllerDependencies(
         start=_start,
+        start_job=_start_job,
         resume=_resume,
         archive=_archive,
         refresh_recovery_block=_refresh_recovery_block,
@@ -82,8 +85,23 @@ def _controller_dependencies() -> ConsoleControllerDependencies:
     )
 
 
+def _job_runner(namespace: argparse.Namespace) -> BackgroundJobRunner:
+    runner = getattr(namespace, "_job_runner", None)
+    if not isinstance(runner, BackgroundJobRunner):
+        runner = BackgroundJobRunner(namespace.cwd.resolve())
+        setattr(namespace, "_job_runner", runner)
+    return runner
+
+
+def _console_session(namespace: argparse.Namespace) -> ConsoleSession:
+    session = ConsoleSession.from_namespace(namespace)
+    session.sync_namespace(namespace)
+    return session
+
+
 def _controller(namespace: argparse.Namespace) -> ConsoleController:
-    return ConsoleController(namespace, _backend_client(namespace), _controller_dependencies())
+    _console_session(namespace)
+    return ConsoleController(namespace, _backend_client(namespace), _controller_dependencies(), _job_runner(namespace))
 
 
 def _waiting_run_ids(repository) -> set[str]:
@@ -362,35 +380,7 @@ def _console_command(namespace: argparse.Namespace, line: str) -> int:
 
 
 def _console_loop(namespace: argparse.Namespace) -> int:
-    print("AI Code Harness console. Type `/` for actions or enter a request.", file=sys.stderr)
-    last_status = 0
-    try:
-        recovered = _startup_recovery(namespace)
-        if recovered is not None:
-            last_status = recovered
-    except KeyboardInterrupt:
-        print("\nPrompt cancelled.", file=sys.stderr)
-    while True:
-        try:
-            line = _interactive_console_line()
-            if line is None:
-                print(file=sys.stderr)
-                return last_status
-            if not line:
-                continue
-            try:
-                last_status = _console_command(namespace, line)
-            except ValueError as exc:
-                print(f"error: {exc}", file=sys.stderr)
-                last_status = 1
-        except EOFError:
-            print(file=sys.stderr)
-            return last_status
-        except KeyboardInterrupt:
-            print("\nPrompt cancelled.", file=sys.stderr)
-            last_status = 130
-        except _LauncherExit:
-            return 0
+    return _controller(namespace).console_loop(_startup_recovery)
 
 
 def _branch_args(namespace: argparse.Namespace) -> list[str]:
@@ -441,7 +431,7 @@ def _select_code_flow() -> str:
     ).value
 
 
-def _start(
+def _prepare_start_backend(
     namespace: argparse.Namespace,
     prompt_args: list[str],
     *,
@@ -449,13 +439,14 @@ def _start(
     route: str | None = None,
     flow: str | None = None,
     source_run: str | None = None,
-) -> int:
+    allow_console_loop: bool = True,
+) -> tuple[int | None, list[str] | None, str | None]:
     provider = _default_provider(namespace.provider)
     request: str | None = request_override
     if namespace.prompt_file is not None:
         if prompt_args or request_override is not None:
             print("error: --file cannot be combined with an inline request", file=sys.stderr)
-            return 2
+            return 2, None, None
     elif request is None:
         request = " ".join(prompt_args).strip()
         if not request and not sys.stdin.isatty():
@@ -463,11 +454,11 @@ def _start(
     if namespace.prompt_file is None and not request:
         if source_run and flow:
             request = f"Run {flow} bundle from {source_run}"
-        elif sys.stdin.isatty():
-            return _console_loop(namespace)
+        elif sys.stdin.isatty() and allow_console_loop:
+            return _console_loop(namespace), None, None
         else:
             print("error: a request is required", file=sys.stderr)
-            return 2
+            return 2, None, None
     if sys.stdin.isatty():
         _startup_ci_preflight(namespace)
     branch_args = _branch_args(namespace)
@@ -495,7 +486,51 @@ def _start(
             prompt_file=namespace.prompt_file,
         )
     )
+    return None, backend, request
+
+
+def _start(
+    namespace: argparse.Namespace,
+    prompt_args: list[str],
+    *,
+    request_override: str | None = None,
+    route: str | None = None,
+    flow: str | None = None,
+    source_run: str | None = None,
+) -> int:
+    code, backend, request = _prepare_start_backend(
+        namespace, prompt_args, request_override=request_override, route=route, flow=flow, source_run=source_run
+    )
+    if code is not None or backend is None:
+        return int(code or 0)
     return _run_and_follow_decisions(namespace, backend, request=request)
+
+
+def _start_job(
+    namespace: argparse.Namespace,
+    prompt_args: list[str],
+    *,
+    request_override: str | None = None,
+    route: str | None = None,
+    flow: str | None = None,
+    source_run: str | None = None,
+) -> int:
+    code, backend, request = _prepare_start_backend(
+        namespace,
+        prompt_args,
+        request_override=request_override,
+        route=route,
+        flow=flow,
+        source_run=source_run,
+        allow_console_loop=False,
+    )
+    if code is not None or backend is None:
+        return int(code or 0)
+    if namespace.dry_run:
+        return _run_and_follow_decisions(namespace, backend, request=request)
+    handle = _job_runner(namespace).submit(backend, request=request)
+    print(f"Started background job {handle.job_id}. Use /attach {handle.job_id} or /jobs.", file=sys.stderr)
+    return 0
 
 
 def _resume(namespace: argparse.Namespace, run_id: str | None, *, follow_decisions: bool = True) -> int:

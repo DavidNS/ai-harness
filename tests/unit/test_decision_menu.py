@@ -441,13 +441,16 @@ class DecisionMenuTests(unittest.TestCase):
         choices = iter(["resume", "exit"])
         stderr = io.StringIO()
 
-        with mock.patch.object(launcher, "_startup_recovery", return_value=None),             mock.patch("builtins.input", side_effect=lambda: next(choices)),             mock.patch.object(launcher, "_console_command", side_effect=[ValueError("multiple unfinished runs require a run ID"), launcher._LauncherExit]),             contextlib.redirect_stderr(stderr):
+        with mock.patch.object(launcher, "_startup_recovery", return_value=None), \
+            mock.patch("harness.cli.console_controller.interactive_console_line", side_effect=lambda _deps: next(choices)), \
+            mock.patch.object(launcher.ConsoleController, "console_command", side_effect=[ValueError("multiple unfinished runs require a run ID"), launcher._LauncherExit]), \
+            contextlib.redirect_stderr(stderr):
             code = launcher._console_loop(namespace)
 
         self.assertEqual(0, code)
         output = stderr.getvalue()
         self.assertIn("multiple unfinished runs require a run ID", output)
-        self.assertGreaterEqual(output.count("aih>"), 2)
+        self.assertIn("AI Code Harness console", output)
 
 
     def test_start_forwards_selected_reasoning_effort(self) -> None:
@@ -760,6 +763,18 @@ class DecisionMenuTests(unittest.TestCase):
         self.assertIn("tdd", bootstrap.ACTIONS)
         self.assertNotIn("start", bootstrap.ACTIONS)
         self.assertNotIn("model", bootstrap.ACTIONS)
+
+    def test_console_plain_request_starts_background_job(self) -> None:
+        launcher = load_launcher()
+        namespace = launcher.argparse.Namespace(cwd=Path("/repo"), provider="local", verbose=False, dry_run=False)
+
+        with mock.patch.object(launcher, "_unfinished_runs", return_value=[]), \
+            mock.patch.object(launcher, "_start_job", return_value=0) as start_job:
+            code = launcher._console_command(namespace, "Fix tests")
+
+        self.assertEqual(0, code)
+        start_job.assert_called_once()
+        self.assertEqual("Fix tests", start_job.call_args.kwargs["request_override"])
 
     def test_console_blocks_plain_request_when_unfinished_runs_require_selection(self) -> None:
         launcher = load_launcher()

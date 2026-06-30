@@ -563,7 +563,7 @@ class RootLauncherIntegrationTests(unittest.TestCase):
                         os.write(master, b"n")
                         sent_new = True
                     elif sent_new and not sent_exit and b"Resume or archive" in output:
-                        os.write(master, b"x")
+                        os.write(master, b"x\r")
                         sent_exit = True
                 try:
                     process.communicate(timeout=2)

@@ -49,6 +49,10 @@ CONSOLE_ACTIONS: tuple[ConsoleAction, ...] = (
     ConsoleAction("artifacts", "List run artifacts", "v", menu_visible=False, top_level=True),
     ConsoleAction("model", "Select model", "m", contexts=("console", "request")),
     ConsoleAction("ci-mode", "Select GitHub CI mode", "g", ("ci", "github-ci"), contexts=("console", "request")),
+    ConsoleAction("jobs", "Show background jobs", "j"),
+    ConsoleAction("attach", "Attach job output", "b"),
+    ConsoleAction("detach", "Detach job output", "z"),
+    ConsoleAction("cancel", "Cancel job", "k"),
     ConsoleAction("install-ci", "Install CI", "c", top_level=True),
     ConsoleAction("install-packages", "Install packages", "p", ("packages",), top_level=True),
     ConsoleAction("help", "Show help", "h"),
@@ -96,7 +100,7 @@ def parse_console_line(
     if not parts:
         return ParsedConsoleInput("empty", raw, is_slash=is_slash)
     action = actions_by_name(actions).get(parts[0].casefold())
-    if action is not None and context in action.contexts:
+    if action is not None and context in action.contexts and (is_slash or context != "request"):
         return ParsedConsoleInput("action", raw, is_slash=is_slash, action=action, args=parts[1:])
     if is_slash:
         return ParsedConsoleInput("unknown_slash", raw, is_slash=True, error=f"Unknown slash command: /{parts[0]}")

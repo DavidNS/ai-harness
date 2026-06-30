@@ -8,9 +8,15 @@ The harness is designed around small, explicit boundaries. A smaller file is onl
 better when it clarifies ownership, reduces context load, and makes validation
 more local.
 
-We split by domain to make boundaries clear, and we use hexagonal architecture to
-increase isolation between orchestration, adapters, tools, storage, and user
-interfaces.
+We split by domain so ownership, context, and validation stay local. A domain is
+the unit that should be possible to inspect, change, test, and review without
+loading the whole harness.
+
+At the edges of each domain, dependencies are explicit. The backend uses
+hexagonal architecture to keep orchestration isolated from adapters, tools,
+storage, and user interfaces. The command frontend uses a command-driven
+Model-View-Update architecture so user intent, state transitions, and backend
+effects remain separate and inspectable.
 
 We try to keep agent context as small and isolated as possible.
 
@@ -30,6 +36,8 @@ interpretation, exploration, judgment, or code generation.
 
 We try to make the pipelines as reproducible as possible, so each AI step has one
 clear task and one limited context.
+
+The harness learns---not the model.
 
 ## Three connected lifecycles
 
