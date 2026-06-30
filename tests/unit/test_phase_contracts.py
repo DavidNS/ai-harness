@@ -8,6 +8,7 @@ from pathlib import Path
 PACKAGE = Path(__file__).resolve().parents[2] / "harness"
 sys.path.insert(0, str(PACKAGE))
 
+from ai_harness.orchestrator.exploration_map import ExplorationMapBuilder
 from ai_harness.phases import PHASE_DEFINITIONS, PhaseValidationError, get_phase
 from tests.fixtures.scripted_provider import explore_outcome_bundle, learning_output
 
@@ -31,6 +32,40 @@ class PhaseContractTests(unittest.TestCase):
             phase.build_input({"request": "r", "explore_bundle_view": {"kind": "explore_bundle_view"}})
         with self.assertRaises(PhaseValidationError):
             phase.build_input({"request": "r", "explore_bundle_view": {"kind": "explore_bundle_view"}, "explorer_scope": {}, "state": {}})
+
+    def test_exploration_map_ignores_ci_observation_noise(self) -> None:
+        observations = [
+            {"kind": "ci_signal", "path": f"harness/noise/{index}.py", "matches": ["security auth path"]}
+            for index in range(80)
+        ] + [
+            {"kind": "source", "path": "harness/cli/ui.py", "score": 42, "matched_terms": ["ui", "command"], "symbols": ["_text_prompt"]}
+        ]
+        evidence = [{
+            "id": "E1",
+            "kind": "code",
+            "claim": "harness/cli/ui.py handles console input.",
+            "status": "supported",
+            "confidence": "high",
+            "sources": [{"type": "file", "path": "harness/cli/ui.py", "description": "UI surface."}],
+        }]
+
+        exploration_map = ExplorationMapBuilder(
+            request_understanding={"summary": "Slash command UI", "explicit_constraints": [], "mentioned_surfaces": []},
+            triage={"complexity": "local_change", "ambiguity": "clear", "risk": "low", "evidence_depth": "standard"},
+            evidence_plan={"required_gatherers": ["code"], "optional_gatherers": [], "ci_requirement": "optional", "questions": []},
+            evidence_collection={"evidence": evidence, "blockers": []},
+            ci_barrier={"blockers": []},
+            evidence_normalization={"evidence": evidence},
+            repository_observations=observations,
+            related_improvements=[],
+        ).build()
+
+        self.assertTrue(any(item["path"] == "harness/cli/ui.py" for item in exploration_map["surfaces"]))
+        self.assertFalse(any(item.get("kind") == "ci_surface" for item in exploration_map["surfaces"]))
+        self.assertLessEqual(len(exploration_map["surfaces"]), 16)
+        self.assertLessEqual(len(exploration_map["risks"]), 12)
+        self.assertLessEqual(len(exploration_map["verification_surfaces"]), 12)
+        self.assertEqual([], exploration_map["security_signals"])
 
     def test_explore_outcome_bundle_accepts_exploration_map(self) -> None:
         document = json.loads(explore_outcome_bundle())

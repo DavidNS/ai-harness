@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ai_harness.orchestrator.explore_evidence import ci_digest_from_artifacts, ci_evidence_from_artifacts, context_pack
+from ai_harness.orchestrator.explore_evidence import ci_digest_from_artifacts, ci_evidence_from_artifacts, compact_context_pack, context_pack
 from ai_harness.stores.artifact import ArtifactStore
 
 
@@ -67,6 +67,33 @@ class ExploreEvidenceTests(unittest.TestCase):
         self.assertEqual("ci_digest", pack["ci_digest"]["kind"])
         self.assertNotIn("signals", pack["ci_digest"])
         self.assertNotIn("path_index", pack["ci_digest"])
+
+    def test_compact_context_pack_drops_ci_observations_and_caps_repository_observations(self) -> None:
+        store = self._store()
+        self._write_ci(store)
+        observations = [
+            {"kind": "ci_signal", "path": f"harness/ci/{index}.py", "matches": ["CI noise"]}
+            for index in range(30)
+        ] + [
+            {"kind": "source", "path": f"harness/cli/ui_{index}.py", "score": 50 - index, "symbols": ["a", "b", "c"], "matches": ["m1", "m2", "m3", "m4"]}
+            for index in range(20)
+        ]
+        pack = context_pack(
+            request="Add slash command autocomplete.",
+            profile={"summary": "Add slash command autocomplete."},
+            knowledge=[],
+            related_improvements=[],
+            repository_observations=observations,
+            artifacts=store,
+            explorer_scope={"artifacts": []},
+        )
+
+        compact = compact_context_pack(pack)
+
+        self.assertEqual(12, len(compact["repository_observations"]))
+        self.assertFalse(any(item["kind"] == "ci_signal" for item in compact["repository_observations"]))
+        self.assertLessEqual(len(compact["repository_observations"][0]["symbols"]), 8)
+        self.assertLessEqual(len(compact["repository_observations"][0]["matches"]), 3)
 
     def test_controller_ci_evidence_is_compact(self) -> None:
         store = self._store()

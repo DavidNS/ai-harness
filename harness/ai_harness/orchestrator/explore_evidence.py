@@ -21,6 +21,10 @@ def _list(value: object) -> list[object]:
     return value if isinstance(value, list) else []
 
 
+def _object_list(value: object) -> list[Mapping[str, object]]:
+    return [item for item in _list(value) if isinstance(item, Mapping)]
+
+
 def _safe_artifact_json(artifacts: ArtifactStore, name: str) -> dict[str, object]:
     if not artifacts.exists(name):
         return {}
@@ -113,6 +117,65 @@ def _count_by(signals: Sequence[Mapping[str, object]], key: str) -> dict[str, in
     counter = Counter(_text(signal.get(key)) or "unknown" for signal in signals)
     return dict(sorted(counter.items()))
 
+
+
+_OBSERVATION_LIMIT = 12
+_OBSERVATION_SYMBOL_LIMIT = 8
+_OBSERVATION_MATCH_LIMIT = 3
+
+
+def compact_repository_observations(
+    observations: Sequence[Mapping[str, object]],
+    *,
+    limit: int = _OBSERVATION_LIMIT,
+) -> list[dict[str, object]]:
+    compacted: list[dict[str, object]] = []
+    for observation in observations:
+        kind = _text(observation.get("kind"))
+        if kind in {"ci", "ci_signal"}:
+            continue
+        path = _path(observation.get("path"))
+        if not path:
+            continue
+        item: dict[str, object] = {"kind": kind or "repository", "path": path}
+        score = observation.get("score")
+        if isinstance(score, int) and not isinstance(score, bool):
+            item["score"] = score
+        terms = [_text(term) for term in _list(observation.get("matched_terms")) if _text(term)]
+        if terms:
+            item["matched_terms"] = terms[:8]
+        symbols = [_text(symbol) for symbol in _list(observation.get("symbols")) if _text(symbol)]
+        if symbols:
+            item["symbols"] = symbols[:_OBSERVATION_SYMBOL_LIMIT]
+        matches = [_text(match) for match in _list(observation.get("matches")) if _text(match)]
+        if matches:
+            item["matches"] = matches[:_OBSERVATION_MATCH_LIMIT]
+        compacted.append(item)
+        if len(compacted) >= limit:
+            break
+    return compacted
+
+
+def compact_context_pack(value: Mapping[str, object]) -> dict[str, object]:
+    compact: dict[str, object] = {
+        "schema_version": value.get("schema_version"),
+        "kind": value.get("kind"),
+        "request": value.get("request"),
+        "profile": value.get("profile"),
+        "ci_digest": value.get("ci_digest"),
+        "git": value.get("git"),
+        "explorer_scope": value.get("explorer_scope"),
+    }
+    knowledge = _list(value.get("knowledge"))[:3]
+    if knowledge:
+        compact["knowledge"] = knowledge
+    related = [dict(item) for item in _object_list(value.get("related_improvements"))[:5]]
+    if related:
+        compact["related_improvements"] = related
+    observations = compact_repository_observations(_object_list(value.get("repository_observations")))
+    if observations:
+        compact["repository_observations"] = observations
+    return {key: item for key, item in compact.items() if item not in (None, [], {})}
 
 def ci_digest_from_artifacts(
     artifacts: ArtifactStore,
@@ -288,7 +351,7 @@ def context_pack(
         "profile": dict(profile),
         "knowledge": list(knowledge),
         "related_improvements": [dict(item) for item in related_improvements],
-        "repository_observations": [dict(item) for item in repository_observations],
+        "repository_observations": compact_repository_observations(repository_observations),
         "git": _safe_artifact_json(artifacts, "git-run.json"),
         "ci_status": _safe_artifact_json(artifacts, "ci-status.json"),
         "ci_digest": ci_digest_from_artifacts(
