@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from harness_v2.backend.domain.lifecycle import PhaseName, RunStatus, RunStrategy
+
 
 class RunNotFoundError(KeyError):
     """Raised when a command or query targets an unknown run."""
@@ -13,9 +15,9 @@ class InvalidRunStateError(RuntimeError):
     """Raised when a command is not valid for the run's current state."""
 
 
-PHASE_VALUES = frozenset({"EXPLORE_BUNDLE", "PROPOSAL_BUNDLE", "SPEC_BUNDLE", "DESIGN_BUNDLE", "TASKS_BUNDLE", "TDD_BUNDLE", "EXPLORER_INTAKE", "EXPLORER_DISCOVERY", "EXPLORER_DECISION", "EXPLORER_ARTIFACT", "EXPLORER_REVIEW", "EXPLORER_DISTILL"})
-RUN_STATUS_VALUES = frozenset({"PENDING", "RUNNING", "WAITING_FOR_USER", "COMPLETED", "FAILED", "CANCELLED"})
-RUN_STRATEGY_VALUES = frozenset({"SDD", "EXPLORER", "EXPLORE_BUNDLE", "PROPOSAL_BUNDLE", "SPEC_BUNDLE", "DESIGN_BUNDLE", "TASKS_BUNDLE", "TDD_BUNDLE"})
+PHASE_VALUES = frozenset(phase.value for phase in PhaseName)
+RUN_STATUS_VALUES = frozenset(status.value for status in RunStatus)
+RUN_STRATEGY_VALUES = frozenset(strategy.value for strategy in RunStrategy)
 
 
 def _require_text(value: str, field: str) -> str:
@@ -85,6 +87,16 @@ class ResumeRun:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "run_id", _require_text(self.run_id, "run_id"))
+
+
+@dataclass(frozen=True, slots=True)
+class RetryPhase:
+    run_id: str
+    phase: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "run_id", _require_text(self.run_id, "run_id"))
+        object.__setattr__(self, "phase", _phase_text(self.phase))
 
 
 @dataclass(frozen=True, slots=True)
@@ -179,6 +191,44 @@ class PhaseFailed:
 
 
 @dataclass(frozen=True, slots=True)
+class PhaseEscalated:
+    run_id: str
+    from_phase: str
+    target_phase: str
+    decision_id: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "run_id", _require_text(self.run_id, "run_id"))
+        object.__setattr__(self, "from_phase", _phase_text(self.from_phase, "from_phase"))
+        object.__setattr__(self, "target_phase", _phase_text(self.target_phase, "target_phase"))
+        object.__setattr__(self, "decision_id", _require_text(self.decision_id, "decision_id"))
+
+
+@dataclass(frozen=True, slots=True)
+class PhaseRecoveryStarted:
+    run_id: str
+    from_phase: str
+    target_phase: str
+    reason: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "run_id", _require_text(self.run_id, "run_id"))
+        object.__setattr__(self, "from_phase", _phase_text(self.from_phase, "from_phase"))
+        object.__setattr__(self, "target_phase", _phase_text(self.target_phase, "target_phase"))
+        object.__setattr__(self, "reason", _require_text(self.reason, "reason"))
+
+
+@dataclass(frozen=True, slots=True)
+class PhaseRetryStarted:
+    run_id: str
+    phase: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "run_id", _require_text(self.run_id, "run_id"))
+        object.__setattr__(self, "phase", _phase_text(self.phase))
+
+
+@dataclass(frozen=True, slots=True)
 class UserDecisionRequested:
     run_id: str
     decision_id: str
@@ -228,13 +278,16 @@ class RunCancelled:
         object.__setattr__(self, "run_id", _require_text(self.run_id, "run_id"))
 
 
-Command = StartRun | ResumeRun | CancelRun | SubmitUserDecision
+Command = StartRun | ResumeRun | RetryPhase | CancelRun | SubmitUserDecision
 Query = GetRun | ListRuns | GetRunState | GetAvailableActions
 Event = (
     RunStarted
     | PhaseStarted
     | PhaseCompleted
     | PhaseFailed
+    | PhaseEscalated
+    | PhaseRecoveryStarted
+    | PhaseRetryStarted
     | UserDecisionRequested
     | UserDecisionReceived
     | RunResumed

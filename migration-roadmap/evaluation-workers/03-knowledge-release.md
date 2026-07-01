@@ -35,7 +35,8 @@ Report issues where:
   truth files;
 - knowledge patches are transient logs instead of permanent candidate
   artifacts;
-- promotion from knowledge patch to source of truth is implicit or missing;
+- promotion from knowledge patch to source of truth is implicit, or missing from
+  a slice that claims to implement promotion;
 - local agents DB or human knowledge files are treated as authoritative truth
   instead of generated views;
 - CI artifacts, feature branches, merge requests, or main-branch artifact
@@ -45,6 +46,8 @@ Report issues where:
 
 - absent full knowledge implementation when the reviewed slice does not touch
   knowledge or release behavior;
+- absent KP-to-SOT, SOT-to-local-agents-DB, or SOT-to-human-knowledge-file
+  workflows when reviewing the v2 Stage 9 candidate-patch slice;
 - placeholder ports that are intentionally empty but preserve the boundary;
 - release workflow gaps documented as future stages, unless new code actively
   contradicts the target flow.

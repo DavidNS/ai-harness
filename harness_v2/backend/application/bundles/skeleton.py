@@ -15,6 +15,8 @@ from harness_v2.backend.domain.tasks import TaskStatus, TaskSummary
 class ProposalBundleDefinition:
     phase: PhaseName = PhaseName.PROPOSAL_BUNDLE
     failure_code: str = "PROPOSAL_BUNDLE_FAILED"
+    produced_artifacts: tuple[str, ...] = ("purpose/bundle.json", "published/proposal-handoff.json")
+    produced_prefixes: tuple[str, ...] = ()
 
     def execute(self, context: BundleContext) -> BundleExecutionResult:
         run = context.run
@@ -39,6 +41,8 @@ class ProposalBundleDefinition:
 class SpecBundleDefinition:
     phase: PhaseName = PhaseName.SPEC_BUNDLE
     failure_code: str = "SPEC_BUNDLE_FAILED"
+    produced_artifacts: tuple[str, ...] = ("spec.md", "published/spec-handoff.json")
+    produced_prefixes: tuple[str, ...] = ()
 
     def execute(self, context: BundleContext) -> BundleExecutionResult:
         run = context.run
@@ -63,6 +67,8 @@ class SpecBundleDefinition:
 class DesignBundleDefinition:
     phase: PhaseName = PhaseName.DESIGN_BUNDLE
     failure_code: str = "DESIGN_BUNDLE_FAILED"
+    produced_artifacts: tuple[str, ...] = ("design.md", "published/design-handoff.json")
+    produced_prefixes: tuple[str, ...] = ()
 
     def execute(self, context: BundleContext) -> BundleExecutionResult:
         run = context.run
@@ -92,6 +98,8 @@ class DesignBundleDefinition:
 class TasksBundleDefinition:
     phase: PhaseName = PhaseName.TASKS_BUNDLE
     failure_code: str = "TASKS_BUNDLE_FAILED"
+    produced_artifacts: tuple[str, ...] = ("tasks.json", "published/tasks-handoff.json")
+    produced_prefixes: tuple[str, ...] = ()
 
     def execute(self, context: BundleContext) -> BundleExecutionResult:
         run = context.run
@@ -113,20 +121,21 @@ class TasksBundleDefinition:
             TaskSummary(str(item["id"]), str(item["title"]), TaskStatus.PENDING)
             for item in _object_list(document.get("tasks"), "tasks")
         )
-        context.state_store.save(run.replace(tasks=tasks))
         context.artifacts.ensure_controller_json(
             run.run_id,
             "published/tasks-handoff.json",
             lambda: _handoff("tasks", ["tasks.json"], "TDD_BUNDLE"),
             validate_handoff,
         )
-        return BundleExecutionResult()
+        return BundleExecutionResult(tasks=tasks)
 
 
 @dataclass(frozen=True, slots=True)
 class TddBundleDefinition:
     phase: PhaseName = PhaseName.TDD_BUNDLE
     failure_code: str = "TDD_BUNDLE_FAILED"
+    produced_artifacts: tuple[str, ...] = ("published/tdd-handoff.json",)
+    produced_prefixes: tuple[str, ...] = ()
 
     def execute(self, context: BundleContext) -> BundleExecutionResult:
         run = context.run
@@ -138,7 +147,6 @@ class TddBundleDefinition:
             else TaskSummary(task.task_id, task.title, TaskStatus.COMPLETED)
             for task in run.tasks
         )
-        context.state_store.save(run.replace(tasks=completed))
         context.artifacts.ensure_controller_json(
             run.run_id,
             "published/tdd-handoff.json",
@@ -154,7 +162,7 @@ class TddBundleDefinition:
             ),
             validate_handoff,
         )
-        return BundleExecutionResult()
+        return BundleExecutionResult(tasks=completed)
 
 
 def validate_explore_outcome_bundle(value: dict[str, Any]) -> None:

@@ -10,7 +10,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from harness_v2.backend.domain.decisions import DecisionRecord, PendingDecision
+from harness_v2.backend.domain.decisions import DecisionAction, DecisionEffect, DecisionRecord, PendingDecision
 from harness_v2.backend.domain.errors import DomainValidationError, ErrorRecord
 from harness_v2.backend.domain.lifecycle import PhaseName, RunStatus, RunStrategy
 from harness_v2.backend.domain.runs import RunRecord
@@ -224,6 +224,17 @@ def _decision_to_mapping(decision: PendingDecision | None) -> dict[str, Any] | N
         "prompt": decision.prompt,
         "created_at": decision.created_at,
         "options": list(decision.options),
+        "effects": [_decision_effect_to_mapping(effect) for effect in decision.effects],
+        "default_action": decision.default_action.value,
+        "default_target_phase": decision.default_target_phase.value if decision.default_target_phase else None,
+    }
+
+
+def _decision_effect_to_mapping(effect: DecisionEffect) -> dict[str, Any]:
+    return {
+        "option": effect.option,
+        "action": effect.action.value,
+        "target_phase": effect.target_phase.value if effect.target_phase else None,
     }
 
 
@@ -236,6 +247,9 @@ def _decision_record_to_mapping(decision: DecisionRecord) -> dict[str, Any]:
         "created_at": decision.created_at,
         "answered_at": decision.answered_at,
         "options": list(decision.options),
+        "effects": [_decision_effect_to_mapping(effect) for effect in decision.effects],
+        "default_action": decision.default_action.value,
+        "default_target_phase": decision.default_target_phase.value if decision.default_target_phase else None,
     }
 
 
@@ -287,6 +301,20 @@ def _decision_from_mapping(data: object) -> PendingDecision | None:
         prompt=data["prompt"],
         created_at=data["created_at"],
         options=tuple(data.get("options", ())),
+        effects=tuple(_decision_effect_from_mapping(item) for item in data.get("effects", ())),
+        default_action=DecisionAction(data.get("default_action", "CONTINUE")),
+        default_target_phase=PhaseName(data["default_target_phase"]) if data.get("default_target_phase") is not None else None,
+    )
+
+
+def _decision_effect_from_mapping(data: object) -> DecisionEffect:
+    if not isinstance(data, dict):
+        raise StateStoreCorruptionError("decision effect must be an object")
+    target = data.get("target_phase")
+    return DecisionEffect(
+        option=data["option"],
+        action=DecisionAction(data["action"]),
+        target_phase=PhaseName(target) if target is not None else None,
     )
 
 
@@ -301,6 +329,9 @@ def _decision_record_from_mapping(data: object) -> DecisionRecord:
         created_at=data["created_at"],
         answered_at=data["answered_at"],
         options=tuple(data.get("options", ())),
+        effects=tuple(_decision_effect_from_mapping(item) for item in data.get("effects", ())),
+        default_action=DecisionAction(data.get("default_action", "CONTINUE")),
+        default_target_phase=PhaseName(data["default_target_phase"]) if data.get("default_target_phase") is not None else None,
     )
 
 
@@ -419,6 +450,19 @@ class FileArtifactStore:
             raise ArtifactNotFoundError(f"{run_id}:{normalized}")
         path = _require_safe_existing_artifact(root, normalized)
         return path.read_bytes()
+
+    def delete(self, run_id: str, artifact_id: str) -> bool:
+        normalized = _require_artifact_id(artifact_id)
+        root = _safe_existing_artifact_root(self._root, run_id)
+        if root is None:
+            return False
+        try:
+            path = _require_safe_existing_artifact(root, normalized)
+        except ArtifactNotFoundError:
+            return False
+        path.unlink()
+        _fsync_directory(path.parent)
+        return True
 
     def checksum(self, run_id: str, artifact_id: str) -> str:
         return self._metadata(run_id, artifact_id).checksum

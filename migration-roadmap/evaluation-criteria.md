@@ -267,14 +267,17 @@ resume support.
 
 Knowledge learned during lifecycle execution must become candidate knowledge
 patches first. It must not be written directly into the accepted source of
-truth.
+truth. During the v2 Stage 9 candidate-patch slice, patch creation and separation
+from SOT are sufficient; KP-to-SOT promotion may remain a documented future
+workflow.
 
 Pass signals:
 
 - `KNOWLEDGE_PHASE_EXTRACTOR` creates permanent, versioned knowledge patch
   artifacts.
-- Promotion from knowledge patch to source of truth is a separate workflow with
-  validation and review.
+- Promotion from knowledge patch to source of truth is either a separate workflow
+  with validation and review, or explicitly deferred without being conflated with
+  extraction.
 - Candidate knowledge and accepted truth are represented separately.
 
 Fail signals:
@@ -288,10 +291,16 @@ Default severity: `critical`.
 ### 10. Knowledge Is Regenerative
 
 Accepted source of truth must be able to regenerate both agent-oriented and
-human-readable views.
+human-readable views. Apply this criterion when the reviewed slice implements or
+changes SOT, local agents DB, human knowledge files, promotion, or regeneration.
+For the v2 Stage 9 candidate-patch slice, absence of KP-to-SOT and
+SOT-regeneration workflows is not a failure when those workflows are explicitly
+deferred.
 
 Pass signals:
 
+- Patch-only stages preserve the SOT/generated-view distinction without claiming
+  to implement regeneration.
 - Local agents DB is treated as derived from source of truth.
 - Human knowledge files are treated as generated from source of truth.
 - Deleting generated agent or human views does not destroy accepted knowledge.
@@ -334,7 +343,9 @@ Default severity: `major`.
 Frontends and hosts should communicate through explicit command, query, and
 event contracts.
 
-Expected commands include concepts such as:
+Expected commands include concepts such as the following across the target
+architecture. Stage-specific reviews should only require commands for behavior
+that is in scope for that stage:
 
 - `StartRun`;
 - `ResumeRun`;

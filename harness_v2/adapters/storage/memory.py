@@ -72,6 +72,10 @@ class InMemoryArtifactStore:
         except KeyError as exc:
             raise ArtifactNotFoundError(f"{run_id}:{normalized}") from exc
 
+    def delete(self, run_id: str, artifact_id: str) -> bool:
+        normalized = _require_artifact_id(artifact_id)
+        return self._artifacts.pop((run_id, normalized), None) is not None
+
     def checksum(self, run_id: str, artifact_id: str) -> str:
         return self._metadata(run_id, _require_artifact_id(artifact_id)).checksum
 

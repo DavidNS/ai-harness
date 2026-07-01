@@ -27,6 +27,15 @@ class BundleRegistryTests(unittest.TestCase):
         with self.assertRaises(InvalidRunStateError):
             registry.get(PhaseName.PROPOSAL_BUNDLE)
 
+    def test_invalidation_rules_are_derived_from_registered_bundles(self) -> None:
+        rules = default_bundle_registry().invalidation_rules()
+
+        self.assertIn("published/explore-handoff.json", rules[PhaseName.EXPLORE_BUNDLE].artifacts)
+        self.assertIn("explore/", rules[PhaseName.EXPLORE_BUNDLE].prefixes)
+        self.assertIn("design.md", rules[PhaseName.DESIGN_BUNDLE].artifacts)
+        self.assertIn("tasks.json", rules[PhaseName.TASKS_BUNDLE].artifacts)
+
+
 
 if __name__ == "__main__":
     unittest.main()

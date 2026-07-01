@@ -146,6 +146,25 @@ class LifecycleGraph:
                 f"{source_node.value} -> {target_node.value}; expected {expected.value}"
             )
 
+    def phase_index(self, phase: PhaseName | str) -> int:
+        node = _coerce_node(phase)
+        if not isinstance(node, PhaseName) or node not in self.phases:
+            value = node.value if isinstance(node, (PhaseName, TerminalState)) else str(node)
+            raise InvalidTransitionError(f"{value} is not in {self.strategy.value} graph")
+        return self.phases.index(node)
+
+    def validate_rewind_target(self, source: PhaseName | str, target: PhaseName | str) -> None:
+        source_index = self.phase_index(source)
+        target_index = self.phase_index(target)
+        if target_index >= source_index:
+            raise InvalidTransitionError("escalation target must be earlier than the current phase")
+
+    def completed_prefix_before(self, phase: PhaseName | str) -> tuple[PhaseName, ...]:
+        return self.phases[: self.phase_index(phase)]
+
+    def phases_from(self, phase: PhaseName | str) -> tuple[PhaseName, ...]:
+        return self.phases[self.phase_index(phase) :]
+
     def validate_completed_prefix(self, completed: tuple[PhaseName, ...]) -> None:
         if len(completed) != len(set(completed)):
             raise DomainValidationError("completed phases must be unique")

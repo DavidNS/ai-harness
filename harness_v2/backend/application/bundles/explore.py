@@ -64,6 +64,8 @@ _HANDOFF_LIMIT = 8
 class ExploreBundleDefinition:
     phase: PhaseName = EXPLORE_PHASE
     failure_code: str = "EXPLORE_BUNDLE_FAILED"
+    produced_artifacts: tuple[str, ...] = ("published/explore-handoff.json",)
+    produced_prefixes: tuple[str, ...] = ("explore/",)
 
     def execute(self, context: BundleContext) -> BundleExecutionResult:
         run = context.run
@@ -83,10 +85,9 @@ class ExploreBundleDefinition:
         )
         if _needs_clarification(profile) and not _has_phase_decision(run):
             questions = "; ".join(_string_list(profile.get("clarification_questions"), "clarification_questions"))
-            waiting = context.decision_service.execute(
-                DecisionRequest(run.run_id, CLARIFICATION_DECISION_ID, questions)
+            return BundleExecutionResult(
+                decision_request=DecisionRequest(run.run_id, CLARIFICATION_DECISION_ID, questions)
             )
-            return BundleExecutionResult(waiting=waiting)
 
         context_pack = context.artifacts.ensure_controller_json(
             run.run_id,

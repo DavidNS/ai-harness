@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import StrEnum
 
 from harness_v2.backend.domain.errors import DomainValidationError, require_text
 from harness_v2.backend.domain.lifecycle import PhaseName
@@ -15,6 +16,48 @@ def _normalize_options(options: tuple[str, ...] | list[str]) -> tuple[str, ...]:
     return normalized
 
 
+class DecisionAction(StrEnum):
+    CONTINUE = "CONTINUE"
+    ESCALATE = "ESCALATE"
+
+
+@dataclass(frozen=True, slots=True)
+class DecisionEffect:
+    option: str
+    action: DecisionAction = DecisionAction.CONTINUE
+    target_phase: PhaseName | None = None
+
+    def __post_init__(self) -> None:
+        action = DecisionAction(self.action)
+        target = None if self.target_phase is None else PhaseName(self.target_phase)
+        object.__setattr__(self, "option", require_text(self.option, "decision effect option"))
+        object.__setattr__(self, "action", action)
+        object.__setattr__(self, "target_phase", target)
+        _validate_action_target(action, target, "escalation decision effect" if action is DecisionAction.ESCALATE else "continue decision effect")
+
+
+def _validate_action_target(action: DecisionAction, target: PhaseName | None, label: str) -> None:
+    if action is DecisionAction.ESCALATE and target is None:
+        raise DomainValidationError(f"{label} requires a target phase")
+    if action is DecisionAction.CONTINUE and target is not None:
+        raise DomainValidationError(f"{label} must not target a phase")
+
+
+def _normalize_effects(
+    options: tuple[str, ...],
+    effects: tuple[DecisionEffect, ...] | list[DecisionEffect],
+) -> tuple[DecisionEffect, ...]:
+    normalized = tuple(DecisionEffect(effect.option, effect.action, effect.target_phase) for effect in effects)
+    effect_options = tuple(effect.option for effect in normalized)
+    if len(effect_options) != len(set(effect_options)):
+        raise DomainValidationError("decision effects must be unique per option")
+    if any(option not in options for option in effect_options):
+        raise DomainValidationError("decision effects must reference a decision option")
+    if not options and normalized:
+        raise DomainValidationError("open-ended decisions cannot define option effects")
+    return normalized
+
+
 @dataclass(frozen=True, slots=True)
 class PendingDecision:
     decision_id: str
@@ -22,13 +65,30 @@ class PendingDecision:
     prompt: str
     created_at: str
     options: tuple[str, ...] = ()
+    effects: tuple[DecisionEffect, ...] = ()
+    default_action: DecisionAction = DecisionAction.CONTINUE
+    default_target_phase: PhaseName | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "decision_id", require_text(self.decision_id, "decision ID"))
         object.__setattr__(self, "origin_phase", PhaseName(self.origin_phase))
         object.__setattr__(self, "prompt", require_text(self.prompt, "decision prompt"))
-        object.__setattr__(self, "options", _normalize_options(self.options))
+        options = _normalize_options(self.options)
+        default_action = DecisionAction(self.default_action)
+        default_target = None if self.default_target_phase is None else PhaseName(self.default_target_phase)
+        _validate_action_target(default_action, default_target, "default decision effect")
+        object.__setattr__(self, "options", options)
+        object.__setattr__(self, "effects", _normalize_effects(options, self.effects))
+        object.__setattr__(self, "default_action", default_action)
+        object.__setattr__(self, "default_target_phase", default_target)
         object.__setattr__(self, "created_at", require_text(self.created_at, "decision timestamp"))
+
+    def effect_for(self, response: str) -> DecisionEffect:
+        normalized = require_text(response, "decision response")
+        for effect in self.effects:
+            if effect.option == normalized:
+                return effect
+        return DecisionEffect(normalized, self.default_action, self.default_target_phase)
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,6 +100,9 @@ class DecisionRecord:
     created_at: str
     answered_at: str
     options: tuple[str, ...] = ()
+    effects: tuple[DecisionEffect, ...] = ()
+    default_action: DecisionAction = DecisionAction.CONTINUE
+    default_target_phase: PhaseName | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "decision_id", require_text(self.decision_id, "decision ID"))
@@ -48,4 +111,11 @@ class DecisionRecord:
         object.__setattr__(self, "response", require_text(self.response, "decision response"))
         object.__setattr__(self, "created_at", require_text(self.created_at, "decision timestamp"))
         object.__setattr__(self, "answered_at", require_text(self.answered_at, "decision answer timestamp"))
-        object.__setattr__(self, "options", _normalize_options(self.options))
+        options = _normalize_options(self.options)
+        default_action = DecisionAction(self.default_action)
+        default_target = None if self.default_target_phase is None else PhaseName(self.default_target_phase)
+        _validate_action_target(default_action, default_target, "default decision effect")
+        object.__setattr__(self, "options", options)
+        object.__setattr__(self, "effects", _normalize_effects(options, self.effects))
+        object.__setattr__(self, "default_action", default_action)
+        object.__setattr__(self, "default_target_phase", default_target)

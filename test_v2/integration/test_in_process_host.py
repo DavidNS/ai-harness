@@ -37,6 +37,12 @@ from harness_v2.hosts.in_process.host import InProcessHost
 TIMESTAMP = "2026-07-01T00:00:00+00:00"
 
 
+class RecordingEventSink:
+    def __init__(self) -> None:
+        self.events: list[object] = []
+
+    def emit(self, event: object) -> None:
+        self.events.append(event)
 
 
 class StaticIdGenerator:
@@ -78,6 +84,21 @@ class InProcessHostIntegrationTests(unittest.TestCase):
         self.assertIsNone(result.run.current_phase)
         self.assertEqual((), result.run.completed_phases)
         self.assertEqual([RunStarted], [type(event) for event in result.events])
+
+    def test_run_service_can_publish_command_events_to_event_sink(self) -> None:
+        sink = RecordingEventSink()
+        host = InProcessHost(state_store=InMemoryStateStore(), event_sink=sink)
+
+        result = host.execute(StartRun("Fix tests"))
+
+        self.assertEqual([RunStarted], [type(event) for event in result.events])
+        self.assertEqual(result.events, tuple(sink.events))
+
+    def test_event_sink_is_not_combined_with_injected_service(self) -> None:
+        service = RunService(InMemoryStateStore(), id_generator=StaticIdGenerator("run-1"))
+
+        with self.assertRaises(ValueError):
+            InProcessHost(service=service, event_sink=RecordingEventSink())
 
     def test_start_run_persists_state_in_injected_store(self) -> None:
         store = InMemoryStateStore()

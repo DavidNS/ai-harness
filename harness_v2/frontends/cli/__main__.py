@@ -20,6 +20,7 @@ from harness_v2.backend.application.contracts import (
     ListRuns,
     ListRunsResult,
     ResumeRun,
+    RetryPhase,
     RunNotFoundError,
     RunView,
     StartRun,
@@ -49,6 +50,10 @@ def _parser() -> argparse.ArgumentParser:
 
     cancel = subcommands.add_parser("cancel", help="cancel an active run")
     cancel.add_argument("run_id")
+
+    retry = subcommands.add_parser("retry", help="retry the last failed phase")
+    retry.add_argument("run_id")
+    retry.add_argument("phase")
 
     decision = subcommands.add_parser("decision", help="submit a pending user decision")
     decision.add_argument("run_id")
@@ -81,12 +86,20 @@ def _render_run(run: RunView) -> None:
         decision = run.pending_decision
         options = f" options={','.join(decision.options)}" if decision.options else ""
         print(f"Pending decision: {decision.decision_id} phase={decision.origin_phase}{options}")
+        print(f"Prompt: {decision.prompt}")
 
 
 def _render_events(result: CommandResult) -> None:
     for event in result.events:
         phase = getattr(event, "phase", None)
-        suffix = f" phase={phase}" if phase else ""
+        if phase:
+            suffix = f" phase={phase}"
+        elif type(event).__name__ in {"PhaseEscalated", "PhaseRecoveryStarted"}:
+            suffix = f" from={event.from_phase} target={event.target_phase}"
+        elif type(event).__name__ == "PhaseRetryStarted":
+            suffix = f" phase={event.phase}"
+        else:
+            suffix = ""
         print(f"Event: {type(event).__name__}{suffix}")
 
 
@@ -113,7 +126,9 @@ def _render_state(result: GetRunStateResult) -> None:
         print(f"Current phase: {result.current_phase}")
     if result.pending_decision is not None:
         decision = result.pending_decision
-        print(f"Pending decision: {decision.decision_id} phase={decision.origin_phase}")
+        options = f" options={','.join(decision.options)}" if decision.options else ""
+        print(f"Pending decision: {decision.decision_id} phase={decision.origin_phase}{options}")
+        print(f"Prompt: {decision.prompt}")
 
 
 def _render_actions(result: GetAvailableActionsResult) -> None:
@@ -133,6 +148,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
         if args.command == "cancel":
             _render_command_result(host.execute(CancelRun(run_id=args.run_id)))
+            return 0
+        if args.command == "retry":
+            _render_command_result(host.execute(RetryPhase(run_id=args.run_id, phase=args.phase)))
             return 0
         if args.command == "decision":
             _render_command_result(

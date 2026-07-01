@@ -8,6 +8,7 @@ from typing import Any, Callable
 
 from harness_v2.backend.application.bundle_artifacts import BundleValidationError
 from harness_v2.backend.application.bundle_orchestration import BundleContext, BundleExecutionResult
+from harness_v2.backend.application.bundles.explorer_recovery import ensure_refinement_artifact, handle_explorer_decision
 from harness_v2.backend.domain.lifecycle import PhaseName
 
 JsonValidator = Callable[[dict[str, Any]], None]
@@ -81,11 +82,21 @@ class ExplorerStageBundleDefinition:
     def failure_code(self) -> str:
         return f"{self.phase.value}_FAILED"
 
+    @property
+    def produced_artifacts(self) -> tuple[str, ...]:
+        return (self.spec.artifact_id,)
+
+    @property
+    def produced_prefixes(self) -> tuple[str, ...]:
+        return ()
+
     def execute(self, context: BundleContext) -> BundleExecutionResult:
         run = context.run
+        if self.phase is PhaseName.EXPLORER_DISCOVERY:
+            ensure_refinement_artifact(context)
         inputs = build_explorer_inputs(context)
         if self.spec.output == "json":
-            context.artifacts.ensure_worker_json(
+            value = context.artifacts.ensure_worker_json(
                 run,
                 self.phase,
                 self.spec.task_id,
@@ -93,6 +104,10 @@ class ExplorerStageBundleDefinition:
                 inputs,
                 self.spec.validator,  # type: ignore[arg-type]
             )
+            if self.phase is PhaseName.EXPLORER_DECISION:
+                recovery = handle_explorer_decision(context, value)
+                if recovery is not None:
+                    return recovery
         else:
             context.artifacts.ensure_worker_text(
                 run,

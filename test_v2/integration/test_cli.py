@@ -6,8 +6,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from harness_v2.adapters.storage import FileStateStore
-from harness_v2.backend.domain.decisions import PendingDecision
+from harness_v2.adapters.storage import FileArtifactStore, FileStateStore
+from harness_v2.backend.domain.decisions import DecisionAction, DecisionEffect, PendingDecision
+from harness_v2.backend.domain.errors import ErrorRecord
 from harness_v2.backend.domain.lifecycle import PhaseName, RunStatus, RunStrategy
 from harness_v2.backend.domain.runs import RunRecord
 
@@ -167,6 +168,71 @@ class CliIntegrationTests(unittest.TestCase):
             self.assertIn("Status: RUNNING", decided.stdout)
             self.assertIn("Event: UserDecisionReceived", decided.stdout)
             self.assertEqual(RunStatus.RUNNING, store.get("run-waiting").status)
+
+    def test_cli_state_displays_decision_prompt_and_decision_can_escalate(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            state_root = Path(temp) / "runtime"
+            store = FileStateStore(state_root)
+            artifacts = FileArtifactStore(state_root)
+            store.save(
+                RunRecord(
+                    run_id="run-waiting",
+                    request="Choose path",
+                    status=RunStatus.WAITING_FOR_USER,
+                    strategy=RunStrategy.SDD,
+                    current_phase=PhaseName.DESIGN_BUNDLE,
+                    completed_phases=(PhaseName.EXPLORE_BUNDLE, PhaseName.PROPOSAL_BUNDLE, PhaseName.SPEC_BUNDLE),
+                    pending_decision=PendingDecision(
+                        decision_id="decision-1",
+                        origin_phase=PhaseName.DESIGN_BUNDLE,
+                        prompt="Continue or revisit the spec?",
+                        created_at=TIMESTAMP,
+                        options=("continue", "respec"),
+                        effects=(DecisionEffect("respec", DecisionAction.ESCALATE, PhaseName.SPEC_BUNDLE),),
+                    ),
+                )
+            )
+            artifacts.write("run-waiting", "spec.md", b"spec")
+            artifacts.write("run-waiting", "design.md", b"design")
+
+            state = self.run_cli(state_root, "state", "run-waiting")
+            self.assertEqual(0, state.returncode, state.stderr)
+            self.assertIn("Pending decision: decision-1 phase=DESIGN_BUNDLE options=continue,respec", state.stdout)
+            self.assertIn("Prompt: Continue or revisit the spec?", state.stdout)
+
+            decided = self.run_cli(state_root, "decision", "run-waiting", "decision-1", "respec")
+            self.assertEqual(0, decided.returncode, decided.stderr)
+            self.assertIn("Status: RUNNING", decided.stdout)
+            self.assertIn("Current phase: SPEC_BUNDLE", decided.stdout)
+            self.assertIn("Event: PhaseEscalated from=DESIGN_BUNDLE target=SPEC_BUNDLE", decided.stdout)
+            self.assertEqual(PhaseName.SPEC_BUNDLE, store.get("run-waiting").current_phase)
+
+
+    def test_cli_retry_reopens_failed_phase(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            state_root = Path(temp) / "runtime"
+            store = FileStateStore(state_root)
+            artifacts = FileArtifactStore(state_root)
+            store.save(
+                RunRecord(
+                    run_id="run-failed",
+                    request="Fix design",
+                    status=RunStatus.FAILED,
+                    strategy=RunStrategy.SDD,
+                    completed_phases=(PhaseName.EXPLORE_BUNDLE, PhaseName.PROPOSAL_BUNDLE, PhaseName.SPEC_BUNDLE),
+                    errors=(ErrorRecord("DESIGN_BUNDLE_FAILED", "bad design", phase="DESIGN_BUNDLE", timestamp=TIMESTAMP),),
+                )
+            )
+            artifacts.write("run-failed", "design.md", b"stale")
+
+            retried = self.run_cli(state_root, "retry", "run-failed", "DESIGN_BUNDLE")
+
+            self.assertEqual(0, retried.returncode, retried.stderr)
+            self.assertIn("Status: RUNNING", retried.stdout)
+            self.assertIn("Current phase: DESIGN_BUNDLE", retried.stdout)
+            self.assertIn("Event: PhaseRetryStarted phase=DESIGN_BUNDLE", retried.stdout)
+            self.assertEqual(RunStatus.RUNNING, store.get("run-failed").status)
+
 
     def test_cli_missing_run_exits_nonzero(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
