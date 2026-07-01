@@ -2,6 +2,11 @@
 
 Goal: define what v1 behavior matters before building v2.
 
+Baseline companion: [00-v1-behavior-baseline.md](00-v1-behavior-baseline.md).
+
+Stage 0 is documentation-only. Do not create `harness_v2/` or `test_v2/` until
+the v1 behavior baseline and high-risk contracts are accepted.
+
 ## Actions
 
 - Record the v1 commands and capabilities that v2 must eventually replace:
@@ -25,6 +30,9 @@ Goal: define what v1 behavior matters before building v2.
   - pending decision artifacts;
   - provider command projection;
   - TDD snapshot and rollback behavior.
+- Treat v1 argv details, wrapper flags, compatibility spellings, and exact exit
+  codes as reference-only unless a later v2 stage explicitly promotes them into
+  the v2 command/query contract.
 
 ## Checkpoint
 
@@ -32,6 +40,16 @@ Goal: define what v1 behavior matters before building v2.
 - Existing unit tests that cover CLI/backend argv and CLI/MVU separation pass.
 - A short "v1 behavior baseline" section exists in this stage or a companion
   document.
+
+Current baseline verification:
+
+```bash
+python3 -B scripts/check_architecture.py --summary
+python3 -B -m unittest tests.unit.test_architecture_contracts tests.unit.test_backend_client tests.unit.test_console_runtime_primitives tests.unit.test_state_store tests.unit.test_runtime_lock tests.integration.test_launcher tests.integration.test_decision_gates
+```
+
+The architecture checker is expected to pass with existing warnings; warnings
+are not treated as Stage 0 blockers unless they become errors.
 
 ## Exit Criteria
 
