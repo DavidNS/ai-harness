@@ -383,7 +383,19 @@ def imported_names(tree: ast.Module) -> set[str]:
             names.update(alias.name for alias in node.names)
         elif isinstance(node, ast.ImportFrom):
             module = node.module or ""
-            names.add(module if node.level == 0 else "." * node.level + module)
+            prefix = "" if node.level == 0 else "." * node.level
+            imported = f"{prefix}{module}"
+            if imported:
+                names.add(imported)
+            for alias in node.names:
+                if alias.name == "*":
+                    continue
+                if not imported:
+                    names.add(alias.name)
+                elif imported.endswith("."):
+                    names.add(f"{imported}{alias.name}")
+                else:
+                    names.add(f"{imported}.{alias.name}")
     return names
 
 
@@ -474,6 +486,117 @@ def check_cli_frontend_boundaries(report: Report) -> None:
         report.error("ai-harness-ui wrapper must target harness.cli.ui_main", code="cli_frontend.wrapper", category="boundary", path="ai-harness-ui")
 
 
+def _imports_with_prefix(imports: set[str], prefixes: set[str]) -> set[str]:
+    return {
+        module
+        for module in imports
+        for prefix in prefixes
+        if module == prefix or module.startswith(f"{prefix}.")
+    }
+
+
+def check_v2_boundaries(report: Report) -> None:
+    root = ROOT / "harness_v2"
+    if not root.exists():
+        return
+
+    v1_forbidden = {"harness", "ai_harness"}
+    for path in python_files(root):
+        bad = _imports_with_prefix(imported_names(parse(path)), v1_forbidden)
+        if bad:
+            report.error(
+                "v2 code must not import v1 harness modules",
+                code="v2.v1_import_boundary",
+                category="boundary",
+                path=rel(path),
+                details={"imports": sorted(bad)},
+            )
+
+    relative_forbidden = {
+        f"{dots}{name}"
+        for dots in (".", "..", "...", "....")
+        for name in ("adapters", "hosts", "frontends")
+    }
+    domain_forbidden = {
+        "harness_v2.adapters",
+        "harness_v2.hosts",
+        "harness_v2.frontends",
+        *relative_forbidden,
+    }
+    application_forbidden = {
+        "harness_v2.adapters",
+        "harness_v2.hosts",
+        "harness_v2.frontends",
+        *relative_forbidden,
+    }
+    adapters_forbidden = {
+        "harness_v2.frontends",
+        ".frontends",
+        "..frontends",
+        "...frontends",
+        "....frontends",
+    }
+    frontends_forbidden = {
+        "harness_v2.adapters",
+        ".adapters",
+        "..adapters",
+        "...adapters",
+        "....adapters",
+    }
+    hosts_forbidden = {
+        "harness_v2.frontends",
+        ".frontends",
+        "..frontends",
+        "...frontends",
+        "....frontends",
+    }
+
+    boundary_checks = (
+        (
+            root / "backend" / "domain",
+            domain_forbidden,
+            "v2.domain_boundary",
+            "v2 domain must not import adapters, hosts, or frontends",
+        ),
+        (
+            root / "backend" / "application",
+            application_forbidden,
+            "v2.application_boundary",
+            "v2 application must not import adapters, hosts, or frontends",
+        ),
+        (
+            root / "adapters",
+            adapters_forbidden,
+            "v2.adapters_boundary",
+            "v2 adapters must not import frontends",
+        ),
+        (
+            root / "frontends",
+            frontends_forbidden,
+            "v2.frontends_boundary",
+            "v2 frontends must not import outbound adapters",
+        ),
+        (
+            root / "hosts",
+            hosts_forbidden,
+            "v2.hosts_boundary",
+            "v2 hosts must not import frontends",
+        ),
+    )
+
+    for folder, forbidden, code, message in boundary_checks:
+        for path in python_files(folder):
+            bad = _imports_with_prefix(imported_names(parse(path)), forbidden)
+            if bad:
+                report.error(
+                    message,
+                    code=code,
+                    category="boundary",
+                    path=rel(path),
+                    details={"imports": sorted(bad)},
+                )
+
+
 def run_checks() -> Report:
     report = Report()
     check_graph_contract(report)
@@ -483,6 +606,7 @@ def run_checks() -> Report:
     check_state_mutation(report)
     check_budgets(report)
     check_cli_frontend_boundaries(report)
+    check_v2_boundaries(report)
     return report
 
 

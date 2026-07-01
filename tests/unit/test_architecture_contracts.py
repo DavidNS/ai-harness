@@ -53,6 +53,72 @@ class ArchitectureContractTests(unittest.TestCase):
             check_architecture.render_summary(report),
         )
 
+    def _v2_boundary_codes_for(self, relative_path: str, source: str) -> set[str]:
+        path = ROOT / relative_path
+        path.write_text(source, encoding="utf-8")
+        try:
+            report = check_architecture.Report()
+            check_architecture.check_v2_boundaries(report)
+            return {finding.code for finding in report.findings}
+        finally:
+            path.unlink(missing_ok=True)
+
+    def test_v2_boundary_checker_rejects_domain_importing_adapters_absolute(self) -> None:
+        codes = self._v2_boundary_codes_for(
+            "harness_v2/backend/domain/_bad_boundary_fixture.py",
+            "from harness_v2.adapters import storage\n",
+        )
+
+        self.assertIn("v2.domain_boundary", codes)
+
+    def test_v2_boundary_checker_rejects_domain_importing_adapters_relative(self) -> None:
+        codes = self._v2_boundary_codes_for(
+            "harness_v2/backend/domain/_bad_boundary_fixture.py",
+            "from ... import adapters\n",
+        )
+
+        self.assertIn("v2.domain_boundary", codes)
+
+    def test_v2_boundary_checker_rejects_frontend_importing_adapters(self) -> None:
+        codes = self._v2_boundary_codes_for(
+            "harness_v2/frontends/_bad_boundary_fixture.py",
+            "from harness_v2.adapters import storage\n",
+        )
+
+        self.assertIn("v2.frontends_boundary", codes)
+
+    def test_v2_boundary_checker_rejects_any_v1_import(self) -> None:
+        codes = self._v2_boundary_codes_for(
+            "harness_v2/backend/application/_bad_boundary_fixture.py",
+            "from ai_harness.orchestrator import lifecycle\n",
+        )
+
+        self.assertIn("v2.v1_import_boundary", codes)
+
+    def test_v2_boundary_checker_rejects_application_importing_adapters(self) -> None:
+        codes = self._v2_boundary_codes_for(
+            "harness_v2/backend/application/_bad_boundary_fixture.py",
+            "from harness_v2.adapters import storage\n",
+        )
+
+        self.assertIn("v2.application_boundary", codes)
+
+    def test_v2_boundary_checker_rejects_adapters_importing_frontends(self) -> None:
+        codes = self._v2_boundary_codes_for(
+            "harness_v2/adapters/_bad_boundary_fixture.py",
+            "from harness_v2.frontends import cli\n",
+        )
+
+        self.assertIn("v2.adapters_boundary", codes)
+
+    def test_v2_boundary_checker_rejects_hosts_importing_frontends(self) -> None:
+        codes = self._v2_boundary_codes_for(
+            "harness_v2/hosts/_bad_boundary_fixture.py",
+            "from harness_v2.frontends import cli\n",
+        )
+
+        self.assertIn("v2.hosts_boundary", codes)
+
 
     def test_cli_commands_module_has_no_interactive_ui_dependencies(self) -> None:
         path = ROOT / "harness" / "cli" / "commands.py"

@@ -35,6 +35,20 @@ Goal: create the smallest executable v2 path with correct boundaries.
 - `test_v2/integration` proves `InProcessHost -> application service -> events`.
 - CLI v2 can start a simulated run and print a useful result.
 
+Stage 1 v2 tests are intentionally kept outside the default v1 pytest
+discovery. Run them explicitly with:
+
+```bash
+python3 -B -m unittest discover -s test_v2 -p "test_*.py"
+```
+
+Also keep the architecture contract and compile checks green:
+
+```bash
+python3 -B -m unittest tests.unit.test_architecture_contracts
+python3 -B -m compileall -q harness_v2 scripts/check_architecture.py
+```
+
 ## Exit Criteria
 
 - The v2 skeleton demonstrates the intended dependency direction without
