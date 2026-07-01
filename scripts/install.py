@@ -145,6 +145,15 @@ the user. Invoke it again with exactly one of `--resume RUN_ID` or
 """
 
 
+def launcher_command_for_source(source: Path) -> str:
+    name = source.name
+    if name == "ai-harness":
+        return "aih"
+    if name == "ai-harness-ui":
+        return "aihui"
+    raise ValueError(f"unsupported launcher source: {source}")
+
+
 def launcher_content(checkout: Path, command: str = "aih") -> str:
     checkout = checkout.resolve()
     executable = "ai-harness-ui" if command == "aihui" else "ai-harness"

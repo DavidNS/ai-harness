@@ -375,6 +375,105 @@ def check_budgets(report: Report) -> None:
             )
 
 
+
+def imported_names(tree: ast.Module) -> set[str]:
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            names.add(module if node.level == 0 else "." * node.level + module)
+    return names
+
+
+def called_names(tree: ast.Module) -> set[str]:
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if isinstance(node.func, ast.Name):
+            names.add(node.func.id)
+        elif isinstance(node.func, ast.Attribute):
+            names.add(node.func.attr)
+    return names
+
+
+def check_cli_frontend_boundaries(report: Report) -> None:
+    commands = parse(ROOT / "harness/cli/commands.py")
+    commands_forbidden_imports = {
+        "harness.cli.console_app", "harness.cli.console_controller", "harness.cli.ui", "harness.cli.ui_primitives",
+        ".console_app", ".console_controller", ".ui", ".ui_primitives",
+    }
+    commands_forbidden_calls = {"input", "_menu_prompt", "_text_prompt", "_line_prompt", "_multi_select_prompt", "_interactive_request", "_prompt_for_decision"}
+    bad_imports = imported_names(commands) & commands_forbidden_imports
+    bad_calls = called_names(commands) & commands_forbidden_calls
+    if bad_imports or bad_calls:
+        report.error(
+            "harness/cli/commands.py must remain non-interactive CLI-only",
+            code="cli_frontend.commands_boundary",
+            category="boundary",
+            path="harness/cli/commands.py",
+            details={"imports": sorted(bad_imports), "calls": sorted(bad_calls)},
+        )
+
+    bootstrap = parse(ROOT / "harness/cli/bootstrap.py")
+    bootstrap_forbidden = {
+        "harness.cli.console", "harness.cli.console_actions", "harness.cli.console_app", "harness.cli.console_controller",
+        "harness.cli.model_discovery", "harness.cli.model_prompts", "harness.cli.ui", "harness.cli.ui_primitives",
+        ".console", ".console_actions", ".console_app", ".console_controller", ".model_discovery", ".model_prompts", ".ui", ".ui_primitives",
+    }
+    bad_bootstrap = imported_names(bootstrap) & bootstrap_forbidden
+    if bad_bootstrap:
+        report.error(
+            "harness/cli/bootstrap.py must not import interactive frontend modules",
+            code="cli_frontend.bootstrap_boundary",
+            category="boundary",
+            path="harness/cli/bootstrap.py",
+            details={"imports": sorted(bad_bootstrap)},
+        )
+
+    console_app = parse(ROOT / "harness/cli/console_app.py")
+    console_app_forbidden_imports = {
+        "harness.cli.backend_client", "harness.cli.runtime", "harness.cli.ui", "harness.cli.ui_primitives",
+        ".backend_client", ".runtime", ".ui", ".ui_primitives",
+    }
+    console_app_forbidden_calls = {"_run", "_unfinished_runs", "_completed_runs", "_decision_request", "_prompt_for_decision", "_menu_prompt", "_text_prompt", "_line_prompt"}
+    bad_app_imports = imported_names(console_app) & console_app_forbidden_imports
+    bad_app_calls = called_names(console_app) & console_app_forbidden_calls
+    if bad_app_imports or bad_app_calls:
+        report.error(
+            "harness/cli/console_app.py must remain a thin UI composition root",
+            code="cli_frontend.console_app_boundary",
+            category="boundary",
+            path="harness/cli/console_app.py",
+            details={"imports": sorted(bad_app_imports), "calls": sorted(bad_app_calls)},
+        )
+
+    core_forbidden = {
+        "harness.cli.backend_client", "harness.cli.runtime", "harness.cli.ui", "harness.cli.ui_primitives",
+        ".backend_client", ".runtime", ".ui", ".ui_primitives", "..backend_client", "..runtime", "..ui", "..ui_primitives",
+    }
+    for name in ("action_plan.py", "effects.py", "messages.py", "model.py", "update.py", "view.py"):
+        path = ROOT / "harness/cli/console" / name
+        bad = imported_names(parse(path)) & core_forbidden
+        if bad:
+            report.error(
+                f"harness/cli/console/{name} must stay pure MVU core",
+                code="cli_frontend.mvu_core_boundary",
+                category="boundary",
+                path=rel(path),
+                details={"imports": sorted(bad)},
+            )
+
+    cli_wrapper = (ROOT / "ai-harness").read_text(encoding="utf-8")
+    ui_wrapper = (ROOT / "ai-harness-ui").read_text(encoding="utf-8")
+    if "from harness.cli.commands import main" not in cli_wrapper or "from harness.cli import main" in cli_wrapper:
+        report.error("ai-harness wrapper must target harness.cli.commands directly", code="cli_frontend.wrapper", category="boundary", path="ai-harness")
+    if "from harness.cli.ui_main import main" not in ui_wrapper:
+        report.error("ai-harness-ui wrapper must target harness.cli.ui_main", code="cli_frontend.wrapper", category="boundary", path="ai-harness-ui")
+
+
 def run_checks() -> Report:
     report = Report()
     check_graph_contract(report)
@@ -383,6 +482,7 @@ def run_checks() -> Report:
     check_import_boundaries(report)
     check_state_mutation(report)
     check_budgets(report)
+    check_cli_frontend_boundaries(report)
     return report
 
 

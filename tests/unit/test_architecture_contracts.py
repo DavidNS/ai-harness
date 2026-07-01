@@ -203,6 +203,16 @@ print(json.dumps(forbidden))
                     imports.add(module if node.level == 0 else "." * node.level + module)
             self.assertTrue(imports.isdisjoint(forbidden_imports), (path.name, imports & forbidden_imports))
 
+
+    def test_shared_parser_keeps_ui_only_options_out_of_cli_default(self) -> None:
+        from harness.cli.bootstrap import _parser
+
+        cli_options = {option for action in _parser()._actions for option in action.option_strings}
+        ui_options = {option for action in _parser(include_ui_options=True)._actions for option in action.option_strings}
+
+        self.assertNotIn("--skip-warnings", cli_options)
+        self.assertIn("--skip-warnings", ui_options)
+
     def test_phase_executor_fails_closed_for_unknown_phase(self) -> None:
         with self.assertRaises(ValidationError):
             PhaseExecutor({}).execute("MISSING_PHASE")

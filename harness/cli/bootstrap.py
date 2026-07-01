@@ -19,7 +19,7 @@ CODEX_REASONING_EFFORTS = ("low", "medium", "high", "xhigh")
 GITHUB_CI_MODES = ("off", "baseline", "branch")
 
 
-def _parser() -> argparse.ArgumentParser:
+def _parser(*, include_ui_options: bool = False) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog=Path(sys.argv[0]).name,
         description="Run AI Code Harness from the current repository.",
@@ -34,7 +34,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--file", dest="prompt_file", type=Path, help="read the request from a file")
     parser.add_argument("--verbose", action="store_true", help="print the delegated backend command")
     parser.add_argument("--dry-run", action="store_true", help="print the delegated command without running it")
-    parser.add_argument("--skip-warnings", action="store_true", help="skip interactive startup CI warning prompts")
+    if include_ui_options:
+        parser.add_argument("--skip-warnings", action="store_true", help="skip interactive startup CI warning prompts")
     parser.epilog = (
         "examples:\n"
         "  aih 'Fix the failing tests'\n"

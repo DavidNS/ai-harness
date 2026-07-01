@@ -18,6 +18,7 @@ from install import (
     bootstrap_content,
     is_owned_bootstrap,
     is_owned_launcher,
+    launcher_command_for_source,
     launcher_content,
     launcher_links_for,
     links_for,
@@ -106,7 +107,7 @@ def check_launcher_shortcut(link: Link) -> Check:
     if not link.destination.is_file():
         return Check(f"launcher:{link.label}", False, f"not a file: {link.destination}")
     checkout = link.source.parent
-    command = link.destination.name
+    command = launcher_command_for_source(link.source)
     if not is_owned_launcher(link.destination, checkout, command):
         return Check(f"launcher:{link.label}", False, f"foreign or missing owner marker: {link.destination}")
     try:

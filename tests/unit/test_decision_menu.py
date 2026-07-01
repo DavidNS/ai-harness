@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import contextlib
 import importlib
 import sys
@@ -75,7 +76,7 @@ class DecisionMenuTests(unittest.TestCase):
         self.assertEqual(["explorer", "sdd_low", "sdd_high"], [item["id"] for item in ordered])
 
     def test_numeric_choice_builds_selected_option_without_inline_scores_signals(self) -> None:
-        launcher = load_launcher()
+        launcher = load_ui()
         stderr = io.StringIO()
         with mock.patch("builtins.input", return_value="1"), contextlib.redirect_stderr(stderr):
             answer, selected = launcher._prompt_for_decision("run-1", decision_request())
@@ -91,7 +92,7 @@ class DecisionMenuTests(unittest.TestCase):
         self.assertIn("Selected Explorer (explorer).", output)
 
     def test_decision_details_command_renders_scores_and_signals(self) -> None:
-        launcher = load_launcher()
+        launcher = load_ui()
         stderr = io.StringIO()
         choices = iter(["d", "1"])
         with mock.patch("builtins.input", side_effect=lambda _prompt="": next(choices)), contextlib.redirect_stderr(stderr):
@@ -108,7 +109,7 @@ class DecisionMenuTests(unittest.TestCase):
         self.assertIn("- explorer: explorer_language+4", output)
 
     def test_invalid_numeric_choice_reprompts_without_resuming(self) -> None:
-        launcher = load_launcher()
+        launcher = load_ui()
         stderr = io.StringIO()
         choices = iter(["9", "2"])
         with mock.patch("builtins.input", side_effect=lambda _prompt="": next(choices)), contextlib.redirect_stderr(stderr):
@@ -119,7 +120,7 @@ class DecisionMenuTests(unittest.TestCase):
         self.assertIn("Enter a menu number.", stderr.getvalue())
 
     def test_freeform_decision_builds_answer_when_allowed(self) -> None:
-        launcher = load_launcher()
+        launcher = load_ui()
         stderr = io.StringIO()
         choices = iter(["f", "Use a custom answer."])
         with mock.patch("builtins.input", side_effect=lambda _prompt="": next(choices)), contextlib.redirect_stderr(stderr):
@@ -131,7 +132,7 @@ class DecisionMenuTests(unittest.TestCase):
 
 
     def test_slash_looking_request_input_is_preserved_literally(self) -> None:
-        launcher = load_launcher()
+        launcher = load_ui()
         choices = iter(["/help", "Fix tests", "."])
 
         with mock.patch("builtins.input", side_effect=lambda _prompt="": next(choices)), contextlib.redirect_stderr(io.StringIO()):
@@ -140,7 +141,7 @@ class DecisionMenuTests(unittest.TestCase):
         self.assertEqual("/help\nFix tests", request)
 
     def test_decision_slash_help_is_invalid_menu_input(self) -> None:
-        launcher = load_launcher()
+        launcher = load_ui()
         stderr = io.StringIO()
         choices = iter(["/help", "1"])
 
@@ -230,7 +231,7 @@ class DecisionMenuTests(unittest.TestCase):
         self.assertIn("Extra high", [item.label for item in selected_items])
 
     def test_decision_slash_exit_is_invalid_menu_input(self) -> None:
-        launcher = load_launcher()
+        launcher = load_ui()
         stderr = io.StringIO()
         choices = iter(["/exit", "1"])
 
@@ -284,7 +285,7 @@ class DecisionMenuTests(unittest.TestCase):
         self.assertEqual("H\ni", value)
 
     def test_interactive_request_preserves_slash_lines(self) -> None:
-        launcher = load_launcher()
+        launcher = load_ui()
         choices = iter(["First line", "/help", "Second line", "."])
 
         with mock.patch("builtins.input", side_effect=lambda _prompt="": next(choices)), contextlib.redirect_stderr(io.StringIO()):
@@ -300,8 +301,8 @@ class DecisionMenuTests(unittest.TestCase):
         namespace = ui_namespace(launcher, provider="codex")
         stderr = io.StringIO()
 
-        with mock.patch.object(launcher, "_prompt_for_model", return_value="gpt-5"), \
-            mock.patch.object(launcher, "_prompt_for_reasoning_effort", return_value="high"), \
+        with mock.patch("harness.cli.console.interpreter._prompt_for_model", return_value="gpt-5"), \
+            mock.patch("harness.cli.console.interpreter._prompt_for_reasoning_effort", return_value="high"), \
             contextlib.redirect_stderr(stderr):
             code = launcher._console_command(namespace, "model")
 
@@ -315,8 +316,8 @@ class DecisionMenuTests(unittest.TestCase):
         launcher = load_launcher()
         namespace = ui_namespace(launcher, provider="codex")
 
-        with mock.patch.object(launcher, "_unfinished_runs", return_value=[]), \
-            mock.patch.object(launcher, "_start_job", return_value=0) as start_job:
+        with mock.patch("harness.cli.console.interpreter._unfinished_runs", return_value=[]), \
+            mock.patch("harness.cli.console.interpreter.ConsoleInterpreter.start_job", return_value=0) as start_job:
             code = launcher._console_command(namespace, "/model")
 
         self.assertEqual(0, code)
@@ -349,7 +350,7 @@ class DecisionMenuTests(unittest.TestCase):
     def test_console_status_dispatches_action(self) -> None:
         launcher = load_launcher()
         namespace = ui_namespace(launcher)
-        with mock.patch.object(launcher, "_run", return_value=0) as run:
+        with mock.patch("harness.cli.console.interpreter._run", return_value=0) as run:
             code = launcher._console_command(namespace, "status")
 
         self.assertEqual(0, code)
@@ -364,8 +365,8 @@ class DecisionMenuTests(unittest.TestCase):
             selected_items.extend(items)
             return next(item for item in items if item.value == "runs")
 
-        with mock.patch.object(launcher, "_menu_prompt", side_effect=choose), \
-            mock.patch.object(launcher, "_run", return_value=0) as run:
+        with mock.patch("harness.cli.console.interpreter._menu_prompt", side_effect=choose), \
+            mock.patch("harness.cli.console.interpreter._run", return_value=0) as run:
             code = launcher._console_command(namespace, "")
 
         self.assertEqual(0, code)
@@ -379,7 +380,7 @@ class DecisionMenuTests(unittest.TestCase):
         launcher = load_launcher()
         namespace = ui_namespace(launcher)
 
-        with mock.patch.object(launcher, "_run", return_value=0) as run:
+        with mock.patch("harness.cli.console.interpreter._run", return_value=0) as run:
             code = launcher._console_command(namespace, "install-packages security github --dry-install")
 
         self.assertEqual(0, code)
@@ -396,8 +397,8 @@ class DecisionMenuTests(unittest.TestCase):
             return [item for item in items if item.value in {"security", "github"}]
 
         with mock.patch.object(launcher.sys.stdin, "isatty", return_value=True), \
-            mock.patch.object(launcher, "_multi_select_prompt", side_effect=choose) as prompt, \
-            mock.patch.object(launcher, "_run", return_value=0) as run:
+            mock.patch("harness.cli.console.interpreter._multi_select_prompt", side_effect=choose) as prompt, \
+            mock.patch("harness.cli.console.interpreter._run", return_value=0) as run:
             code = launcher._console_command(namespace, "install-packages")
 
         self.assertEqual(0, code)
@@ -411,8 +412,8 @@ class DecisionMenuTests(unittest.TestCase):
         launcher = load_launcher()
         namespace = ui_namespace(launcher)
 
-        with mock.patch.object(launcher, "_unfinished_runs", return_value=[]), \
-            mock.patch.object(launcher, "_start_job", return_value=0) as start_job:
+        with mock.patch("harness.cli.console.interpreter._unfinished_runs", return_value=[]), \
+            mock.patch("harness.cli.console.interpreter.ConsoleInterpreter.start_job", return_value=0) as start_job:
             code = launcher._console_command(namespace, "/wat")
 
         self.assertEqual(0, code)
@@ -425,7 +426,7 @@ class DecisionMenuTests(unittest.TestCase):
         choices = iter(["exit"])
         stderr = io.StringIO()
 
-        with mock.patch.object(launcher, "_startup_recovery", return_value=None), \
+        with mock.patch("harness.cli.console.interpreter.ConsoleInterpreter.startup_recovery", return_value=None), \
             mock.patch("harness.cli.console_controller.interactive_console_line", side_effect=lambda _deps, _prompt="aihui> ": next(choices)), \
             contextlib.redirect_stderr(stderr):
             code = launcher._console_loop(namespace)
@@ -438,11 +439,11 @@ class DecisionMenuTests(unittest.TestCase):
         launcher = load_launcher()
         namespace = ui_namespace(launcher, provider="codex", prompt_file=None, model="gpt-5.5", reasoning_effort="xhigh")
         with mock.patch.object(launcher.sys.stdin, "isatty", return_value=False), \
-            mock.patch.object(launcher, "_run_and_follow_decisions", return_value=0) as run:
+            mock.patch("harness.cli.console.interpreter.ConsoleInterpreter.run_and_follow_decisions", return_value=0) as run:
             code = launcher._start(namespace, ["Fix tests"])
 
         self.assertEqual(0, code)
-        backend = run.call_args.args[1]
+        backend = run.call_args.args[0]
         self.assertIn("--model", backend)
         self.assertIn("gpt-5.5", backend)
         self.assertIn("--reasoning-effort", backend)
@@ -452,11 +453,11 @@ class DecisionMenuTests(unittest.TestCase):
         launcher = load_launcher()
         namespace = ui_namespace(launcher, prompt_file=None, github_ci_mode="branch")
         with mock.patch.object(launcher.sys.stdin, "isatty", return_value=False), \
-            mock.patch.object(launcher, "_run_and_follow_decisions", return_value=0) as run:
+            mock.patch("harness.cli.console.interpreter.ConsoleInterpreter.run_and_follow_decisions", return_value=0) as run:
             code = launcher._start(namespace, ["Fix tests"])
 
         self.assertEqual(0, code)
-        backend = run.call_args.args[1]
+        backend = run.call_args.args[0]
         self.assertIn("--github-ci-mode", backend)
         self.assertIn("branch", backend)
 
@@ -467,12 +468,12 @@ class DecisionMenuTests(unittest.TestCase):
         state = {"run_id": "run-1", "status": "waiting_for_user", "current_phase": "DESIGN"}
         waiting = [(current, state)]
 
-        with mock.patch.object(launcher, "_run", side_effect=[0, 0]) as run, \
+        with mock.patch("harness.cli.console.interpreter._run", side_effect=[0, 0]) as run, \
             mock.patch.object(launcher.sys.stdin, "isatty", return_value=True), \
-            mock.patch.object(launcher, "_unfinished_runs", side_effect=[[], waiting, []]), \
-            mock.patch.object(launcher, "_find_run", return_value=waiting[0]), \
-            mock.patch.object(launcher, "_decision_request", return_value={"question": "Q?", "options": [], "allows_freeform": True}), \
-            mock.patch.object(launcher, "_prompt_for_decision", return_value=(None, "preserve")):
+            mock.patch("harness.cli.console.interpreter._unfinished_runs", side_effect=[[], waiting, []]), \
+            mock.patch("harness.cli.console.interpreter._find_run", return_value=waiting[0]), \
+            mock.patch("harness.cli.console.interpreter._decision_request", return_value={"question": "Q?", "options": [], "allows_freeform": True}), \
+            mock.patch("harness.cli.console.interpreter._prompt_for_decision", return_value=(None, "preserve")):
             code = launcher._run_and_follow_decisions(namespace, ["--cwd", "/repo", "--provider", "local"], request="start")
 
         self.assertEqual(0, code)
@@ -489,8 +490,8 @@ class DecisionMenuTests(unittest.TestCase):
         current = Path("/tmp/current-run")
         state = {"run_id": "run-1", "status": "active", "current_phase": "IMPLEMENT"}
 
-        with mock.patch.object(launcher, "_find_run", return_value=(current, state)), \
-            mock.patch.object(launcher, "_run", return_value=0) as run:
+        with mock.patch("harness.cli.console.interpreter._find_run", return_value=(current, state)), \
+            mock.patch("harness.cli.console.interpreter._run", return_value=0) as run:
             code = launcher._resume(namespace, "run-1", follow_decisions=False)
 
         self.assertEqual(0, code)
@@ -499,7 +500,7 @@ class DecisionMenuTests(unittest.TestCase):
         self.assertIn("branch", backend)
 
     def test_discovers_improvement_candidates_with_titles(self) -> None:
-        launcher = load_launcher()
+        launcher = load_ui()
         with tempfile.TemporaryDirectory() as directory:
             repository = Path(directory)
             first = repository / "docs/explorer/improvements/alpha/improvement.md"
@@ -517,7 +518,7 @@ class DecisionMenuTests(unittest.TestCase):
         self.assertEqual(["Alpha", "Beta"], [candidate.title for candidate in candidates])
 
     def test_validate_explorer_scope_rejects_broad_docs_and_accepts_artifacts_and_folders(self) -> None:
-        launcher = load_launcher()
+        launcher = load_ui()
         with tempfile.TemporaryDirectory() as directory:
             repository = Path(directory)
             artifact = repository / "docs/explorer/improvements/alpha/improvement.md"
@@ -535,10 +536,10 @@ class DecisionMenuTests(unittest.TestCase):
 
 
     def test_prepare_console_request_does_not_prompt_for_plain_docs_edit(self) -> None:
-        launcher = load_launcher()
+        launcher = load_ui()
         with tempfile.TemporaryDirectory() as directory:
             repository = Path(directory)
-            namespace = launcher.argparse.Namespace(cwd=repository)
+            namespace = argparse.Namespace(cwd=repository)
 
             with mock.patch("sys.stdin.isatty", return_value=True),                 mock.patch("builtins.input") as prompt,                 contextlib.redirect_stderr(io.StringIO()):
                 request = launcher._prepare_console_request(namespace, "Fix docs/README.md typo")
@@ -547,13 +548,13 @@ class DecisionMenuTests(unittest.TestCase):
         prompt.assert_not_called()
 
     def test_prepare_console_request_appends_selected_scope_for_full_implementation(self) -> None:
-        launcher = load_launcher()
+        launcher = load_ui()
         with tempfile.TemporaryDirectory() as directory:
             repository = Path(directory)
             artifact = repository / "docs/explorer/improvements/alpha/improvement.md"
             artifact.parent.mkdir(parents=True)
             artifact.write_text("# Improvement: Alpha\n", encoding="utf-8")
-            namespace = launcher.argparse.Namespace(cwd=repository)
+            namespace = argparse.Namespace(cwd=repository)
 
             with mock.patch("sys.stdin.isatty", return_value=True), \
                 mock.patch("builtins.input", return_value="1"), \
@@ -567,13 +568,13 @@ class DecisionMenuTests(unittest.TestCase):
 
 
     def test_prepare_console_request_prompts_for_hyphenated_full_sdd(self) -> None:
-        launcher = load_launcher()
+        launcher = load_ui()
         with tempfile.TemporaryDirectory() as directory:
             repository = Path(directory)
             artifact = repository / "docs/explorer/improvements/alpha/improvement.md"
             artifact.parent.mkdir(parents=True)
             artifact.write_text("# Improvement: Alpha\n", encoding="utf-8")
-            namespace = launcher.argparse.Namespace(cwd=repository)
+            namespace = argparse.Namespace(cwd=repository)
 
             with mock.patch("sys.stdin.isatty", return_value=True), \
                 mock.patch("builtins.input", return_value="1"), \
@@ -590,10 +591,10 @@ class DecisionMenuTests(unittest.TestCase):
         namespace = ui_namespace(launcher)
         stale = (Path("/tmp/current-stale"), {"run_id": "stale", "status": "waiting_for_user"})
 
-        with mock.patch.object(launcher, "_run", return_value=0) as run, \
+        with mock.patch("harness.cli.console.interpreter._run", return_value=0) as run, \
             mock.patch.object(launcher.sys.stdin, "isatty", return_value=True), \
-            mock.patch.object(launcher, "_unfinished_runs", side_effect=[[stale], [stale]]), \
-            mock.patch.object(launcher, "_prompt_for_decision") as prompt:
+            mock.patch("harness.cli.console.interpreter._unfinished_runs", side_effect=[[stale], [stale]]), \
+            mock.patch("harness.cli.console.interpreter._prompt_for_decision") as prompt:
             code = launcher._run_and_follow_decisions(namespace, ["--cwd", "/repo", "--provider", "local"], request="start")
 
         self.assertEqual(0, code)
@@ -617,9 +618,9 @@ class DecisionMenuTests(unittest.TestCase):
             def choose(_title_lines, items, **_kwargs):
                 return items[0]
 
-            with mock.patch.object(launcher, "_unfinished_runs", return_value=[]), \
-                mock.patch.object(launcher, "_menu_prompt", side_effect=choose), \
-                mock.patch.object(launcher, "_start", return_value=0) as start:
+            with mock.patch("harness.cli.console.interpreter._unfinished_runs", return_value=[]), \
+                mock.patch("harness.cli.console.interpreter._menu_prompt", side_effect=choose), \
+                mock.patch("harness.cli.console.interpreter.ConsoleInterpreter.start", return_value=0) as start:
                 code = launcher._continue_completed_run(namespace)
 
         self.assertEqual(0, code)
@@ -687,9 +688,9 @@ class DecisionMenuTests(unittest.TestCase):
                 return None
 
         keys = iter(["/", "s", "t", "\n"])
-        with mock.patch.object(launcher, "_interactive_stdin", return_value=True), \
-            mock.patch.object(launcher, "_RawTerminal", DummyRawTerminal), \
-            mock.patch.object(launcher, "_read_key", side_effect=lambda: next(keys)), \
+        with mock.patch("harness.cli.console.interpreter._interactive_stdin", return_value=True), \
+            mock.patch("harness.cli.console.interpreter._RawTerminal", DummyRawTerminal), \
+            mock.patch("harness.cli.console.interpreter._read_key", side_effect=lambda: next(keys)), \
             contextlib.redirect_stderr(io.StringIO()):
             line = launcher._interactive_console_line()
 
@@ -706,9 +707,9 @@ class DecisionMenuTests(unittest.TestCase):
                 return None
 
         keys = iter(["\n"])
-        with mock.patch.object(launcher, "_interactive_stdin", return_value=True), \
-            mock.patch.object(launcher, "_RawTerminal", DummyRawTerminal), \
-            mock.patch.object(launcher, "_read_key", side_effect=lambda: next(keys)), \
+        with mock.patch("harness.cli.console.interpreter._interactive_stdin", return_value=True), \
+            mock.patch("harness.cli.console.interpreter._RawTerminal", DummyRawTerminal), \
+            mock.patch("harness.cli.console.interpreter._read_key", side_effect=lambda: next(keys)), \
             contextlib.redirect_stderr(io.StringIO()):
             line = launcher._interactive_console_line()
 
@@ -725,9 +726,9 @@ class DecisionMenuTests(unittest.TestCase):
                 return None
 
         keys = iter(["/", "m", "e", "n", "u", "\n"])
-        with mock.patch.object(launcher, "_interactive_stdin", return_value=True), \
-            mock.patch.object(launcher, "_RawTerminal", DummyRawTerminal), \
-            mock.patch.object(launcher, "_read_key", side_effect=lambda: next(keys)), \
+        with mock.patch("harness.cli.console.interpreter._interactive_stdin", return_value=True), \
+            mock.patch("harness.cli.console.interpreter._RawTerminal", DummyRawTerminal), \
+            mock.patch("harness.cli.console.interpreter._read_key", side_effect=lambda: next(keys)), \
             contextlib.redirect_stderr(io.StringIO()):
             line = launcher._interactive_console_line()
 
@@ -761,8 +762,8 @@ class DecisionMenuTests(unittest.TestCase):
         launcher = load_launcher()
         namespace = ui_namespace(launcher)
 
-        with mock.patch.object(launcher, "_unfinished_runs", return_value=[]), \
-            mock.patch.object(launcher, "_start_job", return_value=0) as start_job:
+        with mock.patch("harness.cli.console.interpreter._unfinished_runs", return_value=[]), \
+            mock.patch("harness.cli.console.interpreter.ConsoleInterpreter.start_job", return_value=0) as start_job:
             code = launcher._console_command(namespace, "Fix tests")
 
         self.assertEqual(0, code)
@@ -775,8 +776,8 @@ class DecisionMenuTests(unittest.TestCase):
         stderr = io.StringIO()
         unfinished = [(Path("/tmp/current-run"), {"run_id": "run-1", "status": "active"})]
 
-        with mock.patch.object(launcher, "_unfinished_runs", return_value=unfinished), \
-            mock.patch.object(launcher, "_start") as start, \
+        with mock.patch("harness.cli.console.interpreter._unfinished_runs", return_value=unfinished), \
+            mock.patch("harness.cli.console.interpreter.ConsoleInterpreter.start") as start, \
             contextlib.redirect_stderr(stderr):
             code = launcher._console_command(namespace, "Fix tests")
 
