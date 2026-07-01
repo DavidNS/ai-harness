@@ -220,7 +220,7 @@ class ExploreOrchestrationIntegrationTests(unittest.TestCase):
         self.assertEqual(PhaseName.PROPOSAL_BUNDLE, persisted.current_phase)
 
 
-    def test_sdd_skeleton_completes_one_bundle_per_resume_through_all_registered_phases(self) -> None:
+    def test_sdd_skeleton_advances_to_tdd_then_fails_without_mutation_enabled(self) -> None:
         app, state, artifacts, _provider = service()
         app.execute(StartRun("Fix tests"))
 
@@ -230,14 +230,18 @@ class ExploreOrchestrationIntegrationTests(unittest.TestCase):
             ("DESIGN_BUNDLE", ("EXPLORE_BUNDLE", "PROPOSAL_BUNDLE", "SPEC_BUNDLE")),
             ("TASKS_BUNDLE", ("EXPLORE_BUNDLE", "PROPOSAL_BUNDLE", "SPEC_BUNDLE", "DESIGN_BUNDLE")),
             ("TDD_BUNDLE", ("EXPLORE_BUNDLE", "PROPOSAL_BUNDLE", "SPEC_BUNDLE", "DESIGN_BUNDLE", "TASKS_BUNDLE")),
-            (None, ("EXPLORE_BUNDLE", "PROPOSAL_BUNDLE", "SPEC_BUNDLE", "DESIGN_BUNDLE", "TASKS_BUNDLE", "TDD_BUNDLE")),
         ]
         for current_phase, completed in expected:
             result = app.execute(ResumeRun("run-1"))
             self.assertEqual(completed, result.run.completed_phases)
             self.assertEqual(current_phase, result.run.current_phase)
 
-        self.assertEqual(RunStatus.COMPLETED, state.get("run-1").status)
+        result = app.execute(ResumeRun("run-1"))
+
+        self.assertEqual("FAILED", result.run.status)
+        self.assertIsNone(result.run.current_phase)
+        self.assertEqual(("EXPLORE_BUNDLE", "PROPOSAL_BUNDLE", "SPEC_BUNDLE", "DESIGN_BUNDLE", "TASKS_BUNDLE"), result.run.completed_phases)
+        self.assertEqual(RunStatus.FAILED, state.get("run-1").status)
         artifact_ids = [item.artifact_id for item in artifacts.list("run-1")]
         for artifact_id in (
             "purpose/bundle.json",
@@ -248,13 +252,12 @@ class ExploreOrchestrationIntegrationTests(unittest.TestCase):
             "published/spec-handoff.json",
             "published/design-handoff.json",
             "published/tasks-handoff.json",
-            "published/tdd-handoff.json",
+            "published/tdd-results.json",
         ):
             self.assertIn(artifact_id, artifact_ids)
-        tdd_handoff = json.loads(artifacts.read("run-1", "published/tdd-handoff.json"))
-        self.assertEqual("stage_6_placeholder", tdd_handoff["mode"])
-        self.assertEqual("08-tdd-loop-subsystem", tdd_handoff["deferred_to_stage"])
-        self.assertTrue(all(task.status.value == "COMPLETED" for task in state.get("run-1").tasks))
+        tdd_results = json.loads(artifacts.read("run-1", "published/tdd-results.json"))
+        self.assertIn("TDD loop service", tdd_results["blocked_reason"])
+        self.assertTrue(all(task.status.value == "PENDING" for task in state.get("run-1").tasks))
 
     def test_single_proposal_bundle_uses_same_registry_path(self) -> None:
         app, state, artifacts, _provider = service()

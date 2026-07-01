@@ -33,6 +33,15 @@ class BundleRuntimeConfig:
     model: ModelSelection = ModelSelection("scripted", "v2-sdd")
     timeout: TimeoutPolicy = TimeoutPolicy(30)
     truncation: TruncationPolicy = TruncationPolicy(100_000)
+    allow_repository_mutation: bool = False
+    tdd_command_timeout_seconds: float = 30.0
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "working_directory", Path(self.working_directory))
+        if not isinstance(self.allow_repository_mutation, bool):
+            raise TypeError("allow_repository_mutation must be bool")
+        if isinstance(self.tdd_command_timeout_seconds, bool) or self.tdd_command_timeout_seconds <= 0:
+            raise ValueError("tdd_command_timeout_seconds must be positive")
 
 
 class BundleArtifactGateway:
@@ -137,6 +146,16 @@ class BundleArtifactGateway:
         validator(value)
         self.write_text(run.run_id, artifact_id, value)
         return value
+
+
+    def run_worker_text(
+        self,
+        run: RunRecord,
+        phase: PhaseName,
+        task_id: str,
+        inputs: dict[str, Any],
+    ) -> str:
+        return self._worker_stdout(run, phase, task_id, inputs)
 
     def _worker_stdout(self, run: RunRecord, phase: PhaseName, task_id: str, inputs: dict[str, Any]) -> str:
         result = self._worker_service.execute(

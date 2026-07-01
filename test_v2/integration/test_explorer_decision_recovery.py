@@ -140,7 +140,7 @@ class ExplorerDecisionRecoveryTests(unittest.TestCase):
         self.assertEqual("RUNNING", decided.run.status)
         self.assertEqual("EXPLORER_DISCOVERY", decided.run.current_phase)
         self.assertEqual(("EXPLORER_INTAKE",), decided.run.completed_phases)
-        self.assertEqual(["UserDecisionReceived", "PhaseEscalated", "PhaseStarted"], [type(event).__name__ for event in decided.events])
+        self.assertEqual(["UserDecisionReceived", "EscalationRaised", "EscalationResolved", "PhaseStarted"], [type(event).__name__ for event in decided.events])
         for stale in ("explorer/discovery.json", "explorer/decision.json"):
             with self.assertRaises(ArtifactNotFoundError):
                 artifacts.read("run-1", stale)
@@ -171,7 +171,7 @@ class ExplorerDecisionRecoveryTests(unittest.TestCase):
         self.assertEqual("RUNNING", recovered.run.status)
         self.assertEqual("EXPLORER_DISCOVERY", recovered.run.current_phase)
         self.assertEqual(("EXPLORER_INTAKE",), recovered.run.completed_phases)
-        self.assertEqual(["RunResumed", "PhaseRecoveryStarted", "PhaseStarted"], [type(event).__name__ for event in recovered.events])
+        self.assertEqual(["RunResumed", "EscalationRaised", "EscalationResolved", "PhaseStarted"], [type(event).__name__ for event in recovered.events])
         self.assertEqual(PhaseName.EXPLORER_DISCOVERY, state.get("run-1").current_phase)
         for stale in ("explorer/discovery.json", "explorer/decision.json"):
             with self.assertRaises(ArtifactNotFoundError):

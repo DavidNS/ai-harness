@@ -6,6 +6,7 @@ from pathlib import Path
 
 from harness_v2.adapters.storage import FileArtifactStore, FileStateStore, InMemoryArtifactStore
 from harness_v2.backend.domain.decisions import DecisionAction, DecisionEffect, DecisionRecord, PendingDecision
+from harness_v2.backend.domain.escalation import EscalationCategory
 from harness_v2.backend.domain.lifecycle import PhaseName, RunStatus, RunStrategy
 from harness_v2.backend.domain.runs import RunRecord
 from harness_v2.backend.ports.artifact_store import ArtifactNotFoundError
@@ -23,9 +24,9 @@ class StorageDecisionEffectIntegrationTests(unittest.TestCase):
                 "Choose",
                 TIMESTAMP,
                 options=("continue", "respec"),
-                effects=(DecisionEffect("respec", DecisionAction.ESCALATE, PhaseName.SPEC_BUNDLE),),
+                effects=(DecisionEffect("respec", DecisionAction.ESCALATE, EscalationCategory.REQUIREMENTS_GAP),),
                 default_action=DecisionAction.ESCALATE,
-                default_target_phase=PhaseName.SPEC_BUNDLE,
+                default_category=EscalationCategory.REQUIREMENTS_GAP,
             )
             history = DecisionRecord(
                 "decision-0",
@@ -53,9 +54,9 @@ class StorageDecisionEffectIntegrationTests(unittest.TestCase):
             self.assertEqual(pending, loaded.pending_decision)
             self.assertEqual((history,), loaded.decision_history)
             self.assertEqual(DecisionAction.ESCALATE, loaded.pending_decision.effects[0].action)
-            self.assertEqual(PhaseName.SPEC_BUNDLE, loaded.pending_decision.effects[0].target_phase)
+            self.assertEqual(EscalationCategory.REQUIREMENTS_GAP, loaded.pending_decision.effects[0].category)
             self.assertEqual(DecisionAction.ESCALATE, loaded.pending_decision.default_action)
-            self.assertEqual(PhaseName.SPEC_BUNDLE, loaded.pending_decision.default_target_phase)
+            self.assertEqual(EscalationCategory.REQUIREMENTS_GAP, loaded.pending_decision.default_category)
 
     def test_artifact_delete_removes_existing_artifact_and_missing_returns_false(self) -> None:
         memory = InMemoryArtifactStore()

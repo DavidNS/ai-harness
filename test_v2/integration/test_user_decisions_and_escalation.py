@@ -7,6 +7,7 @@ from harness_v2.backend.application.contracts import InvalidRunStateError, Submi
 from harness_v2.backend.application.decision_service import DecisionRequest, RequestUserDecisionService
 from harness_v2.backend.application.run_service import RunService
 from harness_v2.backend.domain.decisions import DecisionAction, DecisionEffect, PendingDecision
+from harness_v2.backend.domain.escalation import EscalationCategory
 from harness_v2.backend.domain.lifecycle import PhaseName, RunStatus, RunStrategy
 from harness_v2.backend.domain.runs import RunRecord
 from harness_v2.backend.domain.tasks import TaskStatus, TaskSummary
@@ -65,7 +66,7 @@ def waiting_tdd_run() -> RunRecord:
             "Continue or redesign?",
             TIMESTAMP,
             options=("continue", "redesign"),
-            effects=(DecisionEffect("redesign", DecisionAction.ESCALATE, PhaseName.DESIGN_BUNDLE),),
+            effects=(DecisionEffect("redesign", DecisionAction.ESCALATE, EscalationCategory.DESIGN_GAP),),
         ),
         tasks=(TaskSummary("task-1", "Implement", TaskStatus.COMPLETED),),
     )
@@ -76,7 +77,7 @@ def service(state: InMemoryStateStore, artifacts: InMemoryArtifactStore) -> RunS
 
 
 class UserDecisionEscalationIntegrationTests(unittest.TestCase):
-    def test_request_decision_persists_waiting_state_and_validates_escalation_target(self) -> None:
+    def test_request_decision_persists_waiting_state_with_escalation_category(self) -> None:
         state = InMemoryStateStore()
         state.save(
             RunRecord(
@@ -96,34 +97,13 @@ class UserDecisionEscalationIntegrationTests(unittest.TestCase):
                 "decision-1",
                 "Continue or respec?",
                 options=("continue", "respec"),
-                effects=(DecisionEffect("respec", DecisionAction.ESCALATE, PhaseName.SPEC_BUNDLE),),
+                effects=(DecisionEffect("respec", DecisionAction.ESCALATE, EscalationCategory.REQUIREMENTS_GAP),),
             )
         )
 
         self.assertEqual("WAITING_FOR_USER", result.run.status)
         self.assertEqual("decision-1", result.run.pending_decision.decision_id)
         self.assertEqual(RunStatus.WAITING_FOR_USER, state.get("run-1").status)
-
-        state.save(
-            RunRecord(
-                "run-2",
-                "Fix tests",
-                RunStatus.RUNNING,
-                RunStrategy.SDD,
-                current_phase=PhaseName.SPEC_BUNDLE,
-                completed_phases=(PhaseName.EXPLORE_BUNDLE, PhaseName.PROPOSAL_BUNDLE),
-            )
-        )
-        with self.assertRaises(InvalidRunStateError):
-            RequestUserDecisionService(state, StaticClock()).execute(
-                DecisionRequest(
-                    "run-2",
-                    "decision-2",
-                    "Invalid target",
-                    options=("future",),
-                    effects=(DecisionEffect("future", DecisionAction.ESCALATE, PhaseName.TDD_BUNDLE),),
-                )
-            )
 
     def test_submit_decision_rejects_wrong_id_and_invalid_option_without_mutating_state(self) -> None:
         state = InMemoryStateStore()
@@ -181,7 +161,7 @@ class UserDecisionEscalationIntegrationTests(unittest.TestCase):
         self.assertEqual("RUNNING", result.run.status)
         self.assertEqual("DESIGN_BUNDLE", result.run.current_phase)
         self.assertEqual(("EXPLORE_BUNDLE", "PROPOSAL_BUNDLE", "SPEC_BUNDLE"), result.run.completed_phases)
-        self.assertEqual(["UserDecisionReceived", "PhaseEscalated", "PhaseStarted"], [type(event).__name__ for event in result.events])
+        self.assertEqual(["UserDecisionReceived", "EscalationRaised", "EscalationResolved", "PhaseStarted"], [type(event).__name__ for event in result.events])
         persisted = state.get("run-1")
         self.assertEqual(PhaseName.DESIGN_BUNDLE, persisted.current_phase)
         self.assertEqual((PhaseName.EXPLORE_BUNDLE, PhaseName.PROPOSAL_BUNDLE, PhaseName.SPEC_BUNDLE), persisted.completed_phases)
@@ -239,14 +219,16 @@ class UserDecisionEscalationIntegrationTests(unittest.TestCase):
                     "Invalid target",
                     TIMESTAMP,
                     options=("future",),
-                    effects=(DecisionEffect("future", DecisionAction.ESCALATE, PhaseName.TDD_BUNDLE),),
+                    effects=(DecisionEffect("future", DecisionAction.ESCALATE, EscalationCategory.TASK_PLAN_GAP),),
                 ),
             )
         )
 
-        with self.assertRaises(InvalidRunStateError):
-            service(state, artifacts).execute(SubmitUserDecision("run-1", "decision-1", "future"))
-        self.assertEqual(RunStatus.WAITING_FOR_USER, state.get("run-1").status)
+        result = service(state, artifacts).execute(SubmitUserDecision("run-1", "decision-1", "future"))
+
+        self.assertEqual("FAILED", result.run.status)
+        self.assertEqual(["UserDecisionReceived", "EscalationRaised", "EscalationResolved", "PhaseFailed"], [type(event).__name__ for event in result.events])
+        self.assertEqual(RunStatus.FAILED, state.get("run-1").status)
 
 
 if __name__ == "__main__":

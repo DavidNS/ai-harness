@@ -15,8 +15,8 @@ from harness_v2.backend.application.contracts import (
     UserDecisionRequested,
 )
 from harness_v2.backend.domain.decisions import DecisionAction, DecisionEffect, PendingDecision
-from harness_v2.backend.domain.errors import DomainValidationError
-from harness_v2.backend.domain.lifecycle import LifecycleGraph, PhaseName, RunStatus
+from harness_v2.backend.domain.escalation import EscalationCategory
+from harness_v2.backend.domain.lifecycle import RunStatus
 from harness_v2.backend.domain.runs import RunRecord
 from harness_v2.backend.ports.clock import ClockPort
 from harness_v2.backend.ports.state_store import StateNotFoundError, StateStorePort
@@ -43,7 +43,7 @@ class DecisionRequest:
     options: tuple[str, ...] = ()
     effects: tuple[DecisionEffect, ...] = ()
     default_action: DecisionAction = DecisionAction.CONTINUE
-    default_target_phase: PhaseName | str | None = None
+    default_category: EscalationCategory | str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "run_id", _require_text(self.run_id, "run_id"))
@@ -54,10 +54,11 @@ class DecisionRequest:
         object.__setattr__(
             self,
             "effects",
-            tuple(DecisionEffect(effect.option, effect.action, effect.target_phase) for effect in self.effects),
+            tuple(DecisionEffect(effect.option, effect.action, effect.category) for effect in self.effects),
         )
+        default_category = None if self.default_category is None else EscalationCategory(self.default_category)
         object.__setattr__(self, "default_action", default_action)
-        object.__setattr__(self, "default_target_phase", self.default_target_phase)
+        object.__setattr__(self, "default_category", default_category)
 
 
 class RequestUserDecisionService:
@@ -72,17 +73,6 @@ class RequestUserDecisionService:
             raise RunNotFoundError(command.run_id) from exc
         if run.status != RunStatus.RUNNING or run.current_phase is None:
             raise InvalidRunStateError(f"run {run.run_id} cannot request a decision from {run.status.value}")
-        graph = LifecycleGraph.for_strategy(run.strategy)
-        try:
-            for effect in command.effects:
-                if effect.action is DecisionAction.ESCALATE:
-                    graph.validate_rewind_target(run.current_phase, effect.target_phase)
-            if command.default_action is DecisionAction.ESCALATE:
-                if command.default_target_phase is None:
-                    raise DomainValidationError("default decision effect requires a target phase")
-                graph.validate_rewind_target(run.current_phase, command.default_target_phase)
-        except DomainValidationError as exc:
-            raise InvalidRunStateError(str(exc)) from exc
         decision = PendingDecision(
             decision_id=command.decision_id,
             origin_phase=run.current_phase,
@@ -91,7 +81,7 @@ class RequestUserDecisionService:
             options=command.options,
             effects=command.effects,
             default_action=command.default_action,
-            default_target_phase=command.default_target_phase,
+            default_category=command.default_category,
         )
         event = UserDecisionRequested(
             run_id=run.run_id,
@@ -118,7 +108,7 @@ def pending_decision_view(run: RunRecord) -> PendingDecisionView | None:
 
 
 def task_view(task: object) -> TaskSummaryView:
-    return TaskSummaryView(task_id=task.task_id, title=task.title, status=task.status.value)
+    return TaskSummaryView(task_id=task.task_id, title=task.title, status=task.status.value, attempts=task.attempts, last_failure=task.last_failure)
 
 
 def error_view(error: object) -> ErrorView:

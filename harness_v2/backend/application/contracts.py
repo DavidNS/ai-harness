@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from harness_v2.backend.domain.lifecycle import PhaseName, RunStatus, RunStrategy
 
 
 class RunNotFoundError(KeyError):
@@ -15,9 +14,9 @@ class InvalidRunStateError(RuntimeError):
     """Raised when a command is not valid for the run's current state."""
 
 
-PHASE_VALUES = frozenset(phase.value for phase in PhaseName)
-RUN_STATUS_VALUES = frozenset(status.value for status in RunStatus)
-RUN_STRATEGY_VALUES = frozenset(strategy.value for strategy in RunStrategy)
+PHASE_VALUES = frozenset(("EXPLORE_BUNDLE", "PROPOSAL_BUNDLE", "SPEC_BUNDLE", "DESIGN_BUNDLE", "TASKS_BUNDLE", "TDD_BUNDLE", "EXPLORER_INTAKE", "EXPLORER_DISCOVERY", "EXPLORER_DECISION", "EXPLORER_ARTIFACT", "EXPLORER_REVIEW", "EXPLORER_DISTILL"))
+RUN_STATUS_VALUES = frozenset(("PENDING", "RUNNING", "WAITING_FOR_USER", "COMPLETED", "FAILED", "CANCELLED"))
+RUN_STRATEGY_VALUES = frozenset(("SDD", "EXPLORER", "EXPLORE_BUNDLE", "PROPOSAL_BUNDLE", "SPEC_BUNDLE", "DESIGN_BUNDLE", "TASKS_BUNDLE", "TDD_BUNDLE"))
 
 
 def _require_text(value: str, field: str) -> str:
@@ -191,31 +190,44 @@ class PhaseFailed:
 
 
 @dataclass(frozen=True, slots=True)
-class PhaseEscalated:
+class EscalationRaised:
     run_id: str
-    from_phase: str
-    target_phase: str
-    decision_id: str
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "run_id", _require_text(self.run_id, "run_id"))
-        object.__setattr__(self, "from_phase", _phase_text(self.from_phase, "from_phase"))
-        object.__setattr__(self, "target_phase", _phase_text(self.target_phase, "target_phase"))
-        object.__setattr__(self, "decision_id", _require_text(self.decision_id, "decision_id"))
-
-
-@dataclass(frozen=True, slots=True)
-class PhaseRecoveryStarted:
-    run_id: str
-    from_phase: str
-    target_phase: str
+    issue_id: str
+    origin_phase: str
+    category: str
     reason: str
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "run_id", _require_text(self.run_id, "run_id"))
-        object.__setattr__(self, "from_phase", _phase_text(self.from_phase, "from_phase"))
-        object.__setattr__(self, "target_phase", _phase_text(self.target_phase, "target_phase"))
+        object.__setattr__(self, "issue_id", _require_text(self.issue_id, "issue_id"))
+        object.__setattr__(self, "origin_phase", _phase_text(self.origin_phase, "origin_phase"))
+        object.__setattr__(self, "category", _require_text(self.category, "category"))
         object.__setattr__(self, "reason", _require_text(self.reason, "reason"))
+
+
+@dataclass(frozen=True, slots=True)
+class EscalationResolved:
+    run_id: str
+    issue_id: str
+    action: str
+    target_phase: str | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "run_id", _require_text(self.run_id, "run_id"))
+        object.__setattr__(self, "issue_id", _require_text(self.issue_id, "issue_id"))
+        action = _require_text(self.action, "action")
+        if action not in {"ASK_USER", "REWIND", "FAIL", "CONTINUE"}:
+            raise ValueError("action is not a known escalation resolution")
+        object.__setattr__(self, "action", action)
+        object.__setattr__(
+            self,
+            "target_phase",
+            None if self.target_phase is None else _phase_text(self.target_phase, "target_phase"),
+        )
+        if self.action == "REWIND" and self.target_phase is None:
+            raise ValueError("REWIND escalation resolution requires a target phase")
+        if self.action != "REWIND" and self.target_phase is not None:
+            raise ValueError("only REWIND escalation resolution may target a phase")
 
 
 @dataclass(frozen=True, slots=True)
@@ -285,8 +297,8 @@ Event = (
     | PhaseStarted
     | PhaseCompleted
     | PhaseFailed
-    | PhaseEscalated
-    | PhaseRecoveryStarted
+    | EscalationRaised
+    | EscalationResolved
     | PhaseRetryStarted
     | UserDecisionRequested
     | UserDecisionReceived
@@ -317,11 +329,17 @@ class TaskSummaryView:
     task_id: str
     title: str
     status: str
+    attempts: int = 0
+    last_failure: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "task_id", _require_text(self.task_id, "task_id"))
         object.__setattr__(self, "title", _require_text(self.title, "title"))
         object.__setattr__(self, "status", _require_text(self.status, "status"))
+        if isinstance(self.attempts, bool) or self.attempts < 0:
+            raise ValueError("attempts must be a non-negative integer")
+        if self.last_failure is not None:
+            object.__setattr__(self, "last_failure", _require_text(self.last_failure, "last_failure"))
 
 
 @dataclass(frozen=True, slots=True)

@@ -8,6 +8,7 @@ from typing import Any
 from harness_v2.backend.application.bundle_artifacts import BundleValidationError
 from harness_v2.backend.application.bundle_orchestration import BundleContext, BundleExecutionResult
 from harness_v2.backend.domain.lifecycle import PhaseName
+from harness_v2.backend.domain.escalation import EscalationCategory, EscalationIssue
 from harness_v2.backend.domain.tasks import TaskStatus, TaskSummary
 
 
@@ -132,37 +133,30 @@ class TasksBundleDefinition:
 
 @dataclass(frozen=True, slots=True)
 class TddBundleDefinition:
+    tdd_loop: object | None = None
     phase: PhaseName = PhaseName.TDD_BUNDLE
     failure_code: str = "TDD_BUNDLE_FAILED"
-    produced_artifacts: tuple[str, ...] = ("published/tdd-handoff.json",)
-    produced_prefixes: tuple[str, ...] = ()
+    produced_artifacts: tuple[str, ...] = ("published/tdd-results.json", "published/tdd-handoff.json")
+    produced_prefixes: tuple[str, ...] = ("workers/TDD_BUNDLE/",)
 
     def execute(self, context: BundleContext) -> BundleExecutionResult:
-        run = context.run
-        if not run.tasks:
-            raise BundleValidationError("TDD_BUNDLE requires tasks from TASKS_BUNDLE")
-        completed = tuple(
-            task.replace(status=TaskStatus.COMPLETED)
-            if hasattr(task, "replace")
-            else TaskSummary(task.task_id, task.title, TaskStatus.COMPLETED)
-            for task in run.tasks
-        )
-        context.artifacts.ensure_controller_json(
-            run.run_id,
-            "published/tdd-handoff.json",
-            lambda: _handoff(
-                "tdd",
-                ["tasks.json"],
-                None,
-                extra={
-                    "mode": "stage_6_placeholder",
-                    "deferred_to_stage": "08-tdd-loop-subsystem",
-                    "completed_tasks": [task.task_id for task in completed],
-                },
-            ),
-            validate_handoff,
-        )
-        return BundleExecutionResult(tasks=completed)
+        if self.tdd_loop is None:
+            reason = "TDD_BUNDLE has no TDD loop service configured"
+            context.artifacts.write_json(
+                context.run.run_id,
+                "published/tdd-results.json",
+                {"schema_version": 1, "phase": "tdd", "results": [], "blocked_reason": reason},
+            )
+            return BundleExecutionResult(
+                escalation_issue=EscalationIssue(
+                    issue_id="tdd-loop-unconfigured",
+                    origin_phase=PhaseName.TDD_BUNDLE,
+                    category=EscalationCategory.VALIDATION_BLOCKED,
+                    reason=reason,
+                    evidence_artifact_ids=("published/tdd-results.json",),
+                )
+            )
+        return self.tdd_loop.execute(context)
 
 
 def validate_explore_outcome_bundle(value: dict[str, Any]) -> None:

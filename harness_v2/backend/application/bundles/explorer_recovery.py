@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from harness_v2.backend.application.bundle_orchestration import BundleContext, BundleExecutionResult, PhaseRecoveryRequest
+from harness_v2.backend.application.bundle_orchestration import BundleContext, BundleExecutionResult
 from harness_v2.backend.application.contracts import InvalidRunStateError
 from harness_v2.backend.application.decision_service import DecisionRequest
 from harness_v2.backend.domain.decisions import DecisionAction
+from harness_v2.backend.domain.escalation import EscalationCategory, EscalationIssue
 from harness_v2.backend.domain.lifecycle import PhaseName
 
 EXPLORER_REFINEMENT_DECISION_ID = "explorer-refinement"
@@ -23,14 +24,17 @@ def handle_explorer_decision(context: BundleContext, decision: dict[str, Any]) -
                 EXPLORER_REFINEMENT_DECISION_ID,
                 explorer_decision_prompt(decision),
                 default_action=DecisionAction.ESCALATE,
-                default_target_phase=PhaseName.EXPLORER_DISCOVERY,
+                default_category=EscalationCategory.EXPLORATION_GAP,
             )
         )
     if outcome == "escalate_discovery":
         return BundleExecutionResult(
-            recovery_request=PhaseRecoveryRequest(
-                PhaseName.EXPLORER_DISCOVERY,
+            escalation_issue=EscalationIssue(
+                "explorer-decision-escalation",
+                PhaseName.EXPLORER_DECISION,
+                EscalationCategory.EXPLORATION_GAP,
                 _text(decision.get("rationale"), "rationale"),
+                evidence_artifact_ids=("explorer/decision.json",),
             )
         )
     return None

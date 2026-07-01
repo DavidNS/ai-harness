@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
+from harness_v2.backend.domain.escalation import EscalationCategory
 from harness_v2.backend.domain.errors import DomainValidationError, require_text
 from harness_v2.backend.domain.lifecycle import PhaseName
 
@@ -25,29 +26,29 @@ class DecisionAction(StrEnum):
 class DecisionEffect:
     option: str
     action: DecisionAction = DecisionAction.CONTINUE
-    target_phase: PhaseName | None = None
+    category: EscalationCategory | None = None
 
     def __post_init__(self) -> None:
         action = DecisionAction(self.action)
-        target = None if self.target_phase is None else PhaseName(self.target_phase)
+        category = None if self.category is None else EscalationCategory(self.category)
         object.__setattr__(self, "option", require_text(self.option, "decision effect option"))
         object.__setattr__(self, "action", action)
-        object.__setattr__(self, "target_phase", target)
-        _validate_action_target(action, target, "escalation decision effect" if action is DecisionAction.ESCALATE else "continue decision effect")
+        object.__setattr__(self, "category", category)
+        _validate_action_category(action, category, "escalation decision effect" if action is DecisionAction.ESCALATE else "continue decision effect")
 
 
-def _validate_action_target(action: DecisionAction, target: PhaseName | None, label: str) -> None:
-    if action is DecisionAction.ESCALATE and target is None:
-        raise DomainValidationError(f"{label} requires a target phase")
-    if action is DecisionAction.CONTINUE and target is not None:
-        raise DomainValidationError(f"{label} must not target a phase")
+def _validate_action_category(action: DecisionAction, category: EscalationCategory | None, label: str) -> None:
+    if action is DecisionAction.ESCALATE and category is None:
+        raise DomainValidationError(f"{label} requires an escalation category")
+    if action is DecisionAction.CONTINUE and category is not None:
+        raise DomainValidationError(f"{label} must not define an escalation category")
 
 
 def _normalize_effects(
     options: tuple[str, ...],
     effects: tuple[DecisionEffect, ...] | list[DecisionEffect],
 ) -> tuple[DecisionEffect, ...]:
-    normalized = tuple(DecisionEffect(effect.option, effect.action, effect.target_phase) for effect in effects)
+    normalized = tuple(DecisionEffect(effect.option, effect.action, effect.category) for effect in effects)
     effect_options = tuple(effect.option for effect in normalized)
     if len(effect_options) != len(set(effect_options)):
         raise DomainValidationError("decision effects must be unique per option")
@@ -67,7 +68,7 @@ class PendingDecision:
     options: tuple[str, ...] = ()
     effects: tuple[DecisionEffect, ...] = ()
     default_action: DecisionAction = DecisionAction.CONTINUE
-    default_target_phase: PhaseName | None = None
+    default_category: EscalationCategory | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "decision_id", require_text(self.decision_id, "decision ID"))
@@ -75,12 +76,12 @@ class PendingDecision:
         object.__setattr__(self, "prompt", require_text(self.prompt, "decision prompt"))
         options = _normalize_options(self.options)
         default_action = DecisionAction(self.default_action)
-        default_target = None if self.default_target_phase is None else PhaseName(self.default_target_phase)
-        _validate_action_target(default_action, default_target, "default decision effect")
+        default_category = None if self.default_category is None else EscalationCategory(self.default_category)
+        _validate_action_category(default_action, default_category, "default decision effect")
         object.__setattr__(self, "options", options)
         object.__setattr__(self, "effects", _normalize_effects(options, self.effects))
         object.__setattr__(self, "default_action", default_action)
-        object.__setattr__(self, "default_target_phase", default_target)
+        object.__setattr__(self, "default_category", default_category)
         object.__setattr__(self, "created_at", require_text(self.created_at, "decision timestamp"))
 
     def effect_for(self, response: str) -> DecisionEffect:
@@ -88,7 +89,7 @@ class PendingDecision:
         for effect in self.effects:
             if effect.option == normalized:
                 return effect
-        return DecisionEffect(normalized, self.default_action, self.default_target_phase)
+        return DecisionEffect(normalized, self.default_action, self.default_category)
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,7 +103,7 @@ class DecisionRecord:
     options: tuple[str, ...] = ()
     effects: tuple[DecisionEffect, ...] = ()
     default_action: DecisionAction = DecisionAction.CONTINUE
-    default_target_phase: PhaseName | None = None
+    default_category: EscalationCategory | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "decision_id", require_text(self.decision_id, "decision ID"))
@@ -113,9 +114,9 @@ class DecisionRecord:
         object.__setattr__(self, "answered_at", require_text(self.answered_at, "decision answer timestamp"))
         options = _normalize_options(self.options)
         default_action = DecisionAction(self.default_action)
-        default_target = None if self.default_target_phase is None else PhaseName(self.default_target_phase)
-        _validate_action_target(default_action, default_target, "default decision effect")
+        default_category = None if self.default_category is None else EscalationCategory(self.default_category)
+        _validate_action_category(default_action, default_category, "default decision effect")
         object.__setattr__(self, "options", options)
         object.__setattr__(self, "effects", _normalize_effects(options, self.effects))
         object.__setattr__(self, "default_action", default_action)
-        object.__setattr__(self, "default_target_phase", default_target)
+        object.__setattr__(self, "default_category", default_category)

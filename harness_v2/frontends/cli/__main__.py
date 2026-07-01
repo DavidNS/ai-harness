@@ -39,6 +39,17 @@ def _parser() -> argparse.ArgumentParser:
         default=DEFAULT_STATE_ROOT,
         help="v2 runtime state root, default: .ai-harness/v2",
     )
+    parser.add_argument(
+        "--working-directory",
+        type=Path,
+        default=None,
+        help="working directory for repository-mutating phases, default: current directory",
+    )
+    parser.add_argument(
+        "--allow-repository-mutation",
+        action="store_true",
+        help="allow TDD workers and validation commands to mutate the configured working directory",
+    )
     subcommands = parser.add_subparsers(dest="command", required=True)
 
     start = subcommands.add_parser("start", help="start a simulated v2 run")
@@ -94,8 +105,11 @@ def _render_events(result: CommandResult) -> None:
         phase = getattr(event, "phase", None)
         if phase:
             suffix = f" phase={phase}"
-        elif type(event).__name__ in {"PhaseEscalated", "PhaseRecoveryStarted"}:
-            suffix = f" from={event.from_phase} target={event.target_phase}"
+        elif type(event).__name__ == "EscalationRaised":
+            suffix = f" issue={event.issue_id} phase={event.origin_phase} category={event.category}"
+        elif type(event).__name__ == "EscalationResolved":
+            target = f" target={event.target_phase}" if event.target_phase else ""
+            suffix = f" issue={event.issue_id} action={event.action}{target}"
         elif type(event).__name__ == "PhaseRetryStarted":
             suffix = f" phase={event.phase}"
         else:
@@ -138,7 +152,11 @@ def _render_actions(result: GetAvailableActionsResult) -> None:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    host = InProcessHost(state_root=args.state_root)
+    host = InProcessHost(
+        state_root=args.state_root,
+        working_directory=args.working_directory,
+        allow_repository_mutation=args.allow_repository_mutation,
+    )
     try:
         if args.command == "start":
             _render_command_result(host.execute(StartRun(request=" ".join(args.request), strategy=args.strategy)))

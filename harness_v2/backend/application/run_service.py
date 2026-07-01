@@ -17,7 +17,6 @@ from harness_v2.backend.application.contracts import (
     GetRunStateResult,
     ListRuns,
     ListRunsResult,
-    PhaseEscalated,
     PhaseRetryStarted,
     PhaseStarted,
     Query,
@@ -33,9 +32,11 @@ from harness_v2.backend.application.contracts import (
     SubmitUserDecision,
     UserDecisionReceived,
 )
-from harness_v2.backend.application.artifact_invalidation import ArtifactInvalidationRule, InvalidatedArtifact, invalidate_phase_artifacts, restore_invalidated_artifacts
+from harness_v2.backend.application.artifact_invalidation import ArtifactInvalidationRule, invalidate_phase_artifacts, restore_invalidated_artifacts
 from harness_v2.backend.application.decision_service import pending_decision_view, run_to_view
+from harness_v2.backend.application.escalation_service import EscalationPolicyService
 from harness_v2.backend.domain.decisions import DecisionAction, DecisionRecord
+from harness_v2.backend.domain.escalation import EscalationIssue
 from harness_v2.backend.domain.errors import DomainValidationError
 from harness_v2.backend.domain.lifecycle import LifecycleGraph, PhaseName, RunStatus, RunStrategy
 from harness_v2.backend.domain.runs import RunRecord
@@ -193,6 +194,11 @@ class SubmitUserDecisionService(_RunStateAccess):
         self._clock = clock or _UnknownClock()
         self._artifact_store = artifact_store
         self._invalidation_rules = invalidation_rules or {}
+        self._escalation_policy = (
+            EscalationPolicyService(state_store, artifact_store, self._clock, self._invalidation_rules)
+            if artifact_store is not None
+            else None
+        )
 
     def execute(self, command: SubmitUserDecision) -> CommandResult:
         run = self._get(command.run_id)
@@ -206,15 +212,6 @@ class SubmitUserDecisionService(_RunStateAccess):
             raise InvalidRunStateError(f"decision response must be one of: {allowed}")
 
         effect = decision.effect_for(command.response)
-        graph = LifecycleGraph.for_strategy(run.strategy)
-        if effect.action is DecisionAction.ESCALATE:
-            if effect.target_phase is None:
-                raise InvalidRunStateError("escalation decision effect requires a target phase")
-            try:
-                graph.validate_rewind_target(run.current_phase, effect.target_phase)
-            except DomainValidationError as exc:
-                raise InvalidRunStateError(str(exc)) from exc
-
         received = UserDecisionReceived(
             run_id=command.run_id,
             decision_id=command.decision_id,
@@ -230,52 +227,29 @@ class SubmitUserDecisionService(_RunStateAccess):
             options=decision.options,
             effects=decision.effects,
             default_action=decision.default_action,
-            default_target_phase=decision.default_target_phase,
+            default_category=decision.default_category,
+        )
+        updated = run.replace(
+            status=RunStatus.RUNNING,
+            pending_decision=None,
+            decision_history=(*run.decision_history, history),
         )
         if effect.action is DecisionAction.ESCALATE:
-            updated, escalated, invalidated = self._escalate(run, history, graph, effect.target_phase)
-            try:
-                self._state_store.save(updated)
-            except Exception:
-                restore_invalidated_artifacts(self._artifact_store, run.run_id, invalidated)
-                raise
-            return CommandResult(run=run_to_view(updated), events=(received, escalated, PhaseStarted(run.run_id, effect.target_phase.value)))
+            if self._escalation_policy is None:
+                raise InvalidRunStateError("escalation requires an artifact store")
+            issue = EscalationIssue(
+                f"decision-{decision.decision_id}",
+                run.current_phase,
+                effect.category,
+                f"user decision {decision.decision_id} escalated: {command.response}",
+                decision_id=decision.decision_id,
+                response=command.response,
+            )
+            result = self._escalation_policy.execute(run.run_id, issue, base_run=updated)
+            return CommandResult(run=result.run, events=(received, *result.events))
 
-        updated = run.replace(
-            status=RunStatus.RUNNING,
-            pending_decision=None,
-            decision_history=(*run.decision_history, history),
-        )
         self._state_store.save(updated)
         return CommandResult(run=run_to_view(updated), events=(received,))
-
-    def _escalate(
-        self,
-        run: RunRecord,
-        history: DecisionRecord,
-        graph: LifecycleGraph,
-        target_phase: PhaseName,
-    ) -> tuple[RunRecord, PhaseEscalated, tuple[InvalidatedArtifact, ...]]:
-        if self._artifact_store is None:
-            raise InvalidRunStateError("escalation requires an artifact store")
-        invalidated_phases = graph.phases_from(target_phase)
-        invalidated = invalidate_phase_artifacts(self._artifact_store, run.run_id, invalidated_phases, self._invalidation_rules)
-        tasks = () if PhaseName.TASKS_BUNDLE in invalidated_phases else run.tasks
-        updated = run.replace(
-            status=RunStatus.RUNNING,
-            current_phase=target_phase,
-            completed_phases=graph.completed_prefix_before(target_phase),
-            pending_decision=None,
-            decision_history=(*run.decision_history, history),
-            tasks=tasks,
-        )
-        event = PhaseEscalated(
-            run_id=run.run_id,
-            from_phase=run.current_phase.value,
-            target_phase=target_phase.value,
-            decision_id=history.decision_id,
-        )
-        return updated, event, invalidated
 
 
 class GetRunService(_RunStateAccess):

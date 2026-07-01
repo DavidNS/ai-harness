@@ -18,9 +18,9 @@ from harness_v2.backend.application.contracts import (
     ListRunsResult,
     PendingDecisionView,
     PhaseCompleted,
-    PhaseEscalated,
+    EscalationRaised,
+    EscalationResolved,
     PhaseFailed,
-    PhaseRecoveryStarted,
     PhaseRetryStarted,
     PhaseStarted,
     ResumeRun,
@@ -72,8 +72,8 @@ class ContractTests(unittest.TestCase):
             PhaseStarted("run-1", "EXPLORER_INTAKE"),
             PhaseCompleted("run-1", "EXPLORE_BUNDLE"),
             PhaseFailed("run-1", "EXPLORE_BUNDLE", "failed"),
-            PhaseEscalated("run-1", "TDD_BUNDLE", "DESIGN_BUNDLE", "decision-1"),
-            PhaseRecoveryStarted("run-1", "EXPLORER_DECISION", "EXPLORER_DISCOVERY", "needs more evidence"),
+            EscalationRaised("run-1", "issue-1", "TDD_BUNDLE", "DESIGN_GAP", "needs design"),
+            EscalationResolved("run-1", "issue-1", "REWIND", "DESIGN_BUNDLE"),
             PhaseRetryStarted("run-1", "EXPLORE_BUNDLE"),
             UserDecisionRequested("run-1", "decision-1", "Choose", ("continue",)),
             UserDecisionReceived("run-1", "decision-1", "continue"),
@@ -87,7 +87,7 @@ class ContractTests(unittest.TestCase):
 
     def test_result_dtos_can_be_created_with_valid_data(self) -> None:
         decision = PendingDecisionView("decision-1", "EXPLORE_BUNDLE", "Choose", "2026-07-01T00:00:00+00:00", ("continue",))
-        task = TaskSummaryView("task-1", "Implement", "IN_PROGRESS")
+        task = TaskSummaryView("task-1", "Implement", "IN_PROGRESS", attempts=1, last_failure="failed once")
         error = ErrorView("E001", "failed", "EXPLORE_BUNDLE", "2026-07-01T00:00:00+00:00")
         run = RunView(
             run_id="run-1",
@@ -112,6 +112,8 @@ class ContractTests(unittest.TestCase):
         self.assertTrue(all(result is not None for result in results))
         self.assertEqual("WAITING_FOR_USER", run.status)
         self.assertEqual("EXPLORE_BUNDLE", run.current_phase)
+        self.assertEqual(1, run.tasks[0].attempts)
+        self.assertEqual("failed once", run.tasks[0].last_failure)
 
     def test_result_dtos_are_json_serializable(self) -> None:
         result = CommandResult(
@@ -222,14 +224,17 @@ class ContractTests(unittest.TestCase):
             lambda: PhaseFailed("", "EXPLORE_BUNDLE", "failed"),
             lambda: PhaseFailed("run-1", "", "failed"),
             lambda: PhaseFailed("run-1", "EXPLORE_BUNDLE", ""),
-            lambda: PhaseEscalated("", "TDD_BUNDLE", "DESIGN_BUNDLE", "decision-1"),
-            lambda: PhaseEscalated("run-1", "", "DESIGN_BUNDLE", "decision-1"),
-            lambda: PhaseEscalated("run-1", "TDD_BUNDLE", "", "decision-1"),
-            lambda: PhaseEscalated("run-1", "TDD_BUNDLE", "DESIGN_BUNDLE", ""),
-            lambda: PhaseRecoveryStarted("", "EXPLORER_DECISION", "EXPLORER_DISCOVERY", "reason"),
-            lambda: PhaseRecoveryStarted("run-1", "", "EXPLORER_DISCOVERY", "reason"),
-            lambda: PhaseRecoveryStarted("run-1", "EXPLORER_DECISION", "", "reason"),
-            lambda: PhaseRecoveryStarted("run-1", "EXPLORER_DECISION", "EXPLORER_DISCOVERY", ""),
+            lambda: EscalationRaised("", "issue-1", "TDD_BUNDLE", "DESIGN_GAP", "reason"),
+            lambda: EscalationRaised("run-1", "", "TDD_BUNDLE", "DESIGN_GAP", "reason"),
+            lambda: EscalationRaised("run-1", "issue-1", "", "DESIGN_GAP", "reason"),
+            lambda: EscalationRaised("run-1", "issue-1", "TDD_BUNDLE", "", "reason"),
+            lambda: EscalationRaised("run-1", "issue-1", "TDD_BUNDLE", "DESIGN_GAP", ""),
+            lambda: EscalationResolved("", "issue-1", "REWIND", "DESIGN_BUNDLE"),
+            lambda: EscalationResolved("run-1", "", "REWIND", "DESIGN_BUNDLE"),
+            lambda: EscalationResolved("run-1", "issue-1", "", "DESIGN_BUNDLE"),
+            lambda: EscalationResolved("run-1", "issue-1", "NOT_AN_ACTION"),
+            lambda: EscalationResolved("run-1", "issue-1", "REWIND"),
+            lambda: EscalationResolved("run-1", "issue-1", "FAIL", "DESIGN_BUNDLE"),
             lambda: PhaseRetryStarted("", "EXPLORE_BUNDLE"),
             lambda: PhaseRetryStarted("run-1", ""),
             lambda: UserDecisionRequested("", "decision-1", "Choose"),
@@ -255,6 +260,8 @@ class ContractTests(unittest.TestCase):
             lambda: RunSummaryView("run-1", "Fix tests", ""),
             lambda: PendingDecisionView("", "EXPLORE_BUNDLE", "Choose", "now"),
             lambda: TaskSummaryView("task-1", "", "TODO"),
+            lambda: TaskSummaryView("task-1", "Implement", "TODO", attempts=-1),
+            lambda: TaskSummaryView("task-1", "Implement", "TODO", last_failure=""),
             lambda: ErrorView("E001", "", timestamp="now"),
             lambda: GetAvailableActionsResult("run-1", ("resume", "resume")),
         )
@@ -269,10 +276,8 @@ class ContractTests(unittest.TestCase):
             lambda: PhaseStarted("run-1", "NOT_A_PHASE"),
             lambda: PhaseCompleted("run-1", "NOT_A_PHASE"),
             lambda: PhaseFailed("run-1", "NOT_A_PHASE", "failed"),
-            lambda: PhaseEscalated("run-1", "NOT_A_PHASE", "DESIGN_BUNDLE", "decision-1"),
-            lambda: PhaseEscalated("run-1", "TDD_BUNDLE", "NOT_A_PHASE", "decision-1"),
-            lambda: PhaseRecoveryStarted("run-1", "NOT_A_PHASE", "EXPLORER_DISCOVERY", "reason"),
-            lambda: PhaseRecoveryStarted("run-1", "EXPLORER_DECISION", "NOT_A_PHASE", "reason"),
+            lambda: EscalationRaised("run-1", "issue-1", "NOT_A_PHASE", "DESIGN_GAP", "reason"),
+            lambda: EscalationResolved("run-1", "issue-1", "REWIND", "NOT_A_PHASE"),
             lambda: PhaseRetryStarted("run-1", "NOT_A_PHASE"),
             lambda: RunView("run-1", "Fix", "RUNNING", "SDD", current_phase="NOT_A_PHASE"),
             lambda: PendingDecisionView("decision-1", "NOT_A_PHASE", "Choose", "now"),

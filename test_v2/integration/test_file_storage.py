@@ -65,7 +65,7 @@ class FileStateStoreIntegrationTests(unittest.TestCase):
 
     def test_unknown_status_or_phase_fails_closed(self) -> None:
         base = {
-            "schema_version": 1,
+            "schema_version": 2,
             "run": {
                 "run_id": "bad-enum",
                 "request": "Fix tests",
@@ -102,7 +102,7 @@ class FileStateStoreIntegrationTests(unittest.TestCase):
             path.write_text(
                 json.dumps(
                     {
-                        "schema_version": 1,
+                        "schema_version": 2,
                         "run": {
                             "run_id": "bad-domain",
                             "request": "Fix tests",

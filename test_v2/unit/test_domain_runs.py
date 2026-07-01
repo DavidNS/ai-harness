@@ -163,12 +163,19 @@ class RunDomainTests(unittest.TestCase):
         error = ErrorRecord("E001", "failed", phase=PhaseName.EXPLORE_BUNDLE.value, timestamp=TIMESTAMP)
 
         self.assertEqual(TaskStatus.IN_PROGRESS, task.status)
+        self.assertEqual(0, task.attempts)
+        self.assertIsNone(task.last_failure)
+        updated_task = task.replace(attempts=1, last_failure="failed")
+        self.assertEqual(1, updated_task.attempts)
+        self.assertEqual("failed", updated_task.last_failure)
         self.assertEqual("E001", error.code)
 
         invalid_cases = (
             lambda: TaskSummary("", "Implement"),
             lambda: TaskSummary("task-1", ""),
             lambda: TaskSummary("task-1", "Implement", "UNKNOWN"),
+            lambda: TaskSummary("task-1", "Implement", attempts=-1),
+            lambda: TaskSummary("task-1", "Implement", last_failure=""),
             lambda: ErrorRecord("", "failed", timestamp=TIMESTAMP),
             lambda: ErrorRecord("E001", "", timestamp=TIMESTAMP),
             lambda: ErrorRecord("E001", "failed", timestamp=""),

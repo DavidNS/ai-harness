@@ -12,6 +12,7 @@ from typing import Any
 
 from harness_v2.backend.domain.decisions import DecisionAction, DecisionEffect, DecisionRecord, PendingDecision
 from harness_v2.backend.domain.errors import DomainValidationError, ErrorRecord
+from harness_v2.backend.domain.escalation import EscalationCategory
 from harness_v2.backend.domain.lifecycle import PhaseName, RunStatus, RunStrategy
 from harness_v2.backend.domain.runs import RunRecord
 from harness_v2.backend.domain.tasks import TaskStatus, TaskSummary
@@ -23,7 +24,7 @@ from harness_v2.backend.ports.artifact_store import (
 )
 from harness_v2.backend.ports.state_store import StateNotFoundError, StateStoreCorruptionError, StateStoreError
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 _ACTIVE_STATUSES = {RunStatus.PENDING, RunStatus.RUNNING, RunStatus.WAITING_FOR_USER}
 _TERMINAL_STATUSES = {RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED}
 
@@ -226,7 +227,7 @@ def _decision_to_mapping(decision: PendingDecision | None) -> dict[str, Any] | N
         "options": list(decision.options),
         "effects": [_decision_effect_to_mapping(effect) for effect in decision.effects],
         "default_action": decision.default_action.value,
-        "default_target_phase": decision.default_target_phase.value if decision.default_target_phase else None,
+        "default_category": decision.default_category.value if decision.default_category else None,
     }
 
 
@@ -234,7 +235,7 @@ def _decision_effect_to_mapping(effect: DecisionEffect) -> dict[str, Any]:
     return {
         "option": effect.option,
         "action": effect.action.value,
-        "target_phase": effect.target_phase.value if effect.target_phase else None,
+        "category": effect.category.value if effect.category else None,
     }
 
 
@@ -249,12 +250,18 @@ def _decision_record_to_mapping(decision: DecisionRecord) -> dict[str, Any]:
         "options": list(decision.options),
         "effects": [_decision_effect_to_mapping(effect) for effect in decision.effects],
         "default_action": decision.default_action.value,
-        "default_target_phase": decision.default_target_phase.value if decision.default_target_phase else None,
+        "default_category": decision.default_category.value if decision.default_category else None,
     }
 
 
 def _task_to_mapping(task: TaskSummary) -> dict[str, Any]:
-    return {"task_id": task.task_id, "title": task.title, "status": task.status.value}
+    return {
+        "task_id": task.task_id,
+        "title": task.title,
+        "status": task.status.value,
+        "attempts": task.attempts,
+        "last_failure": task.last_failure,
+    }
 
 
 def _error_to_mapping(error: ErrorRecord) -> dict[str, Any]:
@@ -303,18 +310,18 @@ def _decision_from_mapping(data: object) -> PendingDecision | None:
         options=tuple(data.get("options", ())),
         effects=tuple(_decision_effect_from_mapping(item) for item in data.get("effects", ())),
         default_action=DecisionAction(data.get("default_action", "CONTINUE")),
-        default_target_phase=PhaseName(data["default_target_phase"]) if data.get("default_target_phase") is not None else None,
+        default_category=EscalationCategory(data["default_category"]) if data.get("default_category") is not None else None,
     )
 
 
 def _decision_effect_from_mapping(data: object) -> DecisionEffect:
     if not isinstance(data, dict):
         raise StateStoreCorruptionError("decision effect must be an object")
-    target = data.get("target_phase")
+    category = data.get("category")
     return DecisionEffect(
         option=data["option"],
         action=DecisionAction(data["action"]),
-        target_phase=PhaseName(target) if target is not None else None,
+        category=EscalationCategory(category) if category is not None else None,
     )
 
 
@@ -331,14 +338,20 @@ def _decision_record_from_mapping(data: object) -> DecisionRecord:
         options=tuple(data.get("options", ())),
         effects=tuple(_decision_effect_from_mapping(item) for item in data.get("effects", ())),
         default_action=DecisionAction(data.get("default_action", "CONTINUE")),
-        default_target_phase=PhaseName(data["default_target_phase"]) if data.get("default_target_phase") is not None else None,
+        default_category=EscalationCategory(data["default_category"]) if data.get("default_category") is not None else None,
     )
 
 
 def _task_from_mapping(data: object) -> TaskSummary:
     if not isinstance(data, dict):
         raise StateStoreCorruptionError("task summary must be an object")
-    return TaskSummary(task_id=data["task_id"], title=data["title"], status=TaskStatus(data["status"]))
+    return TaskSummary(
+        task_id=data["task_id"],
+        title=data["title"],
+        status=TaskStatus(data["status"]),
+        attempts=int(data.get("attempts", 0)),
+        last_failure=data.get("last_failure"),
+    )
 
 
 def _error_from_mapping(data: object) -> ErrorRecord:

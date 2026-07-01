@@ -20,6 +20,8 @@ class InProcessHost:
         state_store: StateStorePort | None = None,
         state_root: Path | str | None = None,
         event_sink: EventSinkPort | None = None,
+        working_directory: Path | str | None = None,
+        allow_repository_mutation: bool = False,
     ) -> None:
         configured = sum(value is not None for value in (service, state_store, state_root))
         if configured > 1:
@@ -27,11 +29,23 @@ class InProcessHost:
         if service is not None:
             if event_sink is not None:
                 raise ValueError("event_sink cannot be combined with an injected service")
+            if working_directory is not None or allow_repository_mutation:
+                raise ValueError("runtime TDD options cannot be combined with an injected service")
             self._service = service
         elif state_root is not None:
-            self._service = build_file_backed_service(state_root, event_sink=event_sink)
+            self._service = build_file_backed_service(
+                state_root,
+                event_sink=event_sink,
+                working_directory=working_directory,
+                allow_repository_mutation=allow_repository_mutation,
+            )
         else:
-            self._service = build_memory_service(state_store, event_sink=event_sink)
+            self._service = build_memory_service(
+                state_store,
+                event_sink=event_sink,
+                working_directory=working_directory,
+                allow_repository_mutation=allow_repository_mutation,
+            )
 
     def execute(self, command: Command) -> CommandResult:
         return self._service.execute(command)

@@ -1,0 +1,10 @@
+{
+  "commands": [],
+  "mcp_tools": [],
+  "paths": [
+    {"mode": "write", "pattern": "**"}
+  ],
+  "phase": "tdd_implement",
+  "schema_version": 1,
+  "skills": []
+}

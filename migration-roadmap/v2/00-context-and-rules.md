@@ -96,6 +96,36 @@ Do not introduce the daemon first. The daemon is a host, not the backend. The
 backend application core must be usable in-process before it is exposed through
 a local server.
 
+## Migration Scope Boundaries
+
+The v2 migration is responsible for architecture boundaries and deterministic
+backend behavior, not for proving external-provider or production-security
+properties.
+
+In scope:
+
+- keep side effects behind explicit backend ports and host wiring;
+- make provider, repository, filesystem, storage, and tool boundaries visible;
+- support fake, scripted, and fixture-backed tests that exercise backend flows;
+- keep defaults fail-closed when a risky capability is not explicitly enabled;
+- document where a boundary is intentionally coarse because an adapter cannot
+  enforce a narrower contract yet.
+
+Out of scope for this migration:
+
+- granular sandbox/security design for real model providers beyond the current
+  capability projection available in adapters;
+- end-to-end tests that invoke real Codex, Claude, remote git, remote CI, or any
+  other external service;
+- guarantees that a real provider obeys `touched_paths` before the backend
+  observes and validates the resulting diff;
+- production hardening of provider workspaces, credentials, or OS-level
+  isolation.
+
+A migration stage may expose an opt-in capability for manual or later external
+validation, but automated migration acceptance must not depend on real external
+providers or networked services.
+
 ## Cross-Stage Checkpoints
 
 Every stage must answer these questions before moving on:
@@ -110,6 +140,37 @@ Every stage must answer these questions before moving on:
 - Are artifacts recorded through a backend-controlled contract?
 
 If the answer is no, stop and fix the boundary before adding more features.
+
+## Escalation Contract
+
+Escalation is backend/application policy, not phase authority.
+
+Phases, bundles, worker services, and subsystems report blocked work as a
+descriptive escalation issue. They must not choose the lifecycle destination.
+
+Use this split:
+
+- detector: phase, bundle, TDD loop, worker validation, or adapter boundary;
+- report: `EscalationIssue` with origin phase, category, reason, and evidence;
+- policy: `EscalationPolicyService` resolves the issue to continue, ask the
+  user, rewind, or fail;
+- transition: orchestrator/application code updates authoritative run state and
+  invalidates artifacts through backend ports.
+
+User decisions follow the same rule. A decision answer may map to an escalation
+category, but the pending decision and its effects do not carry a target phase.
+Only the policy resolution may contain a target phase.
+
+Examples:
+
+- missing user/product context -> ask the user;
+- missing or stale exploration evidence -> rewind to the appropriate discovery
+  phase;
+- requirements gap -> rewind to `SPEC_BUNDLE`;
+- design gap -> rewind to `DESIGN_BUNDLE`;
+- task plan gap -> rewind to `TASKS_BUNDLE`;
+- contract or infrastructure failure -> fail closed unless a narrower recovery
+  policy exists.
 
 ## Test Progression
 

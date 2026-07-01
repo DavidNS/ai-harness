@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 import tempfile
@@ -9,6 +10,7 @@ from pathlib import Path
 from harness_v2.adapters.storage import FileArtifactStore, FileStateStore
 from harness_v2.backend.domain.decisions import DecisionAction, DecisionEffect, PendingDecision
 from harness_v2.backend.domain.errors import ErrorRecord
+from harness_v2.backend.domain.escalation import EscalationCategory
 from harness_v2.backend.domain.lifecycle import PhaseName, RunStatus, RunStrategy
 from harness_v2.backend.domain.runs import RunRecord
 
@@ -87,8 +89,45 @@ class CliIntegrationTests(unittest.TestCase):
             self.assertIn("Current phase: DESIGN_BUNDLE", outputs[2])
             self.assertIn("Current phase: TASKS_BUNDLE", outputs[3])
             self.assertIn("Current phase: TDD_BUNDLE", outputs[4])
-            self.assertIn("Status: COMPLETED", outputs[5])
-            self.assertIn("Event: RunCompleted", outputs[5])
+            self.assertIn("Status: FAILED", outputs[5])
+            self.assertIn("Event: EscalationRaised issue=tdd-loop-blocked phase=TDD_BUNDLE category=VALIDATION_BLOCKED", outputs[5])
+            self.assertIn("Event: PhaseFailed phase=TDD_BUNDLE", outputs[5])
+
+    def test_cli_tdd_with_mutation_opt_in_uses_configured_working_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            state_root = Path(temp) / "runtime"
+            workdir = Path(temp) / "work"
+            workdir.mkdir()
+            started = self.run_cli(
+                state_root,
+                "--working-directory",
+                str(workdir),
+                "--allow-repository-mutation",
+                "start",
+                "Fix",
+                "tests",
+            )
+            self.assertEqual(0, started.returncode, started.stderr)
+            run_id = next(line.split(": ", 1)[1] for line in started.stdout.splitlines() if line.startswith("Run: "))
+
+            outputs = []
+            for _ in range(6):
+                resumed = self.run_cli(
+                    state_root,
+                    "--working-directory",
+                    str(workdir),
+                    "--allow-repository-mutation",
+                    "resume",
+                    run_id,
+                )
+                self.assertEqual(0, resumed.returncode, resumed.stderr)
+                outputs.append(resumed.stdout)
+
+            self.assertIn("Current phase: TDD_BUNDLE", outputs[4])
+            self.assertIn("Status: FAILED", outputs[5])
+            self.assertIn("category=IMPLEMENTATION_BLOCKED", outputs[5])
+            tdd_results = json.loads(FileArtifactStore(state_root).read(run_id, "published/tdd-results.json"))
+            self.assertNotIn("mutation-enabled", tdd_results["blocked_reason"])
 
     def test_cli_start_with_explore_strategy_resume_completes_run(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -188,7 +227,7 @@ class CliIntegrationTests(unittest.TestCase):
                         prompt="Continue or revisit the spec?",
                         created_at=TIMESTAMP,
                         options=("continue", "respec"),
-                        effects=(DecisionEffect("respec", DecisionAction.ESCALATE, PhaseName.SPEC_BUNDLE),),
+                        effects=(DecisionEffect("respec", DecisionAction.ESCALATE, EscalationCategory.REQUIREMENTS_GAP),),
                     ),
                 )
             )
@@ -204,7 +243,7 @@ class CliIntegrationTests(unittest.TestCase):
             self.assertEqual(0, decided.returncode, decided.stderr)
             self.assertIn("Status: RUNNING", decided.stdout)
             self.assertIn("Current phase: SPEC_BUNDLE", decided.stdout)
-            self.assertIn("Event: PhaseEscalated from=DESIGN_BUNDLE target=SPEC_BUNDLE", decided.stdout)
+            self.assertIn("Event: EscalationResolved issue=decision-decision-1 action=REWIND target=SPEC_BUNDLE", decided.stdout)
             self.assertEqual(PhaseName.SPEC_BUNDLE, store.get("run-waiting").current_phase)
 
 
