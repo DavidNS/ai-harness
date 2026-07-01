@@ -65,7 +65,12 @@ def check_direct_runner(checkout: Path = CHECKOUT) -> list[Check]:
     harness = checkout / "harness"
     runner = harness / "run.py"
     launcher = checkout / "ai-harness"
-    checks = [Check("runner", runner.is_file(), str(runner)), Check("launcher", launcher.is_file(), str(launcher))]
+    ui_launcher = checkout / "ai-harness-ui"
+    checks = [
+        Check("runner", runner.is_file(), str(runner)),
+        Check("launcher:aih", launcher.is_file(), str(launcher)),
+        Check("launcher:aihui", ui_launcher.is_file(), str(ui_launcher)),
+    ]
     for dirname in REQUIRED_HARNESS_DIRS:
         path = harness / dirname
         checks.append(Check(f"resource:{dirname}", path.is_dir(), str(path)))
@@ -157,7 +162,7 @@ def _parser() -> argparse.ArgumentParser:
     scope = parser.add_mutually_exclusive_group(required=True)
     scope.add_argument("--global", dest="global_scope", action="store_true")
     scope.add_argument("--project", nargs="?", const=".", metavar="PATH")
-    parser.add_argument("--launcher", action="store_true", help="also check the aih shortcut")
+    parser.add_argument("--launcher", action="store_true", help="also check the aih and aihui shortcuts")
     parser.add_argument("--bin-dir", type=Path, help="directory containing launcher shortcuts (default: ~/.local/bin)")
     parser.add_argument(
         "--runtime-project",

@@ -92,12 +92,16 @@ class IsolatedInstallationAcceptanceTests(unittest.TestCase):
             self.assertEqual(0, result.returncode, result.stderr)
             assert_bootstrap(self, home / ".codex/AGENTS.md", "codex")
             shortcut = home / ".local/bin/aih"
+            ui_shortcut = home / ".local/bin/aihui"
             assert_shortcut(self, shortcut)
+            assert_shortcut(self, ui_shortcut)
+            self.assertIn("ai-harness-ui", ui_shortcut.read_text(encoding="utf-8"))
 
             removed = run_script(UNINSTALL, "--codex", "--global", "--launcher", cwd=repository, home=home)
             self.assertEqual(0, removed.returncode, removed.stderr)
             self.assertFalse((home / ".codex/AGENTS.md").exists())
             self.assertFalse(shortcut.exists())
+            self.assertFalse(ui_shortcut.exists())
 
     def test_project_install_uses_repository_local_bootstraps(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

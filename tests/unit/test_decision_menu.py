@@ -16,7 +16,7 @@ sys.path.insert(0, str(ROOT / "harness"))
 
 
 def load_launcher():
-    return importlib.import_module("harness.cli.commands")
+    return importlib.import_module("harness.cli.console_app")
 
 
 def load_ui():
@@ -25,6 +25,10 @@ def load_ui():
 
 def load_bootstrap():
     return importlib.import_module("harness.cli.bootstrap")
+
+
+def load_model_prompts():
+    return importlib.import_module("harness.cli.model_prompts")
 
 
 def decision_request():
@@ -49,6 +53,18 @@ def decision_request():
         "ranked_paths": ["explorer", "sdd_low", "sdd_high"],
         "allows_freeform": True,
     }
+
+
+def ui_namespace(launcher, **overrides):
+    values = {
+        "cwd": Path("/repo"),
+        "provider": "local",
+        "verbose": False,
+        "dry_run": False,
+        "_interactive_ui": True,
+    }
+    values.update(overrides)
+    return launcher.argparse.Namespace(**values)
 
 
 class DecisionMenuTests(unittest.TestCase):
@@ -114,46 +130,16 @@ class DecisionMenuTests(unittest.TestCase):
         self.assertIn("Selected free-form answer.", stderr.getvalue())
 
 
-    def test_slash_exit_raises_clean_launcher_cancel(self) -> None:
+    def test_slash_looking_request_input_is_preserved_literally(self) -> None:
         launcher = load_launcher()
-
-        with self.assertRaises(launcher._LauncherExit):
-            launcher._handle_slash_command("/exit", kind="request")
-
-    def test_slash_help_prints_controls_and_reprompts(self) -> None:
-        launcher = load_launcher()
-        stderr = io.StringIO()
-
-        with contextlib.redirect_stderr(stderr):
-            handled = launcher._handle_slash_command("/help", kind="action")
-
-        self.assertTrue(handled)
-        output = stderr.getvalue()
-        self.assertIn("Controls:", output)
-        self.assertIn("/exit", output)
-
-    def test_unknown_slash_command_is_invalid_interactive_input(self) -> None:
-        launcher = load_launcher()
-        stderr = io.StringIO()
-
-        with contextlib.redirect_stderr(stderr):
-            handled = launcher._handle_slash_command("/wat", kind="request")
-
-        self.assertTrue(handled)
-        self.assertIn("Unknown slash command: /wat", stderr.getvalue())
-
-    def test_interactive_request_help_reprompts_and_preserves_dot_fallback(self) -> None:
-        launcher = load_launcher()
-        stderr = io.StringIO()
         choices = iter(["/help", "Fix tests", "."])
 
-        with mock.patch("builtins.input", side_effect=lambda _prompt="": next(choices)), contextlib.redirect_stderr(stderr):
+        with mock.patch("builtins.input", side_effect=lambda _prompt="": next(choices)), contextlib.redirect_stderr(io.StringIO()):
             request = launcher._interactive_request()
 
-        self.assertEqual("Fix tests", request)
-        self.assertIn("Controls:", stderr.getvalue())
+        self.assertEqual("/help\nFix tests", request)
 
-    def test_decision_help_reprompts_without_selecting(self) -> None:
+    def test_decision_slash_help_is_invalid_menu_input(self) -> None:
         launcher = load_launcher()
         stderr = io.StringIO()
         choices = iter(["/help", "1"])
@@ -163,27 +149,27 @@ class DecisionMenuTests(unittest.TestCase):
 
         self.assertIsNone(answer)
         self.assertEqual("explorer", selected)
-        self.assertIn("Controls:", stderr.getvalue())
+        self.assertIn("Enter a menu number.", stderr.getvalue())
 
 
     def test_model_prompt_prefers_configured_model_over_provider_default(self) -> None:
-        launcher = load_bootstrap()
+        launcher = load_model_prompts()
         with mock.patch.object(launcher, "_interactive_stdin", return_value=False), \
             mock.patch.dict(launcher.os.environ, {"AI_HARNESS_MODEL": "gpt-5"}, clear=False):
             self.assertEqual("gpt-5", launcher._prompt_for_model("codex"))
 
     def test_model_prompt_accepts_explicit_override_without_prompting(self) -> None:
-        launcher = load_bootstrap()
+        launcher = load_model_prompts()
         self.assertEqual("custom-model", launcher._prompt_for_model("codex", explicit="custom-model"))
 
     def test_model_prompt_uses_claude_specific_config_noninteractive(self) -> None:
-        launcher = load_bootstrap()
+        launcher = load_model_prompts()
         with mock.patch.object(launcher, "_interactive_stdin", return_value=False), \
             mock.patch.dict(launcher.os.environ, {"AI_HARNESS_CLAUDE_MODEL": "sonnet"}, clear=True):
             self.assertEqual("sonnet", launcher._prompt_for_model("claude"))
 
     def test_model_prompt_lists_provider_choices_and_custom_entry(self) -> None:
-        launcher = load_bootstrap()
+        launcher = load_model_prompts()
         selected_items = []
 
         def choose(_title_lines, items, **_kwargs):
@@ -202,7 +188,7 @@ class DecisionMenuTests(unittest.TestCase):
         self.assertEqual("Enter custom model", selected_items[-1].label)
 
     def test_model_prompt_dedupes_configured_choice(self) -> None:
-        launcher = load_bootstrap()
+        launcher = load_model_prompts()
         selected_items = []
 
         def choose(_title_lines, items, **_kwargs):
@@ -219,14 +205,14 @@ class DecisionMenuTests(unittest.TestCase):
         self.assertEqual(["Use configured model [gpt-5]", "Use provider default", "Enter custom model"], [item.label for item in selected_items])
 
     def test_reasoning_effort_prompt_is_codex_only(self) -> None:
-        launcher = load_bootstrap()
+        launcher = load_model_prompts()
         with mock.patch.object(launcher, "_interactive_stdin", return_value=False), \
             mock.patch.dict(launcher.os.environ, {"AI_HARNESS_CODEX_REASONING_EFFORT": "high"}, clear=True):
             self.assertEqual("high", launcher._prompt_for_reasoning_effort("codex"))
             self.assertIsNone(launcher._prompt_for_reasoning_effort("claude"))
 
     def test_reasoning_effort_prompt_lists_efforts(self) -> None:
-        launcher = load_bootstrap()
+        launcher = load_model_prompts()
         selected_items = []
 
         def choose(_title_lines, items, **_kwargs):
@@ -243,12 +229,17 @@ class DecisionMenuTests(unittest.TestCase):
         self.assertIn("Medium", [item.label for item in selected_items])
         self.assertIn("Extra high", [item.label for item in selected_items])
 
-    def test_decision_exit_cancels_cleanly(self) -> None:
+    def test_decision_slash_exit_is_invalid_menu_input(self) -> None:
         launcher = load_launcher()
+        stderr = io.StringIO()
+        choices = iter(["/exit", "1"])
 
-        with mock.patch("builtins.input", return_value="/exit"):
-            with self.assertRaises(launcher._LauncherExit):
-                launcher._prompt_for_decision("run-1", decision_request())
+        with mock.patch("builtins.input", side_effect=lambda _prompt="": next(choices)), contextlib.redirect_stderr(stderr):
+            answer, selected = launcher._prompt_for_decision("run-1", decision_request())
+
+        self.assertIsNone(answer)
+        self.assertEqual("explorer", selected)
+        self.assertIn("Enter a menu number.", stderr.getvalue())
 
     def test_menu_prompt_tty_arrow_down_enter_selects_highlighted_item(self) -> None:
         launcher = load_ui()
@@ -292,21 +283,21 @@ class DecisionMenuTests(unittest.TestCase):
 
         self.assertEqual("H\ni", value)
 
-    def test_interactive_request_help_after_partial_line_preserves_text(self) -> None:
+    def test_interactive_request_preserves_slash_lines(self) -> None:
         launcher = load_launcher()
         choices = iter(["First line", "/help", "Second line", "."])
 
         with mock.patch("builtins.input", side_effect=lambda _prompt="": next(choices)), contextlib.redirect_stderr(io.StringIO()):
             request = launcher._interactive_request()
 
-        self.assertEqual("First line\nSecond line", request)
+        self.assertEqual("First line\n/help\nSecond line", request)
 
 
 
 
     def test_console_model_command_stores_selected_model(self) -> None:
         launcher = load_launcher()
-        namespace = launcher.argparse.Namespace(cwd=Path("/repo"), provider="codex", verbose=False, dry_run=False)
+        namespace = ui_namespace(launcher, provider="codex")
         stderr = io.StringIO()
 
         with mock.patch.object(launcher, "_prompt_for_model", return_value="gpt-5"), \
@@ -320,61 +311,53 @@ class DecisionMenuTests(unittest.TestCase):
         self.assertIn("Selected model: gpt-5", stderr.getvalue())
         self.assertIn("Selected reasoning effort: high", stderr.getvalue())
 
-    def test_console_model_command_accepts_slash_alias(self) -> None:
+    def test_console_slash_model_is_literal_request(self) -> None:
         launcher = load_launcher()
-        namespace = launcher.argparse.Namespace(cwd=Path("/repo"), provider="codex", verbose=False, dry_run=False)
-        stderr = io.StringIO()
+        namespace = ui_namespace(launcher, provider="codex")
 
-        with mock.patch.object(launcher, "_prompt_for_model", return_value="gpt-5"), \
-            mock.patch.object(launcher, "_prompt_for_reasoning_effort", return_value=None), \
-            contextlib.redirect_stderr(stderr):
+        with mock.patch.object(launcher, "_unfinished_runs", return_value=[]), \
+            mock.patch.object(launcher, "_start_job", return_value=0) as start_job:
             code = launcher._console_command(namespace, "/model")
 
         self.assertEqual(0, code)
-        self.assertEqual("gpt-5", namespace.model)
-        self.assertIn("Selected model: gpt-5", stderr.getvalue())
+        start_job.assert_called_once()
+        self.assertEqual("/model", start_job.call_args.kwargs["request_override"])
 
-    def test_start_request_prompt_accepts_model_command_before_request(self) -> None:
+    def test_start_request_prompt_preserves_slash_lines(self) -> None:
         launcher = load_launcher()
-        namespace = launcher.argparse.Namespace(cwd=Path("/repo"), provider="codex", verbose=False, dry_run=False)
-        stderr = io.StringIO()
+        namespace = ui_namespace(launcher, provider="codex")
         choices = iter(["/model", "Fix tests", "."])
 
-        with mock.patch("builtins.input", side_effect=lambda _prompt="": next(choices)), \
-            mock.patch.object(launcher, "_prompt_for_model", return_value="gpt-5"), \
-            mock.patch.object(launcher, "_prompt_for_reasoning_effort", return_value="high"), \
-            contextlib.redirect_stderr(stderr):
+        with mock.patch("builtins.input", side_effect=lambda _prompt="": next(choices)), contextlib.redirect_stderr(io.StringIO()):
             request = launcher._interactive_start_request(namespace)
 
-        self.assertEqual("Fix tests", request)
-        self.assertEqual("gpt-5", namespace.model)
-        self.assertEqual("high", namespace.reasoning_effort)
-        self.assertIn("Selected model: gpt-5", stderr.getvalue())
+        self.assertEqual("/model\nFix tests", request)
+        self.assertIsNone(namespace.model)
 
     def test_console_ci_mode_command_stores_selected_mode(self) -> None:
         launcher = load_launcher()
-        namespace = launcher.argparse.Namespace(cwd=Path("/repo"), provider="local", verbose=False, dry_run=False)
+        namespace = ui_namespace(launcher)
         stderr = io.StringIO()
 
         with contextlib.redirect_stderr(stderr):
-            code = launcher._console_command(namespace, "/ci-mode branch")
+            code = launcher._console_command(namespace, "ci-mode branch")
 
         self.assertEqual(0, code)
         self.assertEqual("branch", namespace.github_ci_mode)
         self.assertIn("Selected GitHub CI mode: branch", stderr.getvalue())
 
-    def test_console_slash_status_dispatches_action(self) -> None:
+    def test_console_status_dispatches_action(self) -> None:
         launcher = load_launcher()
-        namespace = launcher.argparse.Namespace(cwd=Path("/repo"), provider="local", verbose=False, dry_run=False)
+        namespace = ui_namespace(launcher)
         with mock.patch.object(launcher, "_run", return_value=0) as run:
-            code = launcher._console_command(namespace, "/status")
+            code = launcher._console_command(namespace, "status")
 
         self.assertEqual(0, code)
         self.assertEqual(["--cwd", "/repo", "--status"], run.call_args.args[0])
 
     def test_console_menu_uses_action_registry(self) -> None:
         launcher = load_launcher()
-        namespace = launcher.argparse.Namespace(cwd=Path("/repo"), provider="local", verbose=False, dry_run=False)
+        namespace = ui_namespace(launcher)
         selected_items = []
 
         def choose(_title_lines, items, **_kwargs):
@@ -383,7 +366,7 @@ class DecisionMenuTests(unittest.TestCase):
 
         with mock.patch.object(launcher, "_menu_prompt", side_effect=choose), \
             mock.patch.object(launcher, "_run", return_value=0) as run:
-            code = launcher._console_command(namespace, "/")
+            code = launcher._console_command(namespace, "")
 
         self.assertEqual(0, code)
         self.assertIn("status", [item.value for item in selected_items])
@@ -394,7 +377,7 @@ class DecisionMenuTests(unittest.TestCase):
 
     def test_console_install_packages_delegates_explicit_optional_groups(self) -> None:
         launcher = load_launcher()
-        namespace = launcher.argparse.Namespace(cwd=Path("/repo"), provider="local", verbose=False, dry_run=False)
+        namespace = ui_namespace(launcher)
 
         with mock.patch.object(launcher, "_run", return_value=0) as run:
             code = launcher._console_command(namespace, "install-packages security github --dry-install")
@@ -407,7 +390,7 @@ class DecisionMenuTests(unittest.TestCase):
 
     def test_console_install_packages_prompts_for_optionals_when_interactive(self) -> None:
         launcher = load_launcher()
-        namespace = launcher.argparse.Namespace(cwd=Path("/repo"), provider="local", verbose=False, dry_run=False)
+        namespace = ui_namespace(launcher)
 
         def choose(_title_lines, items, **_kwargs):
             return [item for item in items if item.value in {"security", "github"}]
@@ -424,38 +407,36 @@ class DecisionMenuTests(unittest.TestCase):
             run.call_args.args[0],
         )
 
-    def test_console_unknown_slash_command_does_not_start_request(self) -> None:
+    def test_console_unknown_slash_text_starts_literal_request(self) -> None:
         launcher = load_launcher()
-        namespace = launcher.argparse.Namespace(cwd=Path("/repo"), provider="local", verbose=False, dry_run=False)
-        stderr = io.StringIO()
-        with mock.patch.object(launcher, "_start") as start, contextlib.redirect_stderr(stderr):
+        namespace = ui_namespace(launcher)
+
+        with mock.patch.object(launcher, "_unfinished_runs", return_value=[]), \
+            mock.patch.object(launcher, "_start_job", return_value=0) as start_job:
             code = launcher._console_command(namespace, "/wat")
 
         self.assertEqual(0, code)
-        start.assert_not_called()
-        self.assertIn("Unknown slash command: /wat", stderr.getvalue())
+        start_job.assert_called_once()
+        self.assertEqual("/wat", start_job.call_args.kwargs["request_override"])
 
-    def test_console_loop_reports_value_error_and_keeps_prompting(self) -> None:
+    def test_console_loop_exits_on_exit_command(self) -> None:
         launcher = load_launcher()
-        namespace = launcher.argparse.Namespace(cwd=Path("/repo"), provider="local", verbose=False, dry_run=False)
-        choices = iter(["resume", "exit"])
+        namespace = ui_namespace(launcher)
+        choices = iter(["exit"])
         stderr = io.StringIO()
 
         with mock.patch.object(launcher, "_startup_recovery", return_value=None), \
-            mock.patch("harness.cli.console_controller.interactive_console_line", side_effect=lambda _deps: next(choices)), \
-            mock.patch.object(launcher.ConsoleController, "console_command", side_effect=[ValueError("multiple unfinished runs require a run ID"), launcher._LauncherExit]), \
+            mock.patch("harness.cli.console_controller.interactive_console_line", side_effect=lambda _deps, _prompt="aihui> ": next(choices)), \
             contextlib.redirect_stderr(stderr):
             code = launcher._console_loop(namespace)
 
         self.assertEqual(0, code)
-        output = stderr.getvalue()
-        self.assertIn("multiple unfinished runs require a run ID", output)
-        self.assertIn("AI Code Harness console", output)
+        self.assertIn("AI Code Harness console", stderr.getvalue())
 
 
     def test_start_forwards_selected_reasoning_effort(self) -> None:
         launcher = load_launcher()
-        namespace = launcher.argparse.Namespace(cwd=Path("/repo"), provider="codex", verbose=False, dry_run=False, prompt_file=None, model="gpt-5.5", reasoning_effort="xhigh")
+        namespace = ui_namespace(launcher, provider="codex", prompt_file=None, model="gpt-5.5", reasoning_effort="xhigh")
         with mock.patch.object(launcher.sys.stdin, "isatty", return_value=False), \
             mock.patch.object(launcher, "_run_and_follow_decisions", return_value=0) as run:
             code = launcher._start(namespace, ["Fix tests"])
@@ -469,7 +450,7 @@ class DecisionMenuTests(unittest.TestCase):
 
     def test_start_forwards_selected_github_ci_mode(self) -> None:
         launcher = load_launcher()
-        namespace = launcher.argparse.Namespace(cwd=Path("/repo"), provider="local", verbose=False, dry_run=False, prompt_file=None, github_ci_mode="branch")
+        namespace = ui_namespace(launcher, prompt_file=None, github_ci_mode="branch")
         with mock.patch.object(launcher.sys.stdin, "isatty", return_value=False), \
             mock.patch.object(launcher, "_run_and_follow_decisions", return_value=0) as run:
             code = launcher._start(namespace, ["Fix tests"])
@@ -481,7 +462,7 @@ class DecisionMenuTests(unittest.TestCase):
 
     def test_run_and_follow_decisions_resumes_single_waiting_run(self) -> None:
         launcher = load_launcher()
-        namespace = launcher.argparse.Namespace(cwd=Path("/repo"), provider="local", verbose=False, dry_run=False)
+        namespace = ui_namespace(launcher)
         current = Path("/tmp/current-run")
         state = {"run_id": "run-1", "status": "waiting_for_user", "current_phase": "DESIGN"}
         waiting = [(current, state)]
@@ -504,7 +485,7 @@ class DecisionMenuTests(unittest.TestCase):
 
     def test_resume_forwards_selected_github_ci_mode(self) -> None:
         launcher = load_launcher()
-        namespace = launcher.argparse.Namespace(cwd=Path("/repo"), provider="local", verbose=False, dry_run=False, github_ci_mode="branch")
+        namespace = ui_namespace(launcher, github_ci_mode="branch")
         current = Path("/tmp/current-run")
         state = {"run_id": "run-1", "status": "active", "current_phase": "IMPLEMENT"}
 
@@ -606,7 +587,7 @@ class DecisionMenuTests(unittest.TestCase):
 
     def test_run_and_follow_decisions_ignores_preexisting_waiting_run(self) -> None:
         launcher = load_launcher()
-        namespace = launcher.argparse.Namespace(cwd=Path("/repo"), provider="local", verbose=False, dry_run=False)
+        namespace = ui_namespace(launcher)
         stale = (Path("/tmp/current-stale"), {"run_id": "stale", "status": "waiting_for_user"})
 
         with mock.patch.object(launcher, "_run", return_value=0) as run, \
@@ -631,7 +612,7 @@ class DecisionMenuTests(unittest.TestCase):
             )
             (snapshot / "run-title.json").write_text('{"title":"Explore launcher recovery"}\n', encoding="utf-8")
             (snapshot / "published" / "explore-handoff.json").write_text('{"schema_version":1}\n', encoding="utf-8")
-            namespace = launcher.argparse.Namespace(cwd=repository, provider="local", verbose=False, dry_run=False, prompt_file=None)
+            namespace = ui_namespace(launcher, cwd=repository, prompt_file=None)
 
             def choose(_title_lines, items, **_kwargs):
                 return items[0]
@@ -656,34 +637,46 @@ class DecisionMenuTests(unittest.TestCase):
             launcher._console_help()
 
         output = stderr.getvalue()
-        self.assertIn("/status: Show status", output)
-        self.assertIn("/ci-mode: Select GitHub CI mode", output)
-        self.assertIn("/tdd: Run TDD bundle", output)
+        self.assertIn("status: Show status", output)
+        self.assertIn("ci-mode: Select GitHub CI mode", output)
+        self.assertIn("tdd: Run TDD bundle", output)
+        self.assertNotIn("/status", output)
 
-    def test_console_suggestions_filter_and_rank_actions(self) -> None:
+    def test_console_mvu_update_separates_commands_menu_and_requests(self) -> None:
+        from harness.cli.console.model import ConsoleActionSpec, ConsoleModel
+        from harness.cli.console.messages import SubmitLine
+        from harness.cli.console.update import update
+
+        model = ConsoleModel(actions=(ConsoleActionSpec("status", "Show status", "s"),))
+        _, command_effects = update(model, SubmitLine("status"))
+        menu_model, menu_effects = update(model, SubmitLine(""))
+        _, request_effects = update(model, SubmitLine("/status"))
+
+        self.assertEqual("dispatch_action", command_effects[0].kind)
+        self.assertEqual("status", command_effects[0].value)
+        self.assertEqual("menu", menu_model.screen)
+        self.assertEqual("open_menu", menu_effects[0].kind)
+        self.assertEqual("start_request", request_effects[0].kind)
+        self.assertEqual("/status", request_effects[0].value)
+
+    def test_console_action_registry_has_handlers_for_every_action(self) -> None:
+        from harness.cli.console_actions import CONSOLE_ACTIONS
+        from harness.cli.console_controller import handled_console_action_names
+
+        self.assertEqual({action.name for action in CONSOLE_ACTIONS}, handled_console_action_names())
+
+    def test_dispatch_unknown_console_action_does_not_start_request(self) -> None:
         launcher = load_launcher()
+        namespace = ui_namespace(launcher)
+        stderr = io.StringIO()
 
-        self.assertEqual("status", launcher.suggest_console_actions("st")[0].name)
-        self.assertEqual("ci-mode", launcher.suggest_console_actions("github")[0].name)
-        self.assertIn("start", [action.name for action in launcher.suggest_console_actions("")])
+        with contextlib.redirect_stderr(stderr):
+            code = launcher._dispatch_console_action(namespace, "unknown-action", [], "unknown-action")
 
-    def test_parse_console_line_separates_actions_requests_and_errors(self) -> None:
-        launcher = load_launcher()
+        self.assertEqual(2, code)
+        self.assertIn("unknown console action", stderr.getvalue())
 
-        action = launcher.parse_console_line("/ci-mode branch")
-        request = launcher.parse_console_line("Fix tests")
-        unknown = launcher.parse_console_line("/wat")
-        broken = launcher.parse_console_line("/status '")
-
-        self.assertEqual("action", action.kind)
-        self.assertEqual("ci-mode", action.action.name)
-        self.assertEqual(("branch",), action.args)
-        self.assertEqual("request", request.kind)
-        self.assertEqual("Fix tests", request.request)
-        self.assertEqual("unknown_slash", unknown.kind)
-        self.assertEqual("error", broken.kind)
-
-    def test_console_prompt_slash_suggestions_select_filtered_action(self) -> None:
+    def test_console_prompt_preserves_slash_text(self) -> None:
         launcher = load_launcher()
 
         class DummyRawTerminal:
@@ -697,13 +690,12 @@ class DecisionMenuTests(unittest.TestCase):
         with mock.patch.object(launcher, "_interactive_stdin", return_value=True), \
             mock.patch.object(launcher, "_RawTerminal", DummyRawTerminal), \
             mock.patch.object(launcher, "_read_key", side_effect=lambda: next(keys)), \
-            contextlib.redirect_stderr(io.StringIO()) as stderr:
+            contextlib.redirect_stderr(io.StringIO()):
             line = launcher._interactive_console_line()
 
-        self.assertEqual("/status", line)
-        self.assertIn("/status", stderr.getvalue())
+        self.assertEqual("/st", line)
 
-    def test_console_prompt_slash_enter_opens_menu_contract(self) -> None:
+    def test_console_prompt_blank_line_opens_menu_contract(self) -> None:
         launcher = load_launcher()
 
         class DummyRawTerminal:
@@ -713,14 +705,14 @@ class DecisionMenuTests(unittest.TestCase):
             def __exit__(self, exc_type, exc, tb):
                 return None
 
-        keys = iter(["/", "\n"])
+        keys = iter(["\n"])
         with mock.patch.object(launcher, "_interactive_stdin", return_value=True), \
             mock.patch.object(launcher, "_RawTerminal", DummyRawTerminal), \
             mock.patch.object(launcher, "_read_key", side_effect=lambda: next(keys)), \
             contextlib.redirect_stderr(io.StringIO()):
             line = launcher._interactive_console_line()
 
-        self.assertEqual("/", line)
+        self.assertEqual("", line)
 
     def test_console_prompt_menu_literal_opens_menu_contract(self) -> None:
         launcher = load_launcher()
@@ -741,18 +733,19 @@ class DecisionMenuTests(unittest.TestCase):
 
         self.assertEqual("/menu", line)
 
-    def test_console_prompt_render_clears_stale_suggestion_rows(self) -> None:
+    def test_console_prompt_render_redraws_single_prompt_row(self) -> None:
         launcher = load_launcher()
         stderr = io.StringIO()
 
         with contextlib.redirect_stderr(stderr):
-            previous = launcher._render_console_prompt(["/"], True, 0, 0)
-            current = launcher._render_console_prompt(["/", "z", "z"], True, 0, previous)
+            previous = launcher._render_console_prompt(["F"], 0)
+            current = launcher._render_console_prompt(["F", "i", "x"], previous)
 
         output = stderr.getvalue()
-        self.assertEqual(previous, current)
+        self.assertEqual(1, previous)
+        self.assertEqual(1, current)
+        self.assertIn("aihui> Fix", output)
         self.assertIn(f"\x1b[{previous}F", output)
-        self.assertGreaterEqual(output.count("\x1b[2K"), previous + current)
 
     def test_bootstrap_actions_are_derived_from_top_level_registry(self) -> None:
         bootstrap = load_bootstrap()
@@ -766,7 +759,7 @@ class DecisionMenuTests(unittest.TestCase):
 
     def test_console_plain_request_starts_background_job(self) -> None:
         launcher = load_launcher()
-        namespace = launcher.argparse.Namespace(cwd=Path("/repo"), provider="local", verbose=False, dry_run=False)
+        namespace = ui_namespace(launcher)
 
         with mock.patch.object(launcher, "_unfinished_runs", return_value=[]), \
             mock.patch.object(launcher, "_start_job", return_value=0) as start_job:
@@ -778,7 +771,7 @@ class DecisionMenuTests(unittest.TestCase):
 
     def test_console_blocks_plain_request_when_unfinished_runs_require_selection(self) -> None:
         launcher = load_launcher()
-        namespace = launcher.argparse.Namespace(cwd=Path("/repo"), provider="local", verbose=False, dry_run=False)
+        namespace = ui_namespace(launcher)
         stderr = io.StringIO()
         unfinished = [(Path("/tmp/current-run"), {"run_id": "run-1", "status": "active"})]
 

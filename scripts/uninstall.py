@@ -63,7 +63,7 @@ def _parser() -> argparse.ArgumentParser:
     scope = parser.add_mutually_exclusive_group(required=True)
     scope.add_argument("--global", dest="global_scope", action="store_true")
     scope.add_argument("--project", nargs="?", const=".", metavar="PATH")
-    parser.add_argument("--launcher", action="store_true", help="also remove the aih shortcut if owned")
+    parser.add_argument("--launcher", action="store_true", help="also remove the aih and aihui shortcuts if owned")
     parser.add_argument("--bin-dir", type=Path, help="directory containing launcher shortcuts (default: ~/.local/bin)")
     parser.add_argument("--dry-run", action="store_true")
     return parser

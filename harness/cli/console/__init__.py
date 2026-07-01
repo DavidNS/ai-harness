@@ -1,0 +1,2 @@
+"""Command-driven console frontend."""
+

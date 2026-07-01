@@ -1,4 +1,4 @@
-"""Console controller for interactive launcher commands."""
+"""Console controller effect interpreter."""
 
 from __future__ import annotations
 
@@ -12,22 +12,20 @@ from ai_harness.bundle_inputs import compatible_runs
 from ai_harness.recommended_packages import load_recommended_package_groups
 
 from .backend_client import BackendClient
-from .job_runner import BackgroundJobRunner
 from .bootstrap import GITHUB_CI_MODES, _default_provider
-from .console_actions import (
-    CONSOLE_ACTIONS,
-    ConsoleAction,
-    action_names,
-    parse_console_line,
-    suggest_console_actions,
-    visible_actions,
-)
+from .console.action_plan import ActionPlan, handled_action_names, package_install_args, plan_action, plan_start_request
+from .console.terminal_driver import ConsoleTerminalDriver
+from .console.model import ConsoleModel
+from .console.view import help_lines
+from .console_actions import CONSOLE_ACTIONS, action_specs, actions_by_name
+from .console_session import ConsoleSession
+from .job_runner import BackgroundJobRunner
 from .ui_primitives import _MenuItem
 
 
 StartCallback = Callable[..., int]
 StartJobCallback = Callable[..., int]
-ResumeCallback = Callable[[argparse.Namespace, str | None], int]
+ResumeCallback = Callable[..., int]
 ArchiveCallback = Callable[[argparse.Namespace, str | None], int]
 RefreshCallback = Callable[[argparse.Namespace], None]
 PromptModelCallback = Callable[[str], str | None]
@@ -35,13 +33,10 @@ PromptReasoningCallback = Callable[[str], str | None]
 MenuPromptCallback = Callable[..., _MenuItem]
 MultiSelectPromptCallback = Callable[..., list[_MenuItem]]
 LinePromptCallback = Callable[..., str | None]
-InteractiveRequestCallback = Callable[..., str]
+InteractiveRequestCallback = Callable[[], str]
 ReadKeyCallback = Callable[[], str]
 InteractiveStdinCallback = Callable[[], bool]
 RawTerminalFactory = Callable[[], object]
-
-
-_REQUEST_PROMPT_ACTIONS = {"model", "ci-mode"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,122 +58,195 @@ class ConsoleControllerDependencies:
     launcher_exit: type[BaseException]
 
 
+def handled_console_action_names() -> set[str]:
+    return handled_action_names()
+
+
 class ConsoleController:
     def __init__(self, namespace: argparse.Namespace, backend: BackendClient, deps: ConsoleControllerDependencies, jobs: BackgroundJobRunner | None = None) -> None:
         self.namespace = namespace
+        self.session = ConsoleSession.from_namespace(namespace)
+        self.session.sync_namespace(self.namespace)
         self.backend = backend
         self.deps = deps
         self.jobs = jobs or BackgroundJobRunner(namespace.cwd.resolve())
 
+    def _console_model(self) -> ConsoleModel:
+        return ConsoleModel(actions=action_specs(CONSOLE_ACTIONS))
+
+    def _refresh_recovery_block(self) -> None:
+        self.deps.refresh_recovery_block(self.namespace)
+        self.session.recovery_blocked = bool(getattr(self.namespace, "_recovery_blocked", False))
+        self.session.sync_namespace(self.namespace)
+
     def console_help(self) -> None:
-        print("Controls:", file=sys.stderr)
-        print("  / or /menu: open the action menu", file=sys.stderr)
-        for action in visible_actions(CONSOLE_ACTIONS):
-            aliases = ", ".join(f"/{alias}" for alias in action.aliases)
-            suffix = f" ({aliases})" if aliases else ""
-            print(f"  /{action.name}: {action.label}{suffix}", file=sys.stderr)
-        print("  Any other text starts a harness run", file=sys.stderr)
+        for line in help_lines(self._console_model()):
+            print(line, file=sys.stderr)
 
     def console_action_menu(self) -> int:
-        items = [
-            _MenuItem(action.key, action.label, action.name, action_names(action))
-            for action in visible_actions(CONSOLE_ACTIONS)
-        ]
-        selected = self.deps.menu_prompt(["Console actions"], items, help_kind="console").value
-        return self.dispatch_console_action(selected, [], selected)
+        return self._driver().run_once("")
 
-    def dispatch_console_action(self, command: str, args: list[str], raw_line: str) -> int:
-        if command == "exit":
+    def dispatch_action(self, command: str, args: tuple[str, ...], raw_tail: str = "") -> int:
+        return self.dispatch_console_action(command, args, raw_tail=raw_tail)
+
+    def dispatch_console_action(self, command: str, args: tuple[str, ...] | list[str], raw_tail: str = "") -> int:
+        canonical = self._canonical_action_name(command)
+        if canonical not in handled_action_names():
+            print(f"error: unknown console action: {command}", file=sys.stderr)
+            return 2
+        self._refresh_recovery_block()
+        plan = plan_action(
+            canonical,
+            tuple(args),
+            raw_tail=raw_tail,
+            recovery_blocked=self.session.recovery_blocked,
+            interactive=bool(getattr(self.namespace, "_interactive_ui", False)),
+            stdin_tty=sys.stdin.isatty(),
+        )
+        if plan is None:
+            print(f"error: unknown console action: {command}", file=sys.stderr)
+            return 2
+        return self._run_action_plan(plan)
+
+    def _canonical_action_name(self, command: str) -> str:
+        action = actions_by_name(CONSOLE_ACTIONS).get(command.strip().casefold())
+        return action.name if action is not None else command.strip()
+
+    def _run_action_plan(self, plan: ActionPlan) -> int:
+        if plan.kind == "error":
+            print(plan.message, file=sys.stderr)
+            return plan.code
+        if plan.kind == "exit":
             raise self.deps.launcher_exit
-        if command == "help":
-            self.console_help()
-            return 0
-        if command == "status":
+        if plan.kind == "status":
             return self.backend.status()
-        if command == "runs":
+        if plan.kind == "runs":
             return self.backend.runs()
-        if command == "jobs":
+        if plan.kind == "jobs":
             return self.show_jobs()
-        if command == "attach":
-            return self.attach_job(args[0] if args else None)
-        if command == "detach":
-            print("No attached job.", file=sys.stderr)
-            return 0
-        if command == "cancel":
-            return self.cancel_job(args[0] if args else None)
-        if command == "resume":
-            return self.deps.resume(self.namespace, args[0] if args else None)
-        if command == "archive":
-            return self.deps.archive(self.namespace, args[0] if args else None)
-        if command == "start":
-            self.deps.refresh_recovery_block(self.namespace)
-            if getattr(self.namespace, "_recovery_blocked", False):
-                print("error: resolve unfinished runs with resume <RUN_ID> or archive <RUN_ID> before starting new work", file=sys.stderr)
-                return 1
-            request = raw_line.split(None, 1)[1].strip() if args else self.interactive_start_request()
+        if plan.kind == "attach_job":
+            return self.attach_job(plan.values[0] if plan.values else None)
+        if plan.kind == "cancel_job":
+            return self.cancel_job(plan.values[0] if plan.values else None)
+        if plan.kind == "resume":
+            return self.deps.resume(self.namespace, plan.target, answer=plan.answer, selected_option=plan.selected_option)
+        if plan.kind == "archive":
+            return self.deps.archive(self.namespace, plan.values[0] if plan.values else None)
+        if plan.kind == "prompt_start_request":
+            request = self.interactive_start_request()
             if not request:
                 print("error: request is empty", file=sys.stderr)
                 return 2
             return self.deps.start_job(self.namespace, [], request_override=request)
-        if command in {"sdd", "explore", "proposal", "spec", "design", "tasks", "tdd"}:
-            self.deps.refresh_recovery_block(self.namespace)
-            if getattr(self.namespace, "_recovery_blocked", False):
-                print("error: resolve unfinished runs with resume <RUN_ID> or archive <RUN_ID> before starting new work", file=sys.stderr)
-                return 1
-            request = raw_line.split(None, 1)[1].strip() if args and command in {"sdd", "explore"} else None
-            source_run = self.source_run_for_bundle(command, args) if command not in {"sdd", "explore"} else None
-            return self.deps.start_job(self.namespace, [], request_override=request, flow=command, source_run=source_run)
-        if command == "artifacts":
-            run_id = args[0] if args else (self.deps.line_prompt("Run id: ", help_kind="console") or "").strip()
-            root = self.namespace.cwd.resolve() / ".ai-harness" / "artifacts" / "runs" / run_id
-            if not root.is_dir():
-                print(f"error: run not found: {run_id}", file=sys.stderr)
-                return 1
-            for item in sorted(path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_file()):
-                print(item)
-            return 0
-        if command == "ci-mode":
-            return self.select_github_ci_mode(args)
-        if command == "install-ci":
-            force = "--force" in args
-            targets = [item for item in args if item != "--force"]
-            target = targets[0] if targets else None
-            if len(targets) > 1:
-                print("error: install-ci accepts at most one target", file=sys.stderr)
-                return 2
-            if target is None and sys.stdin.isatty():
-                target = self.deps.menu_prompt(
-                    ["Install CI templates"],
-                    [
-                        _MenuItem("g", "GitHub Actions", "github", ("github",)),
-                        _MenuItem("l", "GitLab CI", "gitlab", ("gitlab",)),
-                        _MenuItem("b", "Both", "both", ("both",)),
-                    ],
-                    help_kind="console",
-                ).value
-            return self.backend.install_ci(target=target, force=force)
-        if command == "install-packages":
-            optionals, all_optional, dry_install = package_install_args(args)
-            if not optionals and not all_optional and sys.stdin.isatty():
-                selected = self.deps.multi_select_prompt(
-                    ["Optional recommended packages", "Required groups are always included."],
-                    package_group_items(),
-                    help_kind="multi",
-                )
-                optionals = [item.value for item in selected]
-            return self.backend.install_packages(optionals=optionals, all_optional=all_optional, dry_install=dry_install)
-        if command == "model":
-            provider = _default_provider(self.namespace.provider)
-            selected = self.deps.prompt_for_model(provider)
-            setattr(self.namespace, "model", selected)
-            print(f"Selected model: {selected or 'provider default'}", file=sys.stderr)
-            effort = self.deps.prompt_for_reasoning_effort(provider)
-            if effort is not None:
-                setattr(self.namespace, "reasoning_effort", effort)
-                print(f"Selected reasoning effort: {effort or 'provider default'}", file=sys.stderr)
-            return 0
-        raise ValueError(f"unsupported console action: {command}")
+        if plan.kind == "start_job":
+            return self.deps.start_job(self.namespace, [], request_override=plan.request, flow=plan.flow, source_run=plan.source_run)
+        if plan.kind == "start_source_bundle":
+            source_run = self.source_run_for_bundle(str(plan.flow), list(plan.values))
+            return self.deps.start_job(self.namespace, [], request_override=plan.request, flow=plan.flow, source_run=source_run)
+        if plan.kind == "prompt_artifacts_run":
+            run_id = (self.deps.line_prompt("Run id: ", help_kind="console") or "").strip()
+            return self._list_artifacts(run_id)
+        if plan.kind == "list_artifacts":
+            return self._list_artifacts(plan.values[0] if plan.values else "")
+        if plan.kind == "select_ci_mode_prompt":
+            return self._prompt_and_select_github_ci_mode()
+        if plan.kind == "select_ci_mode":
+            return self._select_github_ci_mode(str(plan.target))
+        if plan.kind == "install_ci_prompt":
+            target = self.deps.menu_prompt(
+                ["Install CI templates"],
+                [
+                    _MenuItem("g", "GitHub Actions", "github", ("github",)),
+                    _MenuItem("l", "GitLab CI", "gitlab", ("gitlab",)),
+                    _MenuItem("b", "Both", "both", ("both",)),
+                ],
+                help_kind="console",
+            ).value
+            return self.backend.install_ci(target=target, force=plan.force)
+        if plan.kind == "install_ci":
+            return self.backend.install_ci(target=plan.target, force=plan.force)
+        if plan.kind == "install_packages_prompt":
+            selected = self.deps.multi_select_prompt(
+                ["Optional recommended packages", "Required groups are always included."],
+                package_group_items(),
+                help_kind="multi",
+            )
+            return self.backend.install_packages(optionals=[item.value for item in selected], all_optional=False, dry_install=plan.dry_install)
+        if plan.kind == "install_packages":
+            return self.backend.install_packages(optionals=list(plan.optionals), all_optional=plan.all_optional, dry_install=plan.dry_install)
+        if plan.kind == "model_prompt":
+            return self._prompt_for_model_settings()
+        raise RuntimeError(f"unsupported console action plan: {plan.kind}")
 
+    def _list_artifacts(self, run_id: str) -> int:
+        root = self.namespace.cwd.resolve() / ".ai-harness" / "artifacts" / "runs" / run_id
+        if not root.is_dir():
+            print(f"error: run not found: {run_id}", file=sys.stderr)
+            return 1
+        for item in sorted(path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_file()):
+            print(item)
+        return 0
+
+    def _prompt_and_select_github_ci_mode(self) -> int:
+        current = self.session.github_ci_mode or "baseline"
+        selected = self.deps.menu_prompt(
+            ["GitHub CI mode", f"Current: {current}"],
+            [
+                _MenuItem("o", "Off", "off", ("off",)),
+                _MenuItem("b", "Baseline", "baseline", ("baseline",)),
+                _MenuItem("r", "Branch", "branch", ("branch",)),
+            ],
+            help_kind="console",
+            default_index=GITHUB_CI_MODES.index(current),
+        ).value
+        return self._select_github_ci_mode(selected)
+
+    def _select_github_ci_mode(self, selected: str) -> int:
+        self.session.github_ci_mode = selected
+        self.session.sync_namespace(self.namespace)
+        print(f"Selected GitHub CI mode: {selected}", file=sys.stderr)
+        return 0
+
+    def _prompt_for_model_settings(self) -> int:
+        provider = _default_provider(self.namespace.provider)
+        selected = self.deps.prompt_for_model(provider)
+        self.session.model = selected
+        print(f"Selected model: {selected or 'provider default'}", file=sys.stderr)
+        effort = self.deps.prompt_for_reasoning_effort(provider)
+        if effort is not None:
+            self.session.reasoning_effort = effort
+            print(f"Selected reasoning effort: {effort or 'provider default'}", file=sys.stderr)
+        self.session.sync_namespace(self.namespace)
+        return 0
+
+    def start_request(self, request: str) -> int:
+        self._refresh_recovery_block()
+        return self._run_action_plan(plan_start_request(request, recovery_blocked=self.session.recovery_blocked))
+
+    def interactive_start_request(self) -> str:
+        return self.deps.interactive_request()
+
+    def console_command(self, line: str) -> int:
+        driver = self._driver()
+        return driver.run_once(line)
+
+    def console_loop(self, startup_recovery: Callable[[argparse.Namespace], int | None]) -> int:
+        driver = self._driver()
+        try:
+            return driver.loop(lambda: startup_recovery(self.namespace))
+        except KeyboardInterrupt:
+            print("\nPrompt cancelled.", file=sys.stderr)
+            return 130
+
+    def _driver(self) -> ConsoleTerminalDriver:
+        model = ConsoleModel(actions=action_specs(CONSOLE_ACTIONS))
+        return ConsoleTerminalDriver(
+            model,
+            self,
+            line_reader=lambda: interactive_console_line(self.deps, model.prompt),
+            menu_prompt=self.deps.menu_prompt,
+            launcher_exit=self.deps.launcher_exit,
+        )
 
     def show_jobs(self) -> int:
         jobs = self.jobs.store.list_jobs()
@@ -261,95 +329,17 @@ class ConsoleController:
             return
         print(kind, file=sys.stderr)
 
-    def interactive_start_request(self) -> str:
-        def handle_request_command(value: str) -> bool:
-            parsed = parse_console_line(value, context="request")
-            if parsed.kind == "error":
-                print(f"error: {parsed.error}", file=sys.stderr)
-                return True
-            if parsed.kind != "action" or parsed.action is None or parsed.action.name not in _REQUEST_PROMPT_ACTIONS:
-                return False
-            self.dispatch_console_action(parsed.action.name, list(parsed.args), parsed.raw_line.lstrip("/"))
-            return True
-
-        return self.deps.interactive_request(slash_handler=handle_request_command)
-
-    def console_command(self, line: str) -> int:
-        parsed = parse_console_line(line)
-        if parsed.kind == "menu":
-            return self.console_action_menu()
-        if parsed.kind == "empty":
-            return 0
-        if parsed.kind == "error":
-            print(f"error: {parsed.error}", file=sys.stderr)
-            return 2
-        if parsed.kind == "action" and parsed.action is not None:
-            return self.dispatch_console_action(parsed.action.name, list(parsed.args), parsed.raw_line.lstrip("/"))
-        if parsed.kind == "unknown_slash":
-            print(parsed.error, file=sys.stderr)
-            return 0
-        self.deps.refresh_recovery_block(self.namespace)
-        if getattr(self.namespace, "_recovery_blocked", False):
-            print("error: resolve unfinished runs with resume <RUN_ID> or archive <RUN_ID> before starting new work", file=sys.stderr)
-            return 1
-        return self.deps.start_job(self.namespace, [], request_override=parsed.request or line)
-
-    def console_loop(self, startup_recovery: Callable[[argparse.Namespace], int | None]) -> int:
-        print("AI Code Harness console. Type `/` for actions or enter a request.", file=sys.stderr)
-        last_status = 0
-        try:
-            recovered = startup_recovery(self.namespace)
-            if recovered is not None:
-                last_status = recovered
-        except KeyboardInterrupt:
-            print("\nPrompt cancelled.", file=sys.stderr)
-            return 130
-        while True:
-            try:
-                line = interactive_console_line(self.deps)
-                if line is None:
-                    print(file=sys.stderr)
-                    return last_status
-                if not line:
-                    continue
-                try:
-                    last_status = self.console_command(line)
-                except ValueError as exc:
-                    print(f"error: {exc}", file=sys.stderr)
-                    last_status = 1
-            except EOFError:
-                print(file=sys.stderr)
-                return last_status
-            except KeyboardInterrupt:
-                print("\nPrompt cancelled.", file=sys.stderr)
-                last_status = 130
-            except self.deps.launcher_exit:
-                return 0
-
     def select_github_ci_mode(self, args: list[str]) -> int:
-        if len(args) > 1:
-            print("error: ci-mode accepts at most one mode", file=sys.stderr)
+        plan = plan_action(
+            "ci-mode",
+            tuple(args),
+            interactive=bool(getattr(self.namespace, "_interactive_ui", False)),
+            stdin_tty=sys.stdin.isatty(),
+        )
+        if plan is None:
+            print("error: unknown console action: ci-mode", file=sys.stderr)
             return 2
-        current = getattr(self.namespace, "github_ci_mode", None) or "baseline"
-        if args:
-            selected = args[0].strip().lower()
-            if selected not in GITHUB_CI_MODES:
-                print("error: GitHub CI mode must be off, baseline, or branch", file=sys.stderr)
-                return 2
-        else:
-            selected = self.deps.menu_prompt(
-                ["GitHub CI mode", f"Current: {current}"],
-                [
-                    _MenuItem("o", "Off", "off", ("off",)),
-                    _MenuItem("b", "Baseline", "baseline", ("baseline",)),
-                    _MenuItem("r", "Branch", "branch", ("branch",)),
-                ],
-                help_kind="console",
-                default_index=GITHUB_CI_MODES.index(current),
-            ).value
-        setattr(self.namespace, "github_ci_mode", selected)
-        print(f"Selected GitHub CI mode: {selected}", file=sys.stderr)
-        return 0
+        return self._run_action_plan(plan)
 
     def source_run_for_bundle(self, bundle: str, args: list[str]) -> str | None:
         if args:
@@ -363,7 +353,7 @@ class ConsoleController:
             "tasks": "published/design-handoff.json",
             "tdd": "published/tasks-handoff.json",
         }.get(bundle)
-        if required is None or not sys.stdin.isatty():
+        if required is None or not getattr(self.namespace, "_interactive_ui", False) or not sys.stdin.isatty():
             return None
         runs = compatible_runs(self.namespace.cwd.resolve(), required)[:10]
         if not runs:
@@ -384,123 +374,46 @@ def package_group_items() -> list[_MenuItem]:
     ]
 
 
-def package_install_args(args: list[str]) -> tuple[list[str], bool, bool]:
-    all_optional = False
-    dry_install = False
-    optionals: list[str] = []
-    for arg in args:
-        if arg in {"--all", "--all-optional"}:
-            all_optional = True
-        elif arg == "--dry-install":
-            dry_install = True
-        elif arg.startswith("--"):
-            raise ValueError(f"unknown install-packages option: {arg}")
-        else:
-            optionals.append(arg)
-    return optionals, all_optional, dry_install
-
-
-def console_suggestion_label(action: ConsoleAction) -> str:
-    aliases = ", ".join(f"/{alias}" for alias in action.aliases[:2])
-    suffix = f"  {aliases}" if aliases else ""
-    return f"/{action.name:<16} {action.label}{suffix}"
-
-
-def render_console_prompt(buffer: list[str], slash_mode: bool, selected: int, previous_lines: int) -> int:
-    query = "".join(buffer)[1:] if slash_mode else ""
-    suggestions = suggest_console_actions(query) if slash_mode else []
-    rendered = 1 + len(suggestions) + 1
-    rows = max(previous_lines, rendered)
+def render_console_prompt(buffer: list[str], previous_lines: int = 0, prompt: str = ConsoleModel().prompt) -> int:
     if previous_lines:
         print(f"\x1b[{previous_lines}F", end="", file=sys.stderr)
-    prompt = "aih> "
-    value = "".join(buffer)
-    if slash_mode:
-        if not value.startswith("/"):
-            value = "/" + value
-        line = f"{prompt}\x1b[36m{value}\x1b[0m"
-    else:
-        line = f"{prompt}{value}"
-    print(f"\x1b[2K{line}", file=sys.stderr)
-    for index, action in enumerate(suggestions):
-        marker = ">" if index == selected else " "
-        print(f"\x1b[2K{marker} {console_suggestion_label(action)}", file=sys.stderr)
-    for _ in range(rows - rendered):
-        print("\x1b[2K", file=sys.stderr)
-    print("\x1b[2K", end="", file=sys.stderr)
-    return rows
+    print(f"\x1b[2K{prompt}{''.join(buffer)}", file=sys.stderr)
+    return 1
 
 
-def interactive_console_line(deps: ConsoleControllerDependencies) -> str | None:
+def interactive_console_line(deps: ConsoleControllerDependencies, prompt: str = ConsoleModel().prompt) -> str | None:
     if not deps.interactive_stdin():
         try:
-            print("aih> ", end="", file=sys.stderr, flush=True)
+            print(prompt, end="", file=sys.stderr, flush=True)
             return input().strip()
         except EOFError:
             return None
     try:
         with deps.raw_terminal():
             buffer: list[str] = []
-            slash_mode = False
-            selected = 0
-            rendered_lines = render_console_prompt(buffer, slash_mode, selected, 0)
+            rendered_lines = render_console_prompt(buffer, 0, prompt)
             while True:
                 key = deps.read_key()
                 if key == "\x04":
                     print(file=sys.stderr)
                     return None
                 if key in {"\r", "\n"}:
-                    value = "".join(buffer).strip()
-                    if slash_mode:
-                        query = value[1:] if value.startswith("/") else value
-                        if not query:
-                            print(file=sys.stderr)
-                            return "/"
-                        suggestions = suggest_console_actions(query)
-                        if suggestions:
-                            print(file=sys.stderr)
-                            return "/" + suggestions[min(selected, len(suggestions) - 1)].name
                     print(file=sys.stderr)
-                    return value
-                if key == "up" and slash_mode:
-                    suggestions = suggest_console_actions("".join(buffer)[1:])
-                    if suggestions:
-                        selected = (selected - 1) % len(suggestions)
-                        rendered_lines = render_console_prompt(buffer, slash_mode, selected, rendered_lines)
-                    continue
-                if key == "down" and slash_mode:
-                    suggestions = suggest_console_actions("".join(buffer)[1:])
-                    if suggestions:
-                        selected = (selected + 1) % len(suggestions)
-                        rendered_lines = render_console_prompt(buffer, slash_mode, selected, rendered_lines)
-                    continue
-                if key == "escape":
-                    if slash_mode:
-                        buffer.clear()
-                        slash_mode = False
-                        selected = 0
-                        rendered_lines = render_console_prompt(buffer, slash_mode, selected, rendered_lines)
-                    continue
-                if key in {"left", "right", "home", "end", "delete", "unknown"}:
+                    return "".join(buffer).strip()
+                if key in {"left", "right", "home", "end", "delete", "unknown", "escape", "up", "down"}:
                     continue
                 if key in {"\x7f", "\b"}:
                     if buffer:
                         buffer.pop()
-                        if not buffer:
-                            slash_mode = False
-                        selected = 0
-                        rendered_lines = render_console_prompt(buffer, slash_mode, selected, rendered_lines)
+                        rendered_lines = render_console_prompt(buffer, rendered_lines, prompt)
                     continue
                 if len(key) == 1 and key.isprintable():
-                    if not buffer and key == "/":
-                        slash_mode = True
                     buffer.append(key)
-                    selected = 0
-                    rendered_lines = render_console_prompt(buffer, slash_mode, selected, rendered_lines)
+                    rendered_lines = render_console_prompt(buffer, rendered_lines, prompt)
                     continue
     except (OSError, termios.error):
         try:
-            print("aih> ", end="", file=sys.stderr, flush=True)
+            print(prompt, end="", file=sys.stderr, flush=True)
             return input().strip()
         except EOFError:
             return None

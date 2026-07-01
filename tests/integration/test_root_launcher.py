@@ -13,6 +13,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 LAUNCHER = ROOT / "ai-harness"
+UI_LAUNCHER = ROOT / "ai-harness-ui"
 
 
 def run_launcher(*arguments: str, cwd: Path, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
@@ -119,11 +120,21 @@ class RootLauncherIntegrationTests(unittest.TestCase):
             (current / "state.json").write_text('{"run_id":"run-a","status":"active"}\n', encoding="utf-8")
 
             resume = run_launcher("--dry-run", "--cwd", str(repository), "--provider", "local", "resume", "run-a", cwd=repository)
+            resume_answer = run_launcher("--dry-run", "--cwd", str(repository), "--provider", "local", "resume", "run-a", "--answer", "Ship it", cwd=repository)
+            resume_selected = run_launcher("--dry-run", "--cwd", str(repository), "--provider", "local", "resume", "run-a", "--selected-option", "keep", cwd=repository)
+            resume_conflict = run_launcher("--dry-run", "--cwd", str(repository), "--provider", "local", "resume", "run-a", "--answer", "Ship it", "--selected-option", "keep", cwd=repository)
             archive = run_launcher("--dry-run", "--cwd", str(repository), "archive", "run-a", cwd=repository)
 
             self.assertEqual(0, resume.returncode, resume.stderr)
             self.assertIn("--resume run-a", resume.stderr)
             self.assertIn("--provider local", resume.stderr)
+            self.assertEqual(0, resume_answer.returncode, resume_answer.stderr)
+            self.assertIn("--answer", resume_answer.stderr)
+            self.assertIn("Ship it", resume_answer.stderr)
+            self.assertEqual(0, resume_selected.returncode, resume_selected.stderr)
+            self.assertIn("--selected-option keep", resume_selected.stderr)
+            self.assertEqual(1, resume_conflict.returncode)
+            self.assertIn("only one of --answer or --selected-option", resume_conflict.stderr)
             self.assertEqual(0, archive.returncode, archive.stderr)
             self.assertIn("--archive run-a", archive.stderr)
 
@@ -167,7 +178,7 @@ class RootLauncherIntegrationTests(unittest.TestCase):
 
 
 
-    def test_interactive_cli_start_shows_ci_preflight_before_delegating(self) -> None:
+    def test_cli_tty_start_delegates_without_interactive_prompts(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             repository = Path(directory)
             master, slave = pty.openpty()
@@ -183,86 +194,14 @@ class RootLauncherIntegrationTests(unittest.TestCase):
                 )
                 os.close(slave)
                 output = bytearray()
-                sent_continue = False
-                sent_branch = False
-                selected_route = False
-                selected_flow = False
                 deadline = time.time() + 5
                 while time.time() < deadline and process.poll() is None:
                     ready, _, _ = select.select([master], [], [], 0.1)
-                    if not ready:
-                        continue
-                    try:
-                        chunk = os.read(master, 4096)
-                    except OSError:
-                        break
-                    output.extend(chunk)
-                    if not sent_continue and b"CI setup check" in output:
-                        os.write(master, b"c")
-                        sent_continue = True
-                    elif sent_continue and not sent_branch and b"Git branch" in output:
-                        os.write(master, b"c")
-                        sent_branch = True
-                    elif sent_branch and not selected_route and b"Request route" in output:
-                        os.write(master, b"c")
-                        selected_route = True
-                    elif selected_route and not selected_flow and b"Code flow" in output:
-                        os.write(master, b"f")
-                        selected_flow = True
-                try:
-                    process.communicate(timeout=2)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.communicate()
-
-                decoded = output.decode("utf-8", errors="replace")
-                self.assertTrue(sent_continue, decoded)
-                self.assertEqual(0, process.returncode, decoded)
-                self.assertIn("CI setup check", decoded)
-                self.assertIn("harness/run.py", decoded)
-            finally:
-                try:
-                    os.close(master)
-                except OSError:
-                    pass
-
-    def test_interactive_cli_skip_warnings_delegates_without_ci_preflight(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            repository = Path(directory)
-            master, slave = pty.openpty()
-            try:
-                process = subprocess.Popen(
-                    [str(LAUNCHER), "--skip-warnings", "--dry-run", "--cwd", str(repository), "--provider", "local", "Fix tests"],
-                    cwd=repository,
-                    stdin=slave,
-                    stdout=subprocess.PIPE,
-                    stderr=slave,
-                    text=False,
-                    close_fds=True,
-                )
-                os.close(slave)
-                output = bytearray()
-                sent_branch = False
-                selected_route = False
-                selected_flow = False
-                deadline = time.time() + 5
-                while time.time() < deadline and process.poll() is None:
-                    ready, _, _ = select.select([master], [], [], 0.1)
-                    if not ready:
-                        continue
-                    try:
-                        output.extend(os.read(master, 4096))
-                    except OSError:
-                        break
-                    if not sent_branch and b"Git branch" in output:
-                        os.write(master, b"c")
-                        sent_branch = True
-                    elif sent_branch and not selected_route and b"Request route" in output:
-                        os.write(master, b"c")
-                        selected_route = True
-                    elif selected_route and not selected_flow and b"Code flow" in output:
-                        os.write(master, b"f")
-                        selected_flow = True
+                    if ready:
+                        try:
+                            output.extend(os.read(master, 4096))
+                        except OSError:
+                            break
                 try:
                     process.communicate(timeout=2)
                 except subprocess.TimeoutExpired:
@@ -272,7 +211,60 @@ class RootLauncherIntegrationTests(unittest.TestCase):
                 decoded = output.decode("utf-8", errors="replace")
                 self.assertEqual(0, process.returncode, decoded)
                 self.assertNotIn("CI setup check", decoded)
+                self.assertNotIn("Git branch", decoded)
+                self.assertNotIn("Request route", decoded)
+                self.assertNotIn("Code flow", decoded)
                 self.assertIn("harness/run.py", decoded)
+            finally:
+                try:
+                    os.close(master)
+                except OSError:
+                    pass
+
+    def test_cli_without_request_does_not_open_console(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            completed = run_launcher("--cwd", str(repository), "--provider", "local", cwd=repository)
+
+            self.assertEqual(2, completed.returncode)
+            self.assertIn("use aihui", completed.stderr)
+            self.assertNotIn("AI Harness runs", completed.stderr)
+
+
+    def test_cli_tty_without_request_does_not_open_console(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            master, slave = pty.openpty()
+            try:
+                process = subprocess.Popen(
+                    [str(LAUNCHER), "--cwd", str(repository), "--provider", "local"],
+                    cwd=repository,
+                    stdin=slave,
+                    stdout=subprocess.PIPE,
+                    stderr=slave,
+                    text=False,
+                    close_fds=True,
+                )
+                os.close(slave)
+                output = bytearray()
+                deadline = time.time() + 5
+                while time.time() < deadline and process.poll() is None:
+                    ready, _, _ = select.select([master], [], [], 0.1)
+                    if ready:
+                        try:
+                            output.extend(os.read(master, 4096))
+                        except OSError:
+                            break
+                try:
+                    process.communicate(timeout=2)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.communicate()
+
+                decoded = output.decode("utf-8", errors="replace")
+                self.assertEqual(2, process.returncode, decoded)
+                self.assertIn("use aihui", decoded)
+                self.assertNotIn("AI Harness runs", decoded)
             finally:
                 try:
                     os.close(master)
@@ -318,7 +310,7 @@ class RootLauncherIntegrationTests(unittest.TestCase):
             master, slave = pty.openpty()
             try:
                 process = subprocess.Popen(
-                    [str(LAUNCHER), "--cwd", str(repository), "--provider", "local"],
+                    [str(UI_LAUNCHER), "--cwd", str(repository), "--provider", "local"],
                     cwd=repository,
                     stdin=slave,
                     stdout=subprocess.PIPE,
@@ -351,13 +343,13 @@ class RootLauncherIntegrationTests(unittest.TestCase):
                     if not sent_console and b"Open console" in output:
                         os.write(master, b"o")
                         sent_console = True
-                    elif sent_console and not sent_status and b"aih>" in output:
+                    elif sent_console and not sent_status and b"aihui>" in output:
                         os.write(master, b"status\r")
                         sent_status = True
                     elif sent_status and not saw_status and b"Status: no run" in stdout_output:
                         saw_status = True
-                        prompt_count_at_status = output.count(b"aih>")
-                    elif saw_status and not sent_exit and output.count(b"aih>") > prompt_count_at_status:
+                        prompt_count_at_status = output.count(b"aihui>")
+                    elif saw_status and not sent_exit and output.count(b"aihui>") > prompt_count_at_status:
                         os.write(master, b"exit\r")
                         sent_exit = True
                 try:
@@ -381,13 +373,13 @@ class RootLauncherIntegrationTests(unittest.TestCase):
                 except OSError:
                     pass
 
-    def test_interactive_console_slash_suggestions_execute_status(self) -> None:
+    def test_interactive_console_blank_input_menu_executes_status(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             repository = Path(directory)
             master, slave = pty.openpty()
             try:
                 process = subprocess.Popen(
-                    [str(LAUNCHER), "--cwd", str(repository), "--provider", "local"],
+                    [str(UI_LAUNCHER), "--cwd", str(repository), "--provider", "local"],
                     cwd=repository,
                     stdin=slave,
                     stdout=subprocess.PIPE,
@@ -400,7 +392,8 @@ class RootLauncherIntegrationTests(unittest.TestCase):
                 output = bytearray()
                 stdout_output = bytearray()
                 sent_console = False
-                sent_slash_status = False
+                sent_blank_menu = False
+                sent_menu_status = False
                 sent_exit = False
                 saw_status = False
                 prompt_count_at_status = 0
@@ -420,13 +413,16 @@ class RootLauncherIntegrationTests(unittest.TestCase):
                     if not sent_console and b"Open console" in output:
                         os.write(master, b"o")
                         sent_console = True
-                    elif sent_console and not sent_slash_status and b"aih>" in output:
-                        os.write(master, b"/sta\r")
-                        sent_slash_status = True
-                    elif sent_slash_status and not saw_status and b"Status: no run" in stdout_output:
+                    elif sent_console and not sent_blank_menu and b"aihui>" in output:
+                        os.write(master, b"\r")
+                        sent_blank_menu = True
+                    elif sent_blank_menu and not sent_menu_status and b"Console actions" in output:
+                        os.write(master, b"s")
+                        sent_menu_status = True
+                    elif sent_menu_status and not saw_status and b"Status: no run" in stdout_output:
                         saw_status = True
-                        prompt_count_at_status = output.count(b"aih>")
-                    elif saw_status and not sent_exit and output.count(b"aih>") > prompt_count_at_status:
+                        prompt_count_at_status = output.count(b"aihui>")
+                    elif saw_status and not sent_exit and output.count(b"aihui>") > prompt_count_at_status:
                         os.write(master, b"exit\r")
                         sent_exit = True
                 try:
@@ -439,10 +435,11 @@ class RootLauncherIntegrationTests(unittest.TestCase):
 
                 decoded = output.decode("utf-8", errors="replace")
                 self.assertTrue(sent_console, decoded)
-                self.assertTrue(sent_slash_status, decoded)
+                self.assertTrue(sent_blank_menu, decoded)
+                self.assertTrue(sent_menu_status, decoded)
                 self.assertTrue(sent_exit, decoded)
                 self.assertEqual(0, process.returncode, decoded)
-                self.assertIn("/status", decoded)
+                self.assertIn("Console actions", decoded)
                 self.assertIn(b"Status: no run", stdout_output)
             finally:
                 try:
@@ -461,7 +458,7 @@ class RootLauncherIntegrationTests(unittest.TestCase):
             master, slave = pty.openpty()
             try:
                 process = subprocess.Popen(
-                    [str(LAUNCHER), "--cwd", str(repository), "--provider", "codex"],
+                    [str(UI_LAUNCHER), "--cwd", str(repository), "--provider", "codex"],
                     cwd=repository,
                     env=env,
                     stdin=slave,
@@ -477,6 +474,7 @@ class RootLauncherIntegrationTests(unittest.TestCase):
                 sent_ci_continue = False
                 sent_branch = False
                 selected_code = False
+                selected_flow = False
                 sent_exit = False
                 deadline = time.time() + 8
                 while time.time() < deadline and process.poll() is None:
@@ -503,8 +501,11 @@ class RootLauncherIntegrationTests(unittest.TestCase):
                     if sent_branch and not selected_code and b"Request route" in output:
                         os.write(master, b"c")
                         selected_code = True
-                    if selected_code and not sent_exit and b"Code flow" in output:
-                        os.write(master, b"/exit\r")
+                    if selected_code and not selected_flow and b"Code flow" in output:
+                        os.write(master, b"e")
+                        selected_flow = True
+                    if selected_flow and not sent_exit and b"Started background job" in output and b"aihui>" in output:
+                        os.write(master, b"exit\r")
                         sent_exit = True
                 try:
                     process.communicate(timeout=2)
@@ -517,6 +518,7 @@ class RootLauncherIntegrationTests(unittest.TestCase):
                 self.assertTrue(sent_request, decoded)
                 self.assertTrue(sent_ci_continue, decoded)
                 self.assertTrue(selected_code, decoded)
+                self.assertTrue(selected_flow, decoded)
                 self.assertTrue(sent_exit, decoded)
                 self.assertEqual(0, process.returncode, decoded)
                 self.assertIn("EXPLORE_BUNDLE", decoded)
@@ -537,7 +539,7 @@ class RootLauncherIntegrationTests(unittest.TestCase):
             master, slave = pty.openpty()
             try:
                 process = subprocess.Popen(
-                    [str(LAUNCHER), "--cwd", str(repository), "--provider", "local"],
+                    [str(UI_LAUNCHER), "--cwd", str(repository), "--provider", "local"],
                     cwd=repository,
                     stdin=slave,
                     stdout=subprocess.PIPE,
@@ -593,7 +595,7 @@ class RootLauncherIntegrationTests(unittest.TestCase):
             master, slave = pty.openpty()
             try:
                 process = subprocess.Popen(
-                    [str(LAUNCHER), "--dry-run", "--cwd", str(repository), "--provider", "local"],
+                    [str(UI_LAUNCHER), "--dry-run", "--cwd", str(repository), "--provider", "local"],
                     cwd=repository,
                     stdin=slave,
                     stdout=subprocess.PIPE,
@@ -642,7 +644,7 @@ class RootLauncherIntegrationTests(unittest.TestCase):
                     if selected_route and not selected_flow and b"Code flow" in output:
                         os.write(master, b"f")
                         selected_flow = True
-                    if selected_flow and not sent_exit and output.count(b"aih>") >= 1:
+                    if selected_flow and not sent_exit and output.count(b"aihui>") >= 1:
                         os.write(master, b"exit\r")
                         sent_exit = True
                 try:

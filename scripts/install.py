@@ -55,10 +55,18 @@ def links_for(
     return result
 
 
-def launcher_links_for(checkout: Path, bin_dir: Path, names: Sequence[str] = ("aih",)) -> list[Link]:
+def launcher_source_for(checkout: Path, name: str) -> Path:
+    if name == "aih":
+        return checkout / "ai-harness"
+    if name == "aihui":
+        return checkout / "ai-harness-ui"
+    raise ValueError(f"unsupported launcher shortcut: {name}")
+
+
+def launcher_links_for(checkout: Path, bin_dir: Path, names: Sequence[str] = ("aih", "aihui")) -> list[Link]:
     checkout = checkout.resolve()
     base = bin_dir.expanduser().absolute()
-    return [Link(checkout / "ai-harness", base / name, f"{name} launcher", base.parent, None) for name in names]
+    return [Link(launcher_source_for(checkout, name), base / name, f"{name} launcher", base.parent, None) for name in names]
 
 
 def legacy_skill_links_for(
@@ -139,7 +147,8 @@ the user. Invoke it again with exactly one of `--resume RUN_ID` or
 
 def launcher_content(checkout: Path, command: str = "aih") -> str:
     checkout = checkout.resolve()
-    launcher = shlex.quote(str(checkout / "ai-harness"))
+    executable = "ai-harness-ui" if command == "aihui" else "ai-harness"
+    launcher = shlex.quote(str(checkout / executable))
     return f"""#!/bin/sh
 # ai-code-harness-launcher checkout=\"{checkout}\" command=\"{command}\"
 exec {launcher} "$@"
@@ -325,7 +334,7 @@ def _parser() -> argparse.ArgumentParser:
         metavar="PATH",
         help="install in PATH (defaults to the current directory)",
     )
-    parser.add_argument("--launcher", action="store_true", help="also install the aih shortcut")
+    parser.add_argument("--launcher", action="store_true", help="also install the aih and aihui shortcuts")
     parser.add_argument("--bin-dir", type=Path, help="directory for launcher shortcuts (default: ~/.local/bin)")
     parser.add_argument("--dry-run", action="store_true")
     return parser

@@ -51,18 +51,19 @@ class DoctorTests(unittest.TestCase):
     def test_owned_shortcut_passes_doctor_check(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp); co = checkout(root); bin_dir = root / "bin"
-            link = install.launcher_links_for(co, bin_dir)[0]
-            self.assertTrue(install.install([link])[0])
-            self.assertTrue(doctor.check_launcher_shortcut(link).ok)
+            links = install.launcher_links_for(co, bin_dir)
+            self.assertTrue(install.install(links)[0])
+            self.assertTrue(all(doctor.check_launcher_shortcut(link).ok for link in links))
 
     def test_missing_or_drifted_shortcut_fails_doctor_check(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp); co = checkout(root); bin_dir = root / "bin"; bin_dir.mkdir()
-            link = install.launcher_links_for(co, bin_dir)[0]
-            self.assertFalse(doctor.check_launcher_shortcut(link).ok)
-            link.destination.write_text(install.launcher_content(co, "aih") + "drift\n", encoding="utf-8")
-            link.destination.chmod(0o755)
-            self.assertFalse(doctor.check_launcher_shortcut(link).ok)
+            links = install.launcher_links_for(co, bin_dir)
+            self.assertTrue(all(not doctor.check_launcher_shortcut(link).ok for link in links))
+            for link in links:
+                link.destination.write_text(install.launcher_content(co, link.destination.name) + "drift\n", encoding="utf-8")
+                link.destination.chmod(0o755)
+                self.assertFalse(doctor.check_launcher_shortcut(link).ok)
 
 
 if __name__ == "__main__": unittest.main()

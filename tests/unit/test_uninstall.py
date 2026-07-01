@@ -64,7 +64,7 @@ class UninstallTests(unittest.TestCase):
             ok, messages = uninstall.uninstall(links)
 
             self.assertTrue(ok, messages)
-            self.assertFalse(links[0].destination.exists())
+            self.assertTrue(all(not link.destination.exists() for link in links))
 
     def test_foreign_shortcut_file_or_symlink_is_preserved(self):
         with tempfile.TemporaryDirectory() as tmp:

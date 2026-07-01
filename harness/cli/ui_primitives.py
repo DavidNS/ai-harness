@@ -2,13 +2,10 @@
 
 from __future__ import annotations
 
-import os
-import select
 import sys
 import termios
-from typing import Callable, NamedTuple
+from typing import NamedTuple
 
-from .console_actions import visible_actions
 from .terminal import KeyReader, RawTerminal
 
 
@@ -29,96 +26,28 @@ def _interactive_stdin() -> bool:
 
 def _print_prompt_help(kind: str) -> None:
     print("Controls:", file=sys.stderr)
-    if kind in {"action", "decision"}:
+    if kind in {"action", "decision", "console", "model"}:
         print("  Up/Down: move selection", file=sys.stderr)
         print("  Enter: select highlighted item", file=sys.stderr)
-        print("  Number keys: select by number", file=sys.stderr)
+        print("  Number keys or shortcuts: select item", file=sys.stderr)
     if kind in {"request", "answer"}:
         print("  Enter: submit", file=sys.stderr)
         print("  Alt+Enter: insert newline when supported by the terminal", file=sys.stderr)
-    if kind == "request":
-        for action in visible_actions(context="request"):
-            print(f"  /{action.name}: {action.label.lower()}", file=sys.stderr)
-    if kind == "model":
-        print("  Enter: select the highlighted model", file=sys.stderr)
     if kind == "scope":
         print("  Enter a menu number, repository-relative path, or blank for explorer-first", file=sys.stderr)
-    if kind == "console":
-        print("  / or /menu: open the action menu", file=sys.stderr)
-        actions = ", ".join(f"/{action.name}" for action in visible_actions())
-        print(f"  Slash actions include {actions}", file=sys.stderr)
-        print("  Any other text starts a harness run", file=sys.stderr)
     if kind == "multi":
         print("  Up/Down: move selection", file=sys.stderr)
         print("  Space: toggle highlighted item", file=sys.stderr)
         print("  Enter: confirm selection", file=sys.stderr)
         print("  Number keys: toggle by number", file=sys.stderr)
-    print("  /help: show this help", file=sys.stderr)
-    print("  /exit: exit without invoking the backend", file=sys.stderr)
-
-
-def _handle_slash_command(value: str, *, kind: str) -> bool:
-    command = value.strip()
-    if not command.startswith("/"):
-        return False
-    if command == "/exit":
-        raise _LauncherExit
-    if command == "/help":
-        _print_prompt_help(kind)
-        return True
-    if kind == "console" and command == "/model":
-        return False
-    print(f"Unknown slash command: {command}", file=sys.stderr)
-    return True
+    print("  Ctrl-C: cancel the current prompt", file=sys.stderr)
 
 
 _RawTerminal = RawTerminal
 
 
-def _read_key_byte(timeout: float | None = None) -> str:
-    fd = sys.stdin.fileno()
-    if timeout is not None:
-        ready, _, _ = select.select([fd], [], [], timeout)
-        if not ready:
-            return ""
-    try:
-        data = os.read(fd, 1)
-    except BlockingIOError:
-        return ""
-    return data.decode("utf-8", errors="ignore")
-
-
 def _read_key() -> str:
     return KeyReader().read_key()
-
-
-def _read_menu_command() -> str:
-    command = ["/"]
-    print("/", end="", file=sys.stderr, flush=True)
-    while True:
-        key = _read_key()
-        if key in {"\r", "\n"}:
-            print(file=sys.stderr)
-            return "".join(command)
-        if key in {"\x7f", "\b"}:
-            if len(command) > 1:
-                command.pop()
-                print("\b \b", end="", file=sys.stderr, flush=True)
-            continue
-        if len(key) == 1 and key.isprintable():
-            command.append(key)
-            print(key, end="", file=sys.stderr, flush=True)
-
-
-def _menu_item_for_command(command: str, items: list[_MenuItem]) -> _MenuItem | None:
-    value = command.strip().lstrip("/").casefold()
-    if not value:
-        return None
-    for item in items:
-        names = {item.value.casefold(), item.key.casefold(), *(shortcut.casefold() for shortcut in item.shortcuts)}
-        if value in names:
-            return item
-    return None
 
 
 def _render_menu(title_lines: list[str], items: list[_MenuItem], selected: int) -> None:
@@ -133,7 +62,14 @@ def _redraw_menu(title_lines: list[str], items: list[_MenuItem], selected: int) 
     line_count = len(title_lines) + len(items) + 1
     print(f"\x1b[{line_count}F", end="", file=sys.stderr)
     _render_menu(title_lines, items, selected)
-    print("\x1b[2KUse Up/Down, Enter, number keys, /help, or /exit.", file=sys.stderr, flush=True)
+    print("\x1b[2KUse Up/Down, Enter, number keys, or Ctrl-C.", file=sys.stderr, flush=True)
+
+
+def _item_matches(item: _MenuItem, choice: str, index: int) -> bool:
+    lowered = choice.casefold()
+    return choice == str(index) or lowered == item.key.casefold() or lowered == item.value.casefold() or lowered in {
+        shortcut.casefold() for shortcut in item.shortcuts
+    }
 
 
 def _menu_prompt(title_lines: list[str], items: list[_MenuItem], *, help_kind: str, default_index: int = 0, allow_blank_default: bool = False) -> _MenuItem:
@@ -144,7 +80,7 @@ def _menu_prompt(title_lines: list[str], items: list[_MenuItem], *, help_kind: s
             selected = max(0, min(default_index, len(items) - 1))
             with _RawTerminal():
                 _render_menu(title_lines, items, selected)
-                print("Use Up/Down, Enter, number keys, /help, or /exit.", file=sys.stderr, flush=True)
+                print("Use Up/Down, Enter, number keys, or Ctrl-C.", file=sys.stderr, flush=True)
                 while True:
                     key = _read_key()
                     if key == "up":
@@ -157,24 +93,12 @@ def _menu_prompt(title_lines: list[str], items: list[_MenuItem], *, help_kind: s
                         continue
                     if key in {"\r", "\n"}:
                         return items[selected]
-                    if key == "/":
-                        command = _read_menu_command()
-                        selected_item = _menu_item_for_command(command, items)
-                        if selected_item is not None:
-                            return selected_item
-                        if _handle_slash_command(command, kind=help_kind):
-                            _render_menu(title_lines, items, selected)
-                            print("Use Up/Down, Enter, number keys, /help, or /exit.", file=sys.stderr, flush=True)
-                            continue
-                    if key in {"left", "right", "home", "end", "delete", "unknown"}:
+                    if key in {"left", "right", "home", "end", "delete", "unknown", "escape"}:
                         continue
                     if len(key) == 1:
-                        lowered = key.casefold()
                         for index, item in enumerate(items, 1):
-                            if key == str(index) or lowered == item.key.casefold() or lowered in {shortcut.casefold() for shortcut in item.shortcuts}:
+                            if _item_matches(item, key, index):
                                 return item
-        except _LauncherExit:
-            raise
         except (OSError, termios.error):
             pass
     for line in title_lines:
@@ -185,14 +109,10 @@ def _menu_prompt(title_lines: list[str], items: list[_MenuItem], *, help_kind: s
         choice = input("Select: ").strip()
         if allow_blank_default and not choice:
             return items[default_index]
-        if _handle_slash_command(choice, kind=help_kind):
-            continue
-        lowered = choice.casefold()
         for index, item in enumerate(items, 1):
-            if choice == str(index) or lowered == item.key.casefold() or lowered in {shortcut.casefold() for shortcut in item.shortcuts}:
+            if _item_matches(item, choice, index):
                 return item
         print("Enter a menu number.", file=sys.stderr)
-
 
 
 def _render_multi_select(title_lines: list[str], items: list[_MenuItem], selected: int, checked: set[int]) -> None:
@@ -208,7 +128,7 @@ def _redraw_multi_select(title_lines: list[str], items: list[_MenuItem], selecte
     line_count = len(title_lines) + len(items) + 1
     print(f"\x1b[{line_count}F", end="", file=sys.stderr)
     _render_multi_select(title_lines, items, selected, checked)
-    print("\x1b[2KUse Up/Down, Space, Enter, number keys, /help, or /exit.", file=sys.stderr, flush=True)
+    print("\x1b[2KUse Up/Down, Space, Enter, number keys, or Ctrl-C.", file=sys.stderr, flush=True)
 
 
 def _multi_select_prompt(title_lines: list[str], items: list[_MenuItem], *, help_kind: str = "multi", default_indexes: set[int] | None = None) -> list[_MenuItem]:
@@ -220,7 +140,7 @@ def _multi_select_prompt(title_lines: list[str], items: list[_MenuItem], *, help
             selected = 0
             with _RawTerminal():
                 _render_multi_select(title_lines, items, selected, checked)
-                print("Use Up/Down, Space, Enter, number keys, /help, or /exit.", file=sys.stderr, flush=True)
+                print("Use Up/Down, Space, Enter, number keys, or Ctrl-C.", file=sys.stderr, flush=True)
                 while True:
                     key = _read_key()
                     if key == "up":
@@ -237,30 +157,15 @@ def _multi_select_prompt(title_lines: list[str], items: list[_MenuItem], *, help
                         continue
                     if key in {"\r", "\n"}:
                         return [item for index, item in enumerate(items) if index in checked]
-                    if key == "/":
-                        command = _read_menu_command()
-                        selected_item = _menu_item_for_command(command, items)
-                        if selected_item is not None:
-                            checked.symmetric_difference_update({items.index(selected_item)})
-                            selected = items.index(selected_item)
-                            _redraw_multi_select(title_lines, items, selected, checked)
-                            continue
-                        if _handle_slash_command(command, kind=help_kind):
-                            _render_multi_select(title_lines, items, selected, checked)
-                            print("Use Up/Down, Space, Enter, number keys, /help, or /exit.", file=sys.stderr, flush=True)
-                            continue
-                    if key in {"left", "right", "home", "end", "delete", "unknown"}:
+                    if key in {"left", "right", "home", "end", "delete", "unknown", "escape"}:
                         continue
                     if len(key) == 1:
-                        lowered = key.casefold()
                         for index, item in enumerate(items, 1):
-                            if key == str(index) or lowered == item.key.casefold() or lowered in {shortcut.casefold() for shortcut in item.shortcuts}:
+                            if _item_matches(item, key, index):
                                 checked.symmetric_difference_update({index - 1})
                                 selected = index - 1
                                 _redraw_multi_select(title_lines, items, selected, checked)
                                 break
-        except _LauncherExit:
-            raise
         except (OSError, termios.error):
             pass
     for line in title_lines:
@@ -272,8 +177,6 @@ def _multi_select_prompt(title_lines: list[str], items: list[_MenuItem], *, help
         choice = input("Select optional numbers, comma separated; blank for none: ").strip()
         if not choice:
             return []
-        if _handle_slash_command(choice, kind=help_kind):
-            continue
         indexes: set[int] = set()
         valid = True
         for part in choice.replace(",", " ").split():
@@ -285,13 +188,8 @@ def _multi_select_prompt(title_lines: list[str], items: list[_MenuItem], *, help
             return [item for index, item in enumerate(items) if index in indexes]
         print("Enter listed numbers separated by commas.", file=sys.stderr)
 
-def _text_prompt(
-    prompt: str,
-    *,
-    help_kind: str,
-    multiline_fallback_terminator: str | None = None,
-    slash_handler: Callable[[str], bool] | None = None,
-) -> str:
+
+def _text_prompt(prompt: str, *, help_kind: str, multiline_fallback_terminator: str | None = None) -> str:
     if _interactive_stdin():
         try:
             with _RawTerminal():
@@ -301,16 +199,7 @@ def _text_prompt(
                     key = _read_key()
                     if key in {"\r", "\n"}:
                         print(file=sys.stderr)
-                        value = "".join(buffer).strip()
-                        if slash_handler is not None and slash_handler(value):
-                            buffer.clear()
-                            print(prompt, end="", file=sys.stderr, flush=True)
-                            continue
-                        if _handle_slash_command(value, kind=help_kind):
-                            buffer.clear()
-                            print(prompt, end="", file=sys.stderr, flush=True)
-                            continue
-                        return value
+                        return "".join(buffer).strip()
                     if key == "alt-enter":
                         buffer.append("\n")
                         print("\n... ", end="", file=sys.stderr, flush=True)
@@ -325,43 +214,24 @@ def _text_prompt(
                     if len(key) == 1 and key.isprintable():
                         buffer.append(key)
                         print(key, end="", file=sys.stderr, flush=True)
-        except _LauncherExit:
-            raise
         except (OSError, termios.error):
             pass
     if multiline_fallback_terminator is not None:
         print("Paste the request. Finish with a line containing only a single dot.", file=sys.stderr)
+        lines: list[str] = []
         while True:
-            lines: list[str] = []
-            while True:
-                try:
-                    line = input()
-                except EOFError:
-                    return "\n".join(lines).strip()
-                if line == multiline_fallback_terminator:
-                    break
-                stripped = line.strip()
-                if slash_handler is not None and slash_handler(stripped):
-                    continue
-                if _handle_slash_command(stripped, kind=help_kind):
-                    continue
-                lines.append(line)
-            if lines:
+            try:
+                line = input()
+            except EOFError:
                 return "\n".join(lines).strip()
-    while True:
-        value = input(prompt).strip()
-        if slash_handler is not None and slash_handler(value):
-            continue
-        if _handle_slash_command(value, kind=help_kind):
-            continue
-        return value
+            if line == multiline_fallback_terminator:
+                return "\n".join(lines).strip()
+            lines.append(line)
+    return input(prompt).strip()
 
 
 def _line_prompt(prompt: str, *, help_kind: str, allow_blank: bool = False) -> str | None:
-    while True:
-        value = input(prompt).strip()
-        if _handle_slash_command(value, kind=help_kind):
-            continue
-        if not value and allow_blank:
-            return None
-        return value
+    value = input(prompt).strip()
+    if not value and allow_blank:
+        return None
+    return value

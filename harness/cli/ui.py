@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from . import ui_primitives as _ui_primitives
 from .ui_primitives import (
-    _handle_slash_command,
     _interactive_stdin,
     _LauncherExit,
     _line_prompt,
@@ -16,8 +15,6 @@ from .ui_primitives import (
     _print_prompt_help,
     _RawTerminal,
     _read_key,
-    _read_key_byte,
-    _read_menu_command,
     _redraw_menu,
     _render_menu,
 )
@@ -42,11 +39,8 @@ def _sync_primitive_hooks() -> None:
     _ui_primitives._interactive_stdin = _interactive_stdin
     _ui_primitives._RawTerminal = _RawTerminal
     _ui_primitives._read_key = _read_key
-    _ui_primitives._read_key_byte = _read_key_byte
-    _ui_primitives._read_menu_command = _read_menu_command
     _ui_primitives._render_menu = _render_menu
     _ui_primitives._redraw_menu = _redraw_menu
-    _ui_primitives._handle_slash_command = _handle_slash_command
 
 
 def _menu_prompt(title_lines: list[str], items: list[_MenuItem], *, help_kind: str, default_index: int = 0, allow_blank_default: bool = False) -> _MenuItem:
@@ -65,14 +59,12 @@ def _text_prompt(
     *,
     help_kind: str,
     multiline_fallback_terminator: str | None = None,
-    slash_handler: Callable[[str], bool] | None = None,
 ) -> str:
     _sync_primitive_hooks()
     return _ui_primitives._text_prompt(
         prompt,
         help_kind=help_kind,
         multiline_fallback_terminator=multiline_fallback_terminator,
-        slash_handler=slash_handler,
     )
 
 
@@ -91,8 +83,6 @@ def _prompt_for_explorer_scope(repository: Path) -> str | None:
     while True:
         print("Explorer scope (number/path, blank for explorer-first): ", end="", file=sys.stderr, flush=True)
         choice = input().strip()
-        if _handle_slash_command(choice, kind="scope"):
-            continue
         if not choice:
             return None
         if choice.isdigit():
@@ -214,5 +204,5 @@ def _prompt_for_decision(run_id: str, request: dict[str, Any]) -> tuple[str | No
         return None, selected
 
 
-def _interactive_request(slash_handler: Callable[[str], bool] | None = None) -> str:
-    return _text_prompt("Request: ", help_kind="request", multiline_fallback_terminator=".", slash_handler=slash_handler)
+def _interactive_request() -> str:
+    return _text_prompt("Request: ", help_kind="request", multiline_fallback_terminator=".")

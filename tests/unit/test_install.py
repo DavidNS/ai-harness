@@ -14,6 +14,9 @@ def checkout(root):
     launcher = path / "ai-harness"
     launcher.write_text("#!/bin/sh\nexec echo launcher \"$@\"\n", encoding="utf-8")
     launcher.chmod(0o755)
+    ui_launcher = path / "ai-harness-ui"
+    ui_launcher.write_text("#!/bin/sh\nexec echo ui launcher \"$@\"\n", encoding="utf-8")
+    ui_launcher.chmod(0o755)
     (path / "skills" / "ai-code-harness").mkdir(parents=True)
     return path
 
@@ -104,27 +107,31 @@ class InstallTests(unittest.TestCase):
 
             self.assertTrue(ok)
             self.assertIn(str(bin_dir / "aih"), messages[0])
-            self.assertIn("would write", messages[0])
+            self.assertIn(str(bin_dir / "aihui"), messages[1])
+            self.assertTrue(all("would write" in message for message in messages))
             self.assertFalse(bin_dir.exists())
 
     def test_shortcut_install_creates_executable_owned_launcher(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp); co = checkout(root); bin_dir = root / "bin"
-            link = install.launcher_links_for(co, bin_dir)[0]
+            links = install.launcher_links_for(co, bin_dir)
 
-            ok, messages = install.install([link])
+            ok, messages = install.install(links)
 
             self.assertTrue(ok, messages)
-            self.assertTrue(link.destination.is_file())
-            self.assertTrue(link.destination.stat().st_mode & 0o111)
-            text = link.destination.read_text(encoding="utf-8")
-            self.assertIn("ai-code-harness-launcher", text)
-            self.assertIn(f'checkout="{co.resolve()}"', text)
-            self.assertIn("exec", text)
-            self.assertIn("ai-harness", text)
-            ok, messages = install.install([link])
+            destinations = {link.destination.name: link.destination for link in links}
+            for destination in destinations.values():
+                self.assertTrue(destination.is_file())
+                self.assertTrue(destination.stat().st_mode & 0o111)
+                text = destination.read_text(encoding="utf-8")
+                self.assertIn("ai-code-harness-launcher", text)
+                self.assertIn(f'checkout="{co.resolve()}"', text)
+                self.assertIn("exec", text)
+            self.assertIn("ai-harness", destinations["aih"].read_text(encoding="utf-8"))
+            self.assertIn("ai-harness-ui", destinations["aihui"].read_text(encoding="utf-8"))
+            ok, messages = install.install(links)
             self.assertTrue(ok)
-            self.assertTrue(messages[0].startswith("unchanged:"))
+            self.assertTrue(all(message.startswith("unchanged:") for message in messages))
 
     def test_shortcut_regular_file_conflict_is_preserved(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -161,6 +168,7 @@ class InstallTests(unittest.TestCase):
 
             self.assertFalse(ok)
             self.assertFalse((real / "aih").exists())
+            self.assertFalse((real / "aihui").exists())
             self.assertIn("unsafe parent", " ".join(messages))
 
 
