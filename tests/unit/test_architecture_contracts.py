@@ -127,6 +127,25 @@ class ArchitectureContractTests(unittest.TestCase):
 
         self.assertNotIn("v2.frontends_boundary", codes)
 
+    def test_v2_boundary_checker_rejects_frontend_direct_filesystem_access(self) -> None:
+        cases = (
+            "from pathlib import Path\nPath('.ai-harness/v2/runs').read_text()\n",
+            "open('.ai-harness/v2/runs/state.json')\n",
+        )
+        for source in cases:
+            with self.subTest(source=source):
+                codes = self._v2_boundary_codes_for("harness_v2/frontends/_bad_boundary_fixture.py", source)
+                self.assertIn("v2.frontends_filesystem_boundary", codes)
+
+    def test_v2_contract_dtos_do_not_import_domain_enums(self) -> None:
+        path = ROOT / "harness_v2" / "backend" / "application" / "contracts.py"
+        imports = check_architecture.imported_names(check_architecture.parse(path))
+
+        self.assertFalse(
+            any(module == "harness_v2.backend.domain" or module.startswith("harness_v2.backend.domain.") for module in imports),
+            imports,
+        )
+
     def test_v2_boundary_checker_rejects_any_v1_import(self) -> None:
         codes = self._v2_boundary_codes_for(
             "harness_v2/backend/application/_bad_boundary_fixture.py",
@@ -150,6 +169,35 @@ class ArchitectureContractTests(unittest.TestCase):
         )
 
         self.assertIn("v2.adapters_boundary", codes)
+
+    def test_v2_boundary_checker_rejects_ports_importing_outer_layers(self) -> None:
+        cases = (
+            "from harness_v2.adapters import storage\n",
+            "from harness_v2.hosts.in_process import host\n",
+            "from harness_v2.frontends import cli\n",
+            "from harness_v2.backend.application import run_service\n",
+        )
+        for source in cases:
+            with self.subTest(source=source):
+                codes = self._v2_boundary_codes_for("harness_v2/backend/ports/_bad_boundary_fixture.py", source)
+                self.assertIn("v2.ports_boundary", codes)
+
+    def test_v2_model_provider_guardrail_rejects_shell_execution(self) -> None:
+        cases = (
+            "import subprocess\nsubprocess.run('echo unsafe', shell=True)\n",
+            "import subprocess\nsubprocess.Popen('echo unsafe')\n",
+        )
+        for source in cases:
+            with self.subTest(source=source):
+                path = ROOT / "harness_v2" / "adapters" / "models" / "_bad_shell_fixture.py"
+                path.write_text(source, encoding="utf-8")
+                try:
+                    report = check_architecture.Report()
+                    check_architecture.check_v2_model_provider_execution(report)
+                    codes = {finding.code for finding in report.findings}
+                    self.assertIn("v2.model_provider_shell_boundary", codes)
+                finally:
+                    path.unlink(missing_ok=True)
 
     def test_v2_boundary_checker_rejects_hosts_importing_frontends(self) -> None:
         codes = self._v2_boundary_codes_for(

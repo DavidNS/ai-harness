@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from harness_v2.adapters.id_generator import UuidIdGenerator
 from harness_v2.adapters.storage import FileStateStore, InMemoryStateStore
 from harness_v2.backend.application.contracts import Command, CommandResult, Query, QueryResult
 from harness_v2.backend.application.run_service import RunService
@@ -25,9 +26,9 @@ class InProcessHost:
         if service is not None:
             self._service = service
         elif state_root is not None:
-            self._service = RunService(FileStateStore(state_root))
+            self._service = RunService(FileStateStore(state_root), id_generator=UuidIdGenerator())
         else:
-            self._service = RunService(state_store or InMemoryStateStore())
+            self._service = RunService(state_store or InMemoryStateStore(), id_generator=UuidIdGenerator())
 
     def execute(self, command: Command) -> CommandResult:
         return self._service.execute(command)

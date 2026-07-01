@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from harness_v2.backend.domain.lifecycle import PhaseName, RunStatus, RunStrategy
-
 
 class RunNotFoundError(KeyError):
     """Raised when a command or query targets an unknown run."""
@@ -13,6 +11,11 @@ class RunNotFoundError(KeyError):
 
 class InvalidRunStateError(RuntimeError):
     """Raised when a command is not valid for the run's current state."""
+
+
+PHASE_VALUES = frozenset({"EXPLORE_BUNDLE", "PROPOSAL_BUNDLE", "SPEC_BUNDLE", "DESIGN_BUNDLE", "TASKS_BUNDLE", "TDD_BUNDLE"})
+RUN_STATUS_VALUES = frozenset({"PENDING", "RUNNING", "WAITING_FOR_USER", "COMPLETED", "FAILED", "CANCELLED"})
+RUN_STRATEGY_VALUES = frozenset({"SDD", "EXPLORE_BUNDLE", "PROPOSAL_BUNDLE", "SPEC_BUNDLE", "DESIGN_BUNDLE", "TASKS_BUNDLE", "TDD_BUNDLE"})
 
 
 def _require_text(value: str, field: str) -> str:
@@ -28,25 +31,25 @@ def _text_tuple(values: tuple[str, ...] | list[str], field: str) -> tuple[str, .
     return normalized
 
 
-def _phase_text(value: str | PhaseName, field: str = "phase") -> str:
-    try:
-        return PhaseName(_require_text(value, field)).value
-    except ValueError as exc:
-        raise ValueError(f"{field} is not a known phase") from exc
+def _phase_text(value: str, field: str = "phase") -> str:
+    normalized = _require_text(value, field)
+    if normalized not in PHASE_VALUES:
+        raise ValueError(f"{field} is not a known phase")
+    return normalized
 
 
-def _status_text(value: str | RunStatus, field: str = "status") -> str:
-    try:
-        return RunStatus(_require_text(value, field)).value
-    except ValueError as exc:
-        raise ValueError(f"{field} is not a known run status") from exc
+def _status_text(value: str, field: str = "status") -> str:
+    normalized = _require_text(value, field)
+    if normalized not in RUN_STATUS_VALUES:
+        raise ValueError(f"{field} is not a known run status")
+    return normalized
 
 
-def _strategy_text(value: str | RunStrategy, field: str = "strategy") -> str:
-    try:
-        return RunStrategy(_require_text(value, field)).value
-    except ValueError as exc:
-        raise ValueError(f"{field} is not a known run strategy") from exc
+def _strategy_text(value: str, field: str = "strategy") -> str:
+    normalized = _require_text(value, field)
+    if normalized not in RUN_STRATEGY_VALUES:
+        raise ValueError(f"{field} is not a known run strategy")
+    return normalized
 
 
 def _type_name(expected_type: object) -> str:

@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
-from uuid import uuid4
 
 from harness_v2.backend.application.contracts import (
     CancelRun,
@@ -22,14 +19,12 @@ from harness_v2.backend.application.contracts import (
     ListRuns,
     ListRunsResult,
     PendingDecisionView,
-    PhaseCompleted,
     PhaseStarted,
     Query,
     QueryResult,
     ResumeRun,
     RunCancelled,
     RunNotFoundError,
-    RunCompleted,
     RunResumed,
     RunStarted,
     RunSummaryView,
@@ -43,6 +38,8 @@ from harness_v2.backend.application.contracts import (
 from harness_v2.backend.domain.decisions import PendingDecision
 from harness_v2.backend.domain.lifecycle import LifecycleGraph, PhaseName, RunStatus, RunStrategy
 from harness_v2.backend.domain.runs import RunRecord
+from harness_v2.backend.ports.clock import ClockPort
+from harness_v2.backend.ports.id_generator import IdGeneratorPort
 from harness_v2.backend.ports.state_store import StateNotFoundError, StateStorePort
 
 INITIAL_PHASE = PhaseName.EXPLORE_BUNDLE
@@ -74,9 +71,6 @@ class DecisionRequest:
         object.__setattr__(self, "prompt", _require_text(self.prompt, "prompt"))
         object.__setattr__(self, "options", _text_tuple(self.options, "options"))
 
-
-def _utc_timestamp() -> str:
-    return datetime.now(UTC).isoformat()
 
 
 def _pending_decision_view(run: RunRecord) -> PendingDecisionView | None:
@@ -154,25 +148,18 @@ class _RunStateAccess:
 
 
 class StartRunService(_RunStateAccess):
-    def __init__(self, state_store: StateStorePort, id_factory: Callable[[], str] | None = None) -> None:
+    def __init__(self, state_store: StateStorePort, id_generator: IdGeneratorPort) -> None:
         super().__init__(state_store)
-        self._id_factory = id_factory or (lambda: uuid4().hex)
+        self._id_generator = id_generator
 
     def execute(self, command: StartRun) -> CommandResult:
-        run_id = self._id_factory()
-        events = (
-            RunStarted(run_id=run_id, request=command.request),
-            PhaseStarted(run_id=run_id, phase=INITIAL_PHASE.value),
-            PhaseCompleted(run_id=run_id, phase=INITIAL_PHASE.value),
-            RunCompleted(run_id=run_id),
-        )
+        run_id = self._id_generator.new_id()
+        events = (RunStarted(run_id=run_id, request=command.request),)
         run = RunRecord(
             run_id=run_id,
             request=command.request,
-            status=RunStatus.COMPLETED,
-            strategy=RunStrategy.EXPLORE_BUNDLE,
-            current_phase=None,
-            completed_phases=(INITIAL_PHASE,),
+            status=RunStatus.PENDING,
+            strategy=RunStrategy.SDD,
         )
         self._state_store.save(run)
         return CommandResult(run=run_to_view(run), events=events)
@@ -200,9 +187,9 @@ class ResumeRunService(_RunStateAccess):
 
 
 class RequestUserDecisionService(_RunStateAccess):
-    def __init__(self, state_store: StateStorePort, timestamp_factory: Callable[[], str] | None = None) -> None:
+    def __init__(self, state_store: StateStorePort, clock: ClockPort) -> None:
         super().__init__(state_store)
-        self._timestamp_factory = timestamp_factory or _utc_timestamp
+        self._clock = clock
 
     def execute(self, command: DecisionRequest) -> CommandResult:
         run = self._get(command.run_id)
@@ -212,7 +199,7 @@ class RequestUserDecisionService(_RunStateAccess):
             decision_id=command.decision_id,
             origin_phase=run.current_phase,
             prompt=command.prompt,
-            created_at=self._timestamp_factory(),
+            created_at=self._clock.now_iso(),
             options=command.options,
         )
         event = UserDecisionRequested(
@@ -302,10 +289,10 @@ class RunService:
     def __init__(
         self,
         state_store: StateStorePort,
-        id_factory: Callable[[], str] | None = None,
+        id_generator: IdGeneratorPort,
     ) -> None:
         self._state_store = state_store
-        self._start = StartRunService(state_store, id_factory=id_factory)
+        self._start = StartRunService(state_store, id_generator=id_generator)
         self._resume = ResumeRunService(state_store)
         self._cancel = CancelRunService(state_store)
         self._submit_decision = SubmitUserDecisionService(state_store)

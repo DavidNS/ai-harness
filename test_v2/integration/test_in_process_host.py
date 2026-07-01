@@ -15,11 +15,9 @@ from harness_v2.backend.application.contracts import (
     InvalidRunStateError,
     ListRuns,
     ListRunsResult,
-    PhaseCompleted,
     PhaseStarted,
     QueryResult,
     ResumeRun,
-    RunCompleted,
     RunNotFoundError,
     RunResumed,
     RunStarted,
@@ -38,6 +36,24 @@ from harness_v2.hosts.in_process.host import InProcessHost
 TIMESTAMP = "2026-07-01T00:00:00+00:00"
 
 
+
+
+class StaticIdGenerator:
+    def __init__(self, value: str = "run-1") -> None:
+        self.value = value
+
+    def new_id(self) -> str:
+        return self.value
+
+
+class StaticClock:
+    def __init__(self, value: str = TIMESTAMP) -> None:
+        self.value = value
+
+    def now_iso(self) -> str:
+        return self.value
+
+
 def running_run(run_id: str = "run-1") -> RunRecord:
     return RunRecord(
         run_id=run_id,
@@ -49,31 +65,30 @@ def running_run(run_id: str = "run-1") -> RunRecord:
 
 
 class InProcessHostIntegrationTests(unittest.TestCase):
-    def test_start_run_completes_simulated_run_and_emits_ordered_events(self) -> None:
-        host = InProcessHost(RunService(InMemoryStateStore(), id_factory=lambda: "run-1"))
+    def test_start_run_creates_pending_run_and_emits_started_event(self) -> None:
+        host = InProcessHost(RunService(InMemoryStateStore(), id_generator=StaticIdGenerator("run-1")))
 
         result = host.execute(StartRun("Fix tests"))
 
         self.assertIsInstance(result.run, RunView)
         self.assertEqual("run-1", result.run.run_id)
-        self.assertEqual("COMPLETED", result.run.status)
-        self.assertEqual(("EXPLORE_BUNDLE",), result.run.completed_phases)
-        self.assertEqual(
-            [RunStarted, PhaseStarted, PhaseCompleted, RunCompleted],
-            [type(event) for event in result.events],
-        )
+        self.assertEqual("PENDING", result.run.status)
+        self.assertEqual("SDD", result.run.strategy)
+        self.assertIsNone(result.run.current_phase)
+        self.assertEqual((), result.run.completed_phases)
+        self.assertEqual([RunStarted], [type(event) for event in result.events])
 
     def test_start_run_persists_state_in_injected_store(self) -> None:
         store = InMemoryStateStore()
-        host = InProcessHost(RunService(store, id_factory=lambda: "run-1"))
+        host = InProcessHost(RunService(store, id_generator=StaticIdGenerator("run-1")))
 
         host.execute(StartRun("Fix tests"))
 
         persisted = store.get("run-1")
-        self.assertEqual(RunStatus.COMPLETED, persisted.status)
+        self.assertEqual(RunStatus.PENDING, persisted.status)
 
     def test_queries_return_stable_dtos_for_authoritative_backend_state(self) -> None:
-        host = InProcessHost(RunService(InMemoryStateStore(), id_factory=lambda: "run-1"))
+        host = InProcessHost(RunService(InMemoryStateStore(), id_generator=StaticIdGenerator("run-1")))
         host.execute(StartRun("Fix tests"))
 
         state = host.query(GetRunState("run-1"))
@@ -82,9 +97,9 @@ class InProcessHostIntegrationTests(unittest.TestCase):
         runs = host.query(ListRuns())
 
         self.assertIsInstance(state, GetRunStateResult)
-        self.assertEqual("COMPLETED", state.status)
+        self.assertEqual("PENDING", state.status)
         self.assertIsInstance(actions, GetAvailableActionsResult)
-        self.assertEqual((), actions.actions)
+        self.assertEqual(("resume", "cancel"), actions.actions)
         self.assertIsInstance(run, GetRunResult)
         self.assertEqual("Fix tests", run.run.request)
         self.assertIsInstance(runs, ListRunsResult)
@@ -93,7 +108,7 @@ class InProcessHostIntegrationTests(unittest.TestCase):
     def test_resume_pending_run_starts_first_phase_and_persists_state(self) -> None:
         store = InMemoryStateStore()
         store.save(RunRecord(run_id="run-1", request="Fix tests", status=RunStatus.PENDING, strategy=RunStrategy.SDD))
-        host = InProcessHost(RunService(store))
+        host = InProcessHost(RunService(store, id_generator=StaticIdGenerator()))
 
         result = host.execute(ResumeRun("run-1"))
 
@@ -107,7 +122,7 @@ class InProcessHostIntegrationTests(unittest.TestCase):
     def test_resume_running_run_emits_resume_event_without_state_rewrite(self) -> None:
         store = InMemoryStateStore()
         store.save(running_run("run-1"))
-        host = InProcessHost(RunService(store))
+        host = InProcessHost(RunService(store, id_generator=StaticIdGenerator()))
 
         result = host.execute(ResumeRun("run-1"))
 
@@ -142,7 +157,7 @@ class InProcessHostIntegrationTests(unittest.TestCase):
             with self.subTest(run=run.run_id):
                 store = InMemoryStateStore()
                 store.save(run)
-                host = InProcessHost(RunService(store))
+                host = InProcessHost(RunService(store, id_generator=StaticIdGenerator()))
 
                 with self.assertRaises(InvalidRunStateError):
                     host.execute(ResumeRun(run.run_id))
@@ -150,7 +165,7 @@ class InProcessHostIntegrationTests(unittest.TestCase):
     def test_running_run_can_be_cancelled(self) -> None:
         store = InMemoryStateStore()
         store.save(running_run("run-1"))
-        host = InProcessHost(RunService(store))
+        host = InProcessHost(RunService(store, id_generator=StaticIdGenerator()))
 
         result = host.execute(CancelRun("run-1"))
 
@@ -158,8 +173,17 @@ class InProcessHostIntegrationTests(unittest.TestCase):
         self.assertEqual(RunStatus.CANCELLED, store.get("run-1").status)
 
     def test_completed_run_cannot_be_cancelled(self) -> None:
-        host = InProcessHost(RunService(InMemoryStateStore(), id_factory=lambda: "run-1"))
-        host.execute(StartRun("Fix tests"))
+        store = InMemoryStateStore()
+        store.save(
+            RunRecord(
+                run_id="run-1",
+                request="Fix tests",
+                status=RunStatus.COMPLETED,
+                strategy=RunStrategy.EXPLORE_BUNDLE,
+                completed_phases=(PhaseName.EXPLORE_BUNDLE,),
+            )
+        )
+        host = InProcessHost(RunService(store, id_generator=StaticIdGenerator("run-1")))
 
         with self.assertRaises(InvalidRunStateError):
             host.execute(CancelRun("run-1"))
@@ -167,8 +191,8 @@ class InProcessHostIntegrationTests(unittest.TestCase):
     def test_internal_request_decision_then_public_submit_decision_round_trips_through_backend_events(self) -> None:
         store = InMemoryStateStore()
         store.save(running_run("run-1"))
-        decision_service = RequestUserDecisionService(store, timestamp_factory=lambda: TIMESTAMP)
-        host = InProcessHost(RunService(store))
+        decision_service = RequestUserDecisionService(store, clock=StaticClock(TIMESTAMP))
+        host = InProcessHost(RunService(store, id_generator=StaticIdGenerator()))
 
         requested = decision_service.execute(DecisionRequest("run-1", "decision-1", "Choose", ("continue", "cancel")))
 
@@ -192,19 +216,27 @@ class InProcessHostIntegrationTests(unittest.TestCase):
 
     def test_internal_request_decision_requires_running_run(self) -> None:
         store = InMemoryStateStore()
-        host = InProcessHost(RunService(store, id_factory=lambda: "run-1"))
+        host = InProcessHost(RunService(store, id_generator=StaticIdGenerator("run-1")))
         host.execute(StartRun("Fix tests"))
-        decision_service = RequestUserDecisionService(store, timestamp_factory=lambda: TIMESTAMP)
+        decision_service = RequestUserDecisionService(store, clock=StaticClock(TIMESTAMP))
 
         with self.assertRaises(InvalidRunStateError):
             decision_service.execute(DecisionRequest("run-1", "decision-1", "Choose"))
 
     def test_submit_decision_validates_pending_request(self) -> None:
-        host = InProcessHost(RunService(InMemoryStateStore(), id_factory=lambda: "run-1"))
+        host = InProcessHost(RunService(InMemoryStateStore(), id_generator=StaticIdGenerator("run-1")))
         host.execute(StartRun("Fix tests"))
 
         with self.assertRaises(InvalidRunStateError):
             host.execute(SubmitUserDecision("run-1", "decision-1", "continue"))
+
+    def test_host_exposes_only_command_and_query_execution_surfaces(self) -> None:
+        host = InProcessHost(RunService(InMemoryStateStore(), id_generator=StaticIdGenerator("run-1")))
+
+        self.assertTrue(callable(host.execute))
+        self.assertTrue(callable(host.query))
+        self.assertFalse(hasattr(host, "run_worker_task"))
+        self.assertFalse(hasattr(host, "_worker_service"))
 
     def test_host_delegates_execute_and_query_without_transforming_results(self) -> None:
         class SpyService:

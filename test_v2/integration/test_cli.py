@@ -25,25 +25,22 @@ class CliIntegrationTests(unittest.TestCase):
             check=False,
         )
 
-    def test_cli_module_starts_simulated_run_and_persists_for_queries(self) -> None:
+    def test_cli_module_starts_pending_run_then_resume_starts_first_phase(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             state_root = Path(temp) / "runtime"
 
             started = self.run_cli(state_root, "start", "Fix", "tests")
             self.assertEqual(0, started.returncode, started.stderr)
             self.assertIn("Run: ", started.stdout)
-            self.assertIn("Status: COMPLETED", started.stdout)
+            self.assertIn("Status: PENDING", started.stdout)
             self.assertIn("Event: RunStarted", started.stdout)
-            self.assertIn("Event: PhaseStarted phase=EXPLORE_BUNDLE", started.stdout)
-            self.assertIn("Event: PhaseCompleted phase=EXPLORE_BUNDLE", started.stdout)
-            self.assertIn("Event: RunCompleted", started.stdout)
 
             run_id = next(line.split(": ", 1)[1] for line in started.stdout.splitlines() if line.startswith("Run: "))
 
             listed = self.run_cli(state_root, "list")
             self.assertEqual(0, listed.returncode, listed.stderr)
             self.assertIn("Runs: 1", listed.stdout)
-            self.assertIn(f"Run: {run_id} status=COMPLETED", listed.stdout)
+            self.assertIn(f"Run: {run_id} status=PENDING", listed.stdout)
 
             fetched = self.run_cli(state_root, "get", run_id)
             self.assertEqual(0, fetched.returncode, fetched.stderr)
@@ -51,16 +48,18 @@ class CliIntegrationTests(unittest.TestCase):
             self.assertIn("Request: Fix tests", fetched.stdout)
 
             resumed = self.run_cli(state_root, "resume", run_id)
-            self.assertNotEqual(0, resumed.returncode)
-            self.assertIn("error:", resumed.stderr)
+            self.assertEqual(0, resumed.returncode, resumed.stderr)
+            self.assertIn("Status: RUNNING", resumed.stdout)
+            self.assertIn("Event: RunResumed", resumed.stdout)
+            self.assertIn("Event: PhaseStarted phase=EXPLORE_BUNDLE", resumed.stdout)
 
             state = self.run_cli(state_root, "state", run_id)
             self.assertEqual(0, state.returncode, state.stderr)
-            self.assertIn("Status: COMPLETED", state.stdout)
+            self.assertIn("Status: RUNNING", state.stdout)
 
             actions = self.run_cli(state_root, "actions", run_id)
             self.assertEqual(0, actions.returncode, actions.stderr)
-            self.assertIn("Actions: none", actions.stdout)
+            self.assertIn("Actions: resume, cancel", actions.stdout)
 
     def test_cli_cancel_and_decision_use_host_contract_with_file_state(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

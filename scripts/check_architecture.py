@@ -536,6 +536,18 @@ def check_v2_boundaries(report: Report) -> None:
         "harness_v2.frontends",
         *relative_forbidden,
     }
+    ports_relative_forbidden = {
+        f"{dots}{name}"
+        for dots in (".", "..", "...", "....")
+        for name in ("adapters", "hosts", "frontends", "application")
+    }
+    ports_forbidden = {
+        "harness_v2.adapters",
+        "harness_v2.hosts",
+        "harness_v2.frontends",
+        "harness_v2.backend.application",
+        *ports_relative_forbidden,
+    }
     adapters_forbidden = {
         "harness_v2.frontends",
         ".frontends",
@@ -594,6 +606,12 @@ def check_v2_boundaries(report: Report) -> None:
             "v2 application must not import adapters, hosts, or frontends",
         ),
         (
+            root / "backend" / "ports",
+            ports_forbidden,
+            "v2.ports_boundary",
+            "v2 ports must not import adapters, hosts, frontends, or application services",
+        ),
+        (
             root / "adapters",
             adapters_forbidden,
             "v2.adapters_boundary",
@@ -615,7 +633,8 @@ def check_v2_boundaries(report: Report) -> None:
 
     for folder, forbidden, code, message in boundary_checks:
         for path in python_files(folder):
-            imports = imported_names(parse(path))
+            tree = parse(path)
+            imports = imported_names(tree)
             bad = _imports_with_prefix(imports, forbidden)
             if code == "v2.frontends_boundary":
                 allowed = _imports_with_prefix(imports, frontends_allowed)
@@ -628,6 +647,81 @@ def check_v2_boundaries(report: Report) -> None:
                     path=rel(path),
                     details={"imports": sorted(bad)},
                 )
+            if code == "v2.frontends_boundary":
+                filesystem_calls = _frontend_filesystem_calls(tree)
+                if filesystem_calls:
+                    report.error(
+                        "v2 frontends must not access runtime, state, or artifact files directly",
+                        code="v2.frontends_filesystem_boundary",
+                        category="boundary",
+                        path=rel(path),
+                        details={"calls": sorted(filesystem_calls)},
+                    )
+
+
+
+_FRONTEND_FILESYSTEM_CALLS = {
+    "open",
+    "read_text",
+    "write_text",
+    "read_bytes",
+    "write_bytes",
+    "glob",
+    "rglob",
+    "iterdir",
+    "unlink",
+    "mkdir",
+}
+
+
+def _frontend_filesystem_calls(tree: ast.Module) -> set[str]:
+    calls: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if isinstance(node.func, ast.Name) and node.func.id == "open":
+            calls.add("open")
+        elif isinstance(node.func, ast.Attribute) and node.func.attr in _FRONTEND_FILESYSTEM_CALLS:
+            calls.add(node.func.attr)
+    return calls
+
+
+
+def _model_adapter_shell_findings(tree: ast.Module) -> list[dict[str, object]]:
+    findings: list[dict[str, object]] = []
+    subprocess_calls = {"run", "Popen", "call", "check_call", "check_output"}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        is_subprocess_call = False
+        if isinstance(func, ast.Attribute) and func.attr in subprocess_calls:
+            if isinstance(func.value, ast.Name) and func.value.id == "subprocess":
+                is_subprocess_call = True
+        if not is_subprocess_call:
+            continue
+        for keyword in node.keywords:
+            if keyword.arg == "shell" and isinstance(keyword.value, ast.Constant) and keyword.value.value is True:
+                findings.append({"call": func.attr, "reason": "shell=True"})
+        if node.args and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str):
+            findings.append({"call": func.attr, "reason": "string command"})
+    return findings
+
+
+def check_v2_model_provider_execution(report: Report) -> None:
+    root = ROOT / "harness_v2" / "adapters" / "models"
+    if not root.exists():
+        return
+    for path in python_files(root):
+        findings = _model_adapter_shell_findings(parse(path))
+        if findings:
+            report.error(
+                "v2 model provider adapters must execute argv lists without shell interpretation",
+                code="v2.model_provider_shell_boundary",
+                category="boundary",
+                path=rel(path),
+                details={"findings": findings},
+            )
 
 
 def check_v2_domain_test_boundaries(report: Report) -> None:
@@ -661,6 +755,7 @@ def run_checks() -> Report:
     check_budgets(report)
     check_cli_frontend_boundaries(report)
     check_v2_boundaries(report)
+    check_v2_model_provider_execution(report)
     check_v2_domain_test_boundaries(report)
     return report
 
