@@ -517,11 +517,18 @@ def check_v2_boundaries(report: Report) -> None:
         for dots in (".", "..", "...", "....")
         for name in ("adapters", "hosts", "frontends")
     }
+    domain_relative_forbidden = {
+        f"{dots}{name}"
+        for dots in (".", "..", "...", "....")
+        for name in ("adapters", "hosts", "frontends", "application", "ports")
+    }
     domain_forbidden = {
         "harness_v2.adapters",
         "harness_v2.hosts",
         "harness_v2.frontends",
-        *relative_forbidden,
+        "harness_v2.backend.application",
+        "harness_v2.backend.ports",
+        *domain_relative_forbidden,
     }
     application_forbidden = {
         "harness_v2.adapters",
@@ -538,10 +545,32 @@ def check_v2_boundaries(report: Report) -> None:
     }
     frontends_forbidden = {
         "harness_v2.adapters",
+        "harness_v2.backend.domain",
+        "harness_v2.backend.ports",
+        "harness_v2.backend.application",
         ".adapters",
         "..adapters",
         "...adapters",
         "....adapters",
+        ".backend.domain",
+        "..backend.domain",
+        "...backend.domain",
+        "....backend.domain",
+        ".backend.ports",
+        "..backend.ports",
+        "...backend.ports",
+        "....backend.ports",
+        ".backend.application",
+        "..backend.application",
+        "...backend.application",
+        "....backend.application",
+    }
+    frontends_allowed = {
+        "harness_v2.backend.application.contracts",
+        ".backend.application.contracts",
+        "..backend.application.contracts",
+        "...backend.application.contracts",
+        "....backend.application.contracts",
     }
     hosts_forbidden = {
         "harness_v2.frontends",
@@ -586,7 +615,11 @@ def check_v2_boundaries(report: Report) -> None:
 
     for folder, forbidden, code, message in boundary_checks:
         for path in python_files(folder):
-            bad = _imports_with_prefix(imported_names(parse(path)), forbidden)
+            imports = imported_names(parse(path))
+            bad = _imports_with_prefix(imports, forbidden)
+            if code == "v2.frontends_boundary":
+                allowed = _imports_with_prefix(imports, frontends_allowed)
+                bad = {module for module in bad if module not in allowed}
             if bad:
                 report.error(
                     message,

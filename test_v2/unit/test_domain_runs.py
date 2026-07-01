@@ -46,19 +46,19 @@ class RunDomainTests(unittest.TestCase):
                 completed_phases=(PhaseName.EXPLORE_BUNDLE,),
             )
 
-    def test_with_events_preserves_run_fields(self) -> None:
+    def test_replace_preserves_run_fields(self) -> None:
         run = RunRecord(
             run_id="run-1",
             request="Fix tests",
             status=RunStatus.RUNNING,
             current_phase=PhaseName.EXPLORE_BUNDLE,
         )
-        updated = run.with_events(("event",))
+        updated = run.replace(status=RunStatus.CANCELLED, current_phase=None)
 
         self.assertEqual(run.run_id, updated.run_id)
         self.assertEqual(run.request, updated.request)
-        self.assertEqual(run.status, updated.status)
-        self.assertEqual(("event",), updated.events)
+        self.assertEqual(RunStatus.CANCELLED, updated.status)
+        self.assertIsNone(updated.current_phase)
 
     def test_run_status_invariants_fail_closed(self) -> None:
         decision = PendingDecision("decision-1", PhaseName.EXPLORE_BUNDLE, "Choose", TIMESTAMP)

@@ -39,3 +39,7 @@ For each bundle:
 
 Port one bundle at a time. A partial SDD implementation is acceptable if each
 ported bundle is complete, tested, and resumable.
+
+When a bundle blocks for user input, create the waiting state and emit
+`UserDecisionRequested` from backend orchestration/application services; do not
+add a frontend command that fabricates decision requests.

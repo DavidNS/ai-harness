@@ -31,3 +31,7 @@ Goal: make blocked runs and phase escalation first-class backend behavior.
 
 Decision handling is backend behavior. Frontends render prompts and submit
 answers; they do not decide valid targets, options, or artifact invalidation.
+
+This stage should also decide whether retry/retry-phase belongs with escalation
+or with phase failure handling, then add it to the public command contract only
+with fail-closed backend semantics.

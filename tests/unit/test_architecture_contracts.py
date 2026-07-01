@@ -80,6 +80,21 @@ class ArchitectureContractTests(unittest.TestCase):
 
         self.assertIn("v2.domain_boundary", codes)
 
+    def test_v2_boundary_checker_rejects_domain_importing_application_or_ports(self) -> None:
+        cases = (
+            "from harness_v2.backend.application import contracts\n",
+            "from harness_v2.backend.ports import state_store\n",
+            "from ..application import contracts\n",
+            "from ..ports import state_store\n",
+        )
+        for source in cases:
+            with self.subTest(source=source):
+                codes = self._v2_boundary_codes_for(
+                    "harness_v2/backend/domain/_bad_boundary_fixture.py",
+                    source,
+                )
+                self.assertIn("v2.domain_boundary", codes)
+
     def test_v2_boundary_checker_rejects_frontend_importing_adapters(self) -> None:
         codes = self._v2_boundary_codes_for(
             "harness_v2/frontends/_bad_boundary_fixture.py",
@@ -87,6 +102,30 @@ class ArchitectureContractTests(unittest.TestCase):
         )
 
         self.assertIn("v2.frontends_boundary", codes)
+
+    def test_v2_boundary_checker_rejects_frontend_importing_backend_internals(self) -> None:
+        cases = (
+            "from harness_v2.backend.domain import runs\n",
+            "from harness_v2.backend.ports import state_store\n",
+            "from harness_v2.backend.application import run_service\n",
+            "from harness_v2.backend.application.run_service import RunService\n",
+        )
+        for source in cases:
+            with self.subTest(source=source):
+                codes = self._v2_boundary_codes_for(
+                    "harness_v2/frontends/_bad_boundary_fixture.py",
+                    source,
+                )
+                self.assertIn("v2.frontends_boundary", codes)
+
+    def test_v2_boundary_checker_allows_frontend_importing_host_and_contracts(self) -> None:
+        codes = self._v2_boundary_codes_for(
+            "harness_v2/frontends/_good_boundary_fixture.py",
+            "from harness_v2.hosts.in_process.host import InProcessHost\n"
+            "from harness_v2.backend.application.contracts import StartRun\n",
+        )
+
+        self.assertNotIn("v2.frontends_boundary", codes)
 
     def test_v2_boundary_checker_rejects_any_v1_import(self) -> None:
         codes = self._v2_boundary_codes_for(

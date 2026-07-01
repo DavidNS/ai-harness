@@ -188,7 +188,6 @@ def _run_from_mapping(payload: dict[str, Any]) -> RunRecord:
             pending_decision=_decision_from_mapping(pending),
             tasks=tuple(_task_from_mapping(task) for task in data.get("tasks", ())),
             errors=tuple(_error_from_mapping(error) for error in data.get("errors", ())),
-            events=(),
         )
     except (KeyError, TypeError, ValueError, DomainValidationError) as exc:
         raise StateStoreCorruptionError("state payload is malformed or domain-invalid") from exc

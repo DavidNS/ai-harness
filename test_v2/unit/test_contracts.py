@@ -1,26 +1,40 @@
 from __future__ import annotations
 
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, asdict
+import json
 import unittest
 
 from harness_v2.backend.application.contracts import (
     CancelRun,
+    CommandResult,
+    ErrorView,
     GetAvailableActions,
+    GetAvailableActionsResult,
     GetRun,
+    GetRunResult,
     GetRunState,
+    GetRunStateResult,
     ListRuns,
+    ListRunsResult,
+    PendingDecisionView,
     PhaseCompleted,
     PhaseFailed,
     PhaseStarted,
     ResumeRun,
     RunCancelled,
     RunCompleted,
+    RunResumed,
     RunStarted,
+    RunSummaryView,
+    RunView,
     StartRun,
     SubmitUserDecision,
+    TaskSummaryView,
     UserDecisionReceived,
     UserDecisionRequested,
 )
+from harness_v2.backend.domain.lifecycle import PhaseName, RunStatus, RunStrategy
+from harness_v2.backend.domain.runs import RunRecord
 
 
 class ContractTests(unittest.TestCase):
@@ -53,6 +67,7 @@ class ContractTests(unittest.TestCase):
             PhaseFailed("run-1", "EXPLORE_BUNDLE", "failed"),
             UserDecisionRequested("run-1", "decision-1", "Choose", ("continue",)),
             UserDecisionReceived("run-1", "decision-1", "continue"),
+            RunResumed("run-1"),
             RunCompleted("run-1"),
             RunCancelled("run-1"),
         )
@@ -60,10 +75,106 @@ class ContractTests(unittest.TestCase):
         self.assertEqual("run-1", events[0].run_id)
         self.assertTrue(all(event is not None for event in events))
 
+    def test_result_dtos_can_be_created_with_valid_data(self) -> None:
+        decision = PendingDecisionView("decision-1", "EXPLORE_BUNDLE", "Choose", "2026-07-01T00:00:00+00:00", ("continue",))
+        task = TaskSummaryView("task-1", "Implement", "IN_PROGRESS")
+        error = ErrorView("E001", "failed", "EXPLORE_BUNDLE", "2026-07-01T00:00:00+00:00")
+        run = RunView(
+            run_id="run-1",
+            request="Fix tests",
+            status="WAITING_FOR_USER",
+            strategy="SDD",
+            current_phase="EXPLORE_BUNDLE",
+            completed_phases=(),
+            pending_decision=decision,
+            tasks=(task,),
+            errors=(error,),
+        )
+
+        results = (
+            CommandResult(run=run, events=(RunStarted("run-1", "Fix tests"),)),
+            GetRunResult(run=run),
+            ListRunsResult(runs=(RunSummaryView("run-1", "Fix tests", "WAITING_FOR_USER", "EXPLORE_BUNDLE"),)),
+            GetRunStateResult("run-1", "WAITING_FOR_USER", "EXPLORE_BUNDLE", decision),
+            GetAvailableActionsResult("run-1", ("submit-user-decision", "cancel")),
+        )
+
+        self.assertTrue(all(result is not None for result in results))
+        self.assertEqual("WAITING_FOR_USER", run.status)
+        self.assertEqual("EXPLORE_BUNDLE", run.current_phase)
+
+    def test_result_dtos_are_json_serializable(self) -> None:
+        result = CommandResult(
+            run=RunView(
+                run_id="run-1",
+                request="Fix tests",
+                status="COMPLETED",
+                strategy="EXPLORE_BUNDLE",
+                completed_phases=("EXPLORE_BUNDLE",),
+            ),
+            events=(RunCompleted("run-1"),),
+        )
+
+        encoded = json.dumps(asdict(result), sort_keys=True)
+
+        self.assertIn('"status": "COMPLETED"', encoded)
+        self.assertIn('"completed_phases": ["EXPLORE_BUNDLE"]', encoded)
+
+    def test_result_dtos_reject_raw_domain_objects(self) -> None:
+        domain_run = RunRecord(
+            run_id="run-1",
+            request="Fix tests",
+            status=RunStatus.COMPLETED,
+            strategy=RunStrategy.EXPLORE_BUNDLE,
+            completed_phases=(PhaseName.EXPLORE_BUNDLE,),
+        )
+
+        invalid_cases = (
+            lambda: CommandResult(run=domain_run, events=()),
+            lambda: GetRunResult(run=domain_run),
+            lambda: ListRunsResult(runs=(domain_run,)),
+        )
+
+        for create in invalid_cases:
+            with self.subTest(create=create):
+                with self.assertRaises(TypeError):
+                    create()
+
+    def test_result_dtos_reject_non_serializable_nested_objects(self) -> None:
+        invalid_cases = (
+            lambda: RunView("run-1", "Fix tests", "COMPLETED", "EXPLORE_BUNDLE", tasks=(object(),)),
+            lambda: RunView("run-1", "Fix tests", "COMPLETED", "EXPLORE_BUNDLE", errors=(object(),)),
+            lambda: RunView("run-1", "Fix tests", "COMPLETED", "EXPLORE_BUNDLE", pending_decision=object()),
+            lambda: GetRunStateResult("run-1", "WAITING_FOR_USER", pending_decision=object()),
+            lambda: CommandResult(
+                run=RunView("run-1", "Fix tests", "COMPLETED", "EXPLORE_BUNDLE"),
+                events=(object(),),
+            ),
+        )
+
+        for create in invalid_cases:
+            with self.subTest(create=create):
+                with self.assertRaises(TypeError):
+                    create()
+
+    def test_result_dtos_reject_unknown_status_and_strategy(self) -> None:
+        invalid_cases = (
+            lambda: RunView("run-1", "Fix tests", "NOT_A_STATUS", "EXPLORE_BUNDLE"),
+            lambda: RunView("run-1", "Fix tests", "COMPLETED", "NOT_A_STRATEGY"),
+            lambda: RunSummaryView("run-1", "Fix tests", "NOT_A_STATUS"),
+            lambda: GetRunStateResult("run-1", "NOT_A_STATUS"),
+        )
+
+        for create in invalid_cases:
+            with self.subTest(create=create):
+                with self.assertRaises(ValueError):
+                    create()
+
     def test_text_fields_are_trimmed(self) -> None:
         self.assertEqual("Fix tests", StartRun("  Fix tests  ").request)
         self.assertEqual("run-1", GetRun("  run-1  ").run_id)
         self.assertEqual("EXPLORE_BUNDLE", PhaseStarted("run-1", "  EXPLORE_BUNDLE  ").phase)
+        self.assertEqual("COMPLETED", RunView("run-1", "Fix", "  COMPLETED  ", "SDD").status)
 
     def test_commands_reject_missing_required_text(self) -> None:
         invalid_cases = (
@@ -103,6 +214,7 @@ class ContractTests(unittest.TestCase):
             lambda: UserDecisionReceived("", "decision-1", "continue"),
             lambda: UserDecisionReceived("run-1", "", "continue"),
             lambda: UserDecisionReceived("run-1", "decision-1", ""),
+            lambda: RunResumed(""),
             lambda: RunCompleted(""),
             lambda: RunCancelled(""),
         )
@@ -112,11 +224,29 @@ class ContractTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     create()
 
-    def test_phase_events_reject_unknown_phase(self) -> None:
+    def test_result_dtos_reject_missing_required_text(self) -> None:
+        invalid_cases = (
+            lambda: RunView("", "Fix tests", "COMPLETED", "SDD"),
+            lambda: RunView("run-1", "", "COMPLETED", "SDD"),
+            lambda: RunSummaryView("run-1", "Fix tests", ""),
+            lambda: PendingDecisionView("", "EXPLORE_BUNDLE", "Choose", "now"),
+            lambda: TaskSummaryView("task-1", "", "TODO"),
+            lambda: ErrorView("E001", "", timestamp="now"),
+            lambda: GetAvailableActionsResult("run-1", ("resume", "resume")),
+        )
+
+        for create in invalid_cases:
+            with self.subTest(create=create):
+                with self.assertRaises(ValueError):
+                    create()
+
+    def test_phase_values_reject_unknown_phase(self) -> None:
         invalid_cases = (
             lambda: PhaseStarted("run-1", "NOT_A_PHASE"),
             lambda: PhaseCompleted("run-1", "NOT_A_PHASE"),
             lambda: PhaseFailed("run-1", "NOT_A_PHASE", "failed"),
+            lambda: RunView("run-1", "Fix", "RUNNING", "SDD", current_phase="NOT_A_PHASE"),
+            lambda: PendingDecisionView("decision-1", "NOT_A_PHASE", "Choose", "now"),
         )
 
         for create in invalid_cases:

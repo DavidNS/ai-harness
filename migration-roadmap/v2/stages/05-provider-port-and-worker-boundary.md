@@ -35,3 +35,7 @@ Goal: execute bounded AI worker tasks behind a provider port.
 Do not copy the v1 provider gateway as-is. The provider adapter should run one
 bounded request; orchestration, prompt assembly, and output validation stay
 outside the concrete process adapter.
+
+Carry forward the Stage 04 boundary debt: convert injected clock/id factories to
+ports when infrastructure seams are added, and keep provider details out of
+application service contracts.

@@ -17,10 +17,6 @@ _ACTIVE_STATUSES = {RunStatus.PENDING, RunStatus.RUNNING, RunStatus.WAITING_FOR_
 _TERMINAL_STATUSES = {RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED}
 
 
-def _stored(run: RunRecord) -> RunRecord:
-    return run.with_events(())
-
-
 def _require_artifact_id(artifact_id: str) -> str:
     if not isinstance(artifact_id, str) or not artifact_id.strip():
         raise ValueError("artifact_id is required")
@@ -38,7 +34,7 @@ class InMemoryStateStore:
         self._runs: dict[str, RunRecord] = {}
 
     def save(self, run: RunRecord) -> None:
-        self._runs[run.run_id] = _stored(run)
+        self._runs[run.run_id] = run
 
     def get(self, run_id: str) -> RunRecord:
         try:

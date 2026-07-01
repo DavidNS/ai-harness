@@ -17,7 +17,6 @@ def completed_run(run_id: str = "run-1") -> RunRecord:
         status=RunStatus.COMPLETED,
         strategy=RunStrategy.EXPLORE_BUNDLE,
         completed_phases=(PhaseName.EXPLORE_BUNDLE,),
-        events=("transient",),
     )
 
 
@@ -32,7 +31,7 @@ def running_run(run_id: str = "run-2") -> RunRecord:
 
 
 class InMemoryStateStoreTests(unittest.TestCase):
-    def test_save_get_and_list_indexes_preserve_authoritative_state_without_events(self) -> None:
+    def test_save_get_and_list_indexes_preserve_authoritative_state(self) -> None:
         store = InMemoryStateStore()
         active = running_run()
         completed = completed_run()
@@ -41,7 +40,6 @@ class InMemoryStateStoreTests(unittest.TestCase):
         store.save(active)
 
         self.assertEqual(active, store.get("run-2"))
-        self.assertEqual((), store.get("run-1").events)
         self.assertEqual(["run-1", "run-2"], [run.run_id for run in store.list_all()])
         self.assertEqual(["run-2"], [run.run_id for run in store.list_active()])
         self.assertEqual(["run-1"], [run.run_id for run in store.list_completed()])

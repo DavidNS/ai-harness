@@ -1,11 +1,18 @@
-"""Command, query, and event DTOs for the v2 backend boundary."""
+"""Command, query, event, and result DTOs for the v2 backend boundary."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
-from harness_v2.backend.domain.lifecycle import PhaseName
+from harness_v2.backend.domain.lifecycle import PhaseName, RunStatus, RunStrategy
+
+
+class RunNotFoundError(KeyError):
+    """Raised when a command or query targets an unknown run."""
+
+
+class InvalidRunStateError(RuntimeError):
+    """Raised when a command is not valid for the run's current state."""
 
 
 def _require_text(value: str, field: str) -> str:
@@ -26,6 +33,37 @@ def _phase_text(value: str | PhaseName, field: str = "phase") -> str:
         return PhaseName(_require_text(value, field)).value
     except ValueError as exc:
         raise ValueError(f"{field} is not a known phase") from exc
+
+
+def _status_text(value: str | RunStatus, field: str = "status") -> str:
+    try:
+        return RunStatus(_require_text(value, field)).value
+    except ValueError as exc:
+        raise ValueError(f"{field} is not a known run status") from exc
+
+
+def _strategy_text(value: str | RunStrategy, field: str = "strategy") -> str:
+    try:
+        return RunStrategy(_require_text(value, field)).value
+    except ValueError as exc:
+        raise ValueError(f"{field} is not a known run strategy") from exc
+
+
+def _type_name(expected_type: object) -> str:
+    return getattr(expected_type, "__name__", str(expected_type))
+
+
+def _require_instance(value: object, expected_type: object, field: str) -> object:
+    if not isinstance(value, expected_type):
+        raise TypeError(f"{field} must be {_type_name(expected_type)}")
+    return value
+
+
+def _typed_tuple(values: tuple[object, ...] | list[object], expected_type: object, field: str) -> tuple[object, ...]:
+    normalized = tuple(values)
+    for value in normalized:
+        _require_instance(value, expected_type, field)
+    return normalized
 
 
 @dataclass(frozen=True, slots=True)
@@ -162,6 +200,14 @@ class UserDecisionReceived:
 
 
 @dataclass(frozen=True, slots=True)
+class RunResumed:
+    run_id: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "run_id", _require_text(self.run_id, "run_id"))
+
+
+@dataclass(frozen=True, slots=True)
 class RunCompleted:
     run_id: str
 
@@ -186,16 +232,158 @@ Event = (
     | PhaseFailed
     | UserDecisionRequested
     | UserDecisionReceived
+    | RunResumed
     | RunCompleted
     | RunCancelled
 )
 
 
 @dataclass(frozen=True, slots=True)
+class PendingDecisionView:
+    decision_id: str
+    origin_phase: str
+    prompt: str
+    created_at: str
+    options: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "decision_id", _require_text(self.decision_id, "decision_id"))
+        object.__setattr__(self, "origin_phase", _phase_text(self.origin_phase, "origin_phase"))
+        object.__setattr__(self, "prompt", _require_text(self.prompt, "prompt"))
+        object.__setattr__(self, "created_at", _require_text(self.created_at, "created_at"))
+        object.__setattr__(self, "options", _text_tuple(self.options, "options"))
+
+
+@dataclass(frozen=True, slots=True)
+class TaskSummaryView:
+    task_id: str
+    title: str
+    status: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "task_id", _require_text(self.task_id, "task_id"))
+        object.__setattr__(self, "title", _require_text(self.title, "title"))
+        object.__setattr__(self, "status", _require_text(self.status, "status"))
+
+
+@dataclass(frozen=True, slots=True)
+class ErrorView:
+    code: str
+    message: str
+    phase: str | None = None
+    timestamp: str = "unknown"
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "code", _require_text(self.code, "code"))
+        object.__setattr__(self, "message", _require_text(self.message, "message"))
+        object.__setattr__(self, "phase", None if self.phase is None else _phase_text(self.phase))
+        object.__setattr__(self, "timestamp", _require_text(self.timestamp, "timestamp"))
+
+
+@dataclass(frozen=True, slots=True)
+class RunView:
+    run_id: str
+    request: str
+    status: str
+    strategy: str
+    current_phase: str | None = None
+    completed_phases: tuple[str, ...] = ()
+    pending_decision: PendingDecisionView | None = None
+    tasks: tuple[TaskSummaryView, ...] = ()
+    errors: tuple[ErrorView, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "run_id", _require_text(self.run_id, "run_id"))
+        object.__setattr__(self, "request", _require_text(self.request, "request"))
+        object.__setattr__(self, "status", _status_text(self.status))
+        object.__setattr__(self, "strategy", _strategy_text(self.strategy))
+        object.__setattr__(
+            self,
+            "current_phase",
+            None if self.current_phase is None else _phase_text(self.current_phase, "current_phase"),
+        )
+        object.__setattr__(
+            self,
+            "completed_phases",
+            tuple(_phase_text(phase, "completed_phases") for phase in self.completed_phases),
+        )
+        if self.pending_decision is not None:
+            _require_instance(self.pending_decision, PendingDecisionView, "pending_decision")
+        object.__setattr__(self, "tasks", _typed_tuple(self.tasks, TaskSummaryView, "tasks"))
+        object.__setattr__(self, "errors", _typed_tuple(self.errors, ErrorView, "errors"))
+
+
+@dataclass(frozen=True, slots=True)
+class RunSummaryView:
+    run_id: str
+    request: str
+    status: str
+    current_phase: str | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "run_id", _require_text(self.run_id, "run_id"))
+        object.__setattr__(self, "request", _require_text(self.request, "request"))
+        object.__setattr__(self, "status", _status_text(self.status))
+        object.__setattr__(
+            self,
+            "current_phase",
+            None if self.current_phase is None else _phase_text(self.current_phase, "current_phase"),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class CommandResult:
-    run: Any
+    run: RunView
     events: tuple[Event, ...]
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "events", tuple(self.events))
+        _require_instance(self.run, RunView, "run")
+        object.__setattr__(self, "events", _typed_tuple(self.events, Event, "events"))
 
+
+@dataclass(frozen=True, slots=True)
+class GetRunResult:
+    run: RunView
+
+    def __post_init__(self) -> None:
+        _require_instance(self.run, RunView, "run")
+
+
+@dataclass(frozen=True, slots=True)
+class ListRunsResult:
+    runs: tuple[RunSummaryView, ...]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "runs", _typed_tuple(self.runs, RunSummaryView, "runs"))
+
+
+@dataclass(frozen=True, slots=True)
+class GetRunStateResult:
+    run_id: str
+    status: str
+    current_phase: str | None = None
+    pending_decision: PendingDecisionView | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "run_id", _require_text(self.run_id, "run_id"))
+        object.__setattr__(self, "status", _status_text(self.status))
+        object.__setattr__(
+            self,
+            "current_phase",
+            None if self.current_phase is None else _phase_text(self.current_phase, "current_phase"),
+        )
+        if self.pending_decision is not None:
+            _require_instance(self.pending_decision, PendingDecisionView, "pending_decision")
+
+
+@dataclass(frozen=True, slots=True)
+class GetAvailableActionsResult:
+    run_id: str
+    actions: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "run_id", _require_text(self.run_id, "run_id"))
+        object.__setattr__(self, "actions", _text_tuple(self.actions, "actions"))
+
+
+QueryResult = GetRunResult | ListRunsResult | GetRunStateResult | GetAvailableActionsResult

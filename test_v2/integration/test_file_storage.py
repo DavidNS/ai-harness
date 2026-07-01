@@ -21,7 +21,6 @@ def completed_run(run_id: str = "run-1") -> RunRecord:
         status=RunStatus.COMPLETED,
         strategy=RunStrategy.EXPLORE_BUNDLE,
         completed_phases=(PhaseName.EXPLORE_BUNDLE,),
-        events=("transient",),
     )
 
 
@@ -45,7 +44,6 @@ class FileStateStoreIntegrationTests(unittest.TestCase):
             loaded = store.get("run-1")
 
             self.assertEqual(RunStatus.COMPLETED, loaded.status)
-            self.assertEqual((), loaded.events)
             self.assertEqual(["run-1", "run-2"], [run.run_id for run in store.list_all()])
             self.assertEqual(["run-2"], [run.run_id for run in store.list_active()])
             self.assertEqual(["run-1"], [run.run_id for run in store.list_completed()])

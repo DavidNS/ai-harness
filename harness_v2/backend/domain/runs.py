@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
-
 from harness_v2.backend.domain.decisions import PendingDecision
 from harness_v2.backend.domain.errors import DomainValidationError, ErrorRecord, require_text
 from harness_v2.backend.domain.lifecycle import LifecycleGraph, PhaseName, RunStatus, RunStrategy
@@ -22,7 +20,6 @@ class RunRecord:
     pending_decision: PendingDecision | None = None
     tasks: tuple[TaskSummary, ...] = ()
     errors: tuple[ErrorRecord, ...] = ()
-    events: tuple[Any, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "run_id", require_text(self.run_id, "run ID"))
@@ -37,11 +34,7 @@ class RunRecord:
         )
         object.__setattr__(self, "tasks", tuple(self.tasks))
         object.__setattr__(self, "errors", tuple(self.errors))
-        object.__setattr__(self, "events", tuple(self.events))
         self._validate_invariants()
-
-    def with_events(self, events: tuple[Any, ...]) -> "RunRecord":
-        return self.replace(events=events)
 
     def replace(self, **changes: object) -> "RunRecord":
         data = {
@@ -54,7 +47,6 @@ class RunRecord:
             "pending_decision": self.pending_decision,
             "tasks": self.tasks,
             "errors": self.errors,
-            "events": self.events,
         }
         data.update(changes)
         return RunRecord(**data)
