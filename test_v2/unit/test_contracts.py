@@ -41,6 +41,7 @@ class ContractTests(unittest.TestCase):
     def test_all_commands_can_be_created_with_valid_data(self) -> None:
         commands = (
             StartRun("Fix tests"),
+            StartRun("Explore architecture", strategy="EXPLORER"),
             ResumeRun("run-1"),
             CancelRun("run-1"),
             SubmitUserDecision("run-1", "decision-1", "continue"),
@@ -63,6 +64,7 @@ class ContractTests(unittest.TestCase):
         events = (
             RunStarted("run-1", "Fix tests"),
             PhaseStarted("run-1", "EXPLORE_BUNDLE"),
+            PhaseStarted("run-1", "EXPLORER_INTAKE"),
             PhaseCompleted("run-1", "EXPLORE_BUNDLE"),
             PhaseFailed("run-1", "EXPLORE_BUNDLE", "failed"),
             UserDecisionRequested("run-1", "decision-1", "Choose", ("continue",)),
@@ -184,6 +186,7 @@ class ContractTests(unittest.TestCase):
             lambda: SubmitUserDecision("", "decision-1", "continue"),
             lambda: SubmitUserDecision("run-1", "", "continue"),
             lambda: SubmitUserDecision("run-1", "decision-1", ""),
+            lambda: StartRun("Fix tests", strategy="NOT_A_STRATEGY"),
         )
 
         for create in invalid_cases:

@@ -8,10 +8,11 @@ import unittest
 from pathlib import Path
 
 from harness_v2.adapters.storage import FileArtifactStore, FileStateStore
+from harness_v2.backend.domain.decisions import DecisionRecord
 from harness_v2.backend.domain.lifecycle import PhaseName, RunStatus, RunStrategy
 from harness_v2.backend.domain.runs import RunRecord
 from harness_v2.backend.ports.artifact_store import ArtifactNotFoundError, ArtifactStoreError
-from harness_v2.backend.ports.state_store import StateNotFoundError, StateStoreCorruptionError
+from harness_v2.backend.ports.state_store import StateNotFoundError, StateStoreCorruptionError, StateStoreError
 
 
 def completed_run(run_id: str = "run-1") -> RunRecord:
@@ -132,6 +133,71 @@ class FileStateStoreIntegrationTests(unittest.TestCase):
             self.assertEqual(RunStatus.COMPLETED, store.get("run-1").status)
             state_dir = root / "runs" / "run-1"
             self.assertEqual([], list(state_dir.glob(".state.json.*.tmp")))
+
+
+    @unittest.skipUnless(hasattr(os, "symlink"), "symlink support required")
+    def test_state_final_symlink_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            store = FileStateStore(root)
+            state_dir = root / "runs" / "run-1"
+            state_dir.mkdir(parents=True)
+            escaped = root / "escaped-state.json"
+            (state_dir / "state.json").symlink_to(escaped)
+
+            with self.assertRaises(StateStoreError):
+                store.save(completed_run("run-1"))
+            with self.assertRaises(StateStoreError):
+                store.get("run-1")
+            with self.assertRaises(StateStoreError):
+                store.list_all()
+            self.assertFalse(escaped.exists())
+
+    @unittest.skipUnless(hasattr(os, "symlink"), "symlink support required")
+    def test_state_intermediate_symlink_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            store = FileStateStore(root)
+            runs = root / "runs"
+            runs.mkdir()
+            outside = root / "outside"
+            outside.mkdir()
+            (outside / "state.json").write_text("{}", encoding="utf-8")
+            (runs / "run-1").symlink_to(outside, target_is_directory=True)
+
+            with self.assertRaises(StateStoreError):
+                store.save(completed_run("run-1"))
+            with self.assertRaises(StateStoreError):
+                store.get("run-1")
+            with self.assertRaises(StateStoreError):
+                store.list_all()
+
+    def test_file_state_round_trips_decision_history(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = FileStateStore(Path(temp))
+            decision = DecisionRecord(
+                decision_id="decision-1",
+                origin_phase=PhaseName.EXPLORE_BUNDLE,
+                prompt="Choose",
+                response="continue",
+                created_at="2026-07-01T00:00:00+00:00",
+                answered_at="2026-07-01T00:01:00+00:00",
+                options=("continue", "cancel"),
+            )
+            store.save(
+                RunRecord(
+                    run_id="run-1",
+                    request="Fix tests",
+                    status=RunStatus.COMPLETED,
+                    strategy=RunStrategy.EXPLORE_BUNDLE,
+                    completed_phases=(PhaseName.EXPLORE_BUNDLE,),
+                    decision_history=(decision,),
+                )
+            )
+
+            loaded = store.get("run-1")
+
+            self.assertEqual((decision,), loaded.decision_history)
 
 
 class FileArtifactStoreIntegrationTests(unittest.TestCase):

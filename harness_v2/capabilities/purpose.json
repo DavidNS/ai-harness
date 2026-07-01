@@ -1,0 +1,13 @@
+{
+  "commands": [],
+  "mcp_tools": [],
+  "paths": [
+    {
+      "mode": "read",
+      "pattern": "**"
+    }
+  ],
+  "phase": "purpose",
+  "schema_version": 1,
+  "skills": []
+}

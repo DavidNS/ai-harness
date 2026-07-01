@@ -55,11 +55,35 @@ STATE_UPDATE_ALLOWLIST = {
     Path("harness/ai_harness/orchestrator/control_output_handler.py"),
 }
 SOURCE_LINE_BUDGET = 400
-SOURCE_LINE_EXCEPTIONS = {Path("harness/ai_harness/orchestrator/publishing.py"): 525}
+SOURCE_LINE_EXCEPTIONS = {
+    Path("harness/ai_harness/orchestrator/publishing.py"): 525,
+    # Stage 6 skeleton debt: EXPLORE is intentionally covered by budgets while
+    # remaining temporarily above the default until bundle helpers are split.
+    Path("harness_v2/backend/application/bundles/explore.py"): 1200,
+    # File-backed state and artifacts share security helpers until storage
+    # adapters are split by backend port.
+    Path("harness_v2/adapters/storage/file.py"): 525,
+}
 INTEGRATION_LINE_BUDGET = 350
 INTEGRATION_LINE_EXCEPTIONS = {
     Path("tests/integration/test_decision_gates.py"): 525,
     Path("tests/integration/test_full_sdd.py"): 425,
+}
+
+V2_STAGE6_WORKER_TASKS = {
+    "explore_request_profile",
+    "explore_evidence_digest",
+    "explore_outcome_synthesis",
+    "purpose",
+    "spec",
+    "design",
+    "tasks",
+    "explorer_intake",
+    "explorer_discovery",
+    "explorer_decision",
+    "explorer_artifact",
+    "explorer_review",
+    "explorer_distill",
 }
 
 
@@ -321,31 +345,28 @@ def line_count(path: Path) -> int:
     return len(path.read_text(encoding="utf-8", errors="ignore").splitlines())
 
 
+def _warn_line_budget(report: Report, path: Path, budget: int, *, code: str) -> None:
+    relative = rel(path)
+    count = line_count(path)
+    if count > budget:
+        report.warn(
+            f"{relative} has {count} lines; budget is {budget}",
+            code=code,
+            category="budget",
+            path=relative,
+            details={"lines": count, "budget": budget, "over_by": count - budget},
+        )
+
+
 def check_budgets(report: Report) -> None:
-    for path in python_files(ROOT / "harness/ai_harness", ROOT / "harness/cli", ROOT / "harness/run.py"):
+    for path in python_files(ROOT / "harness/ai_harness", ROOT / "harness/cli", ROOT / "harness/run.py", ROOT / "harness_v2"):
         relative = rel(path)
         budget = SOURCE_LINE_EXCEPTIONS.get(relative, SOURCE_LINE_BUDGET)
-        count = line_count(path)
-        if count > budget:
-            report.warn(
-                f"{relative} has {count} lines; budget is {budget}",
-                code="line_budget.source",
-                category="budget",
-                path=relative,
-                details={"lines": count, "budget": budget, "over_by": count - budget},
-            )
-    for path in python_files(ROOT / "tests/integration"):
+        _warn_line_budget(report, path, budget, code="line_budget.source")
+    for path in python_files(ROOT / "tests/integration", ROOT / "test_v2/integration"):
         relative = rel(path)
         budget = INTEGRATION_LINE_EXCEPTIONS.get(relative, INTEGRATION_LINE_BUDGET)
-        count = line_count(path)
-        if count > budget:
-            report.warn(
-                f"{relative} has {count} lines; budget is {budget}",
-                code="line_budget.integration",
-                category="budget",
-                path=relative,
-                details={"lines": count, "budget": budget, "over_by": count - budget},
-            )
+        _warn_line_budget(report, path, budget, code="line_budget.integration")
     for path in python_files(ROOT / "harness/ai_harness"):
         relative = rel(path)
         text = path.read_text(encoding="utf-8", errors="ignore")
@@ -708,6 +729,66 @@ def _model_adapter_shell_findings(tree: ast.Module) -> list[dict[str, object]]:
     return findings
 
 
+
+def _call_name(node: ast.Call) -> str:
+    func = node.func
+    if isinstance(func, ast.Name):
+        return func.id
+    if isinstance(func, ast.Attribute):
+        parts = [func.attr]
+        value = func.value
+        while isinstance(value, ast.Attribute):
+            parts.append(value.attr)
+            value = value.value
+        if isinstance(value, ast.Name):
+            parts.append(value.id)
+        return ".".join(reversed(parts))
+    return ""
+
+
+def _string_constants(node: ast.AST) -> list[str]:
+    return [item.value for item in ast.walk(node) if isinstance(item, ast.Constant) and isinstance(item.value, str)]
+
+
+def _v2_backend_external_effect_findings(tree: ast.Module) -> list[dict[str, object]]:
+    findings: list[dict[str, object]] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        name = _call_name(node)
+        if name in {"subprocess.run", "subprocess.Popen", "subprocess.call", "subprocess.check_call", "subprocess.check_output"}:
+            findings.append({"call": name, "reason": "subprocess must be behind a port/adapter"})
+            if any(part == "git" or part.startswith("git ") for part in _string_constants(node)):
+                findings.append({"call": name, "reason": "git execution must be behind a port/adapter"})
+        elif name == "os.system":
+            findings.append({"call": name, "reason": "shell execution must be behind a port/adapter"})
+        elif name == "Path.cwd":
+            findings.append({"call": name, "reason": "working directory must be injected by host/runtime"})
+        elif name == "open":
+            findings.append({"call": name, "reason": "filesystem access must be behind a port/adapter"})
+        elif name in {"Path.read_text", "Path.write_text", "Path.read_bytes", "Path.write_bytes", "Path.open"}:
+            findings.append({"call": name, "reason": "filesystem access must be behind a port/adapter"})
+        elif isinstance(node.func, ast.Attribute) and node.func.attr in {"read_text", "write_text", "read_bytes", "write_bytes", "open"}:
+            if isinstance(node.func.value, ast.Call) and _call_name(node.func.value) == "Path":
+                findings.append({"call": f"Path(...).{node.func.attr}", "reason": "filesystem access must be behind a port/adapter"})
+    return findings
+
+
+def check_v2_backend_external_effects(report: Report) -> None:
+    for root in (ROOT / "harness_v2" / "backend" / "domain", ROOT / "harness_v2" / "backend" / "application"):
+        if not root.exists():
+            continue
+        for path in python_files(root):
+            findings = _v2_backend_external_effect_findings(parse(path))
+            if findings:
+                report.error(
+                    "v2 backend must not perform direct filesystem, subprocess, or git effects",
+                    code="v2.backend_external_effect_boundary",
+                    category="boundary",
+                    path=rel(path),
+                    details={"findings": findings},
+                )
+
 def check_v2_model_provider_execution(report: Report) -> None:
     root = ROOT / "harness_v2" / "adapters" / "models"
     if not root.exists():
@@ -745,6 +826,28 @@ def check_v2_domain_test_boundaries(report: Report) -> None:
             )
 
 
+def check_v2_worker_resources(report: Report) -> None:
+    root = ROOT / "harness_v2"
+    if not root.exists():
+        return
+    for task_id in sorted(V2_STAGE6_WORKER_TASKS):
+        expected = (
+            root / "workers" / f"{task_id}.md",
+            root / "prompts" / f"{task_id}.md",
+            root / "capabilities" / f"{task_id}.json",
+        )
+        missing = [rel(path) for path in expected if not path.is_file()]
+        empty = [rel(path) for path in expected[:2] if path.is_file() and not path.read_text(encoding="utf-8").strip()]
+        if missing or empty:
+            report.error(
+                "v2 Stage 6 worker tasks require markdown and capability resources",
+                code="v2.worker_resources",
+                category="boundary",
+                path="harness_v2",
+                details={"task_id": task_id, "missing": [str(path) for path in missing], "empty": [str(path) for path in empty]},
+            )
+
+
 def run_checks() -> Report:
     report = Report()
     check_graph_contract(report)
@@ -756,6 +859,8 @@ def run_checks() -> Report:
     check_cli_frontend_boundaries(report)
     check_v2_boundaries(report)
     check_v2_model_provider_execution(report)
+    check_v2_backend_external_effects(report)
+    check_v2_worker_resources(report)
     check_v2_domain_test_boundaries(report)
     return report
 

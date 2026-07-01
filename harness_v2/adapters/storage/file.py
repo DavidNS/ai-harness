@@ -10,7 +10,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from harness_v2.backend.domain.decisions import PendingDecision
+from harness_v2.backend.domain.decisions import DecisionRecord, PendingDecision
 from harness_v2.backend.domain.errors import DomainValidationError, ErrorRecord
 from harness_v2.backend.domain.lifecycle import PhaseName, RunStatus, RunStrategy
 from harness_v2.backend.domain.runs import RunRecord
@@ -21,7 +21,7 @@ from harness_v2.backend.ports.artifact_store import (
     ArtifactNotFoundError,
     ArtifactStoreError,
 )
-from harness_v2.backend.ports.state_store import StateNotFoundError, StateStoreCorruptionError
+from harness_v2.backend.ports.state_store import StateNotFoundError, StateStoreCorruptionError, StateStoreError
 
 SCHEMA_VERSION = 1
 _ACTIVE_STATUSES = {RunStatus.PENDING, RunStatus.RUNNING, RunStatus.WAITING_FOR_USER}
@@ -115,6 +115,75 @@ def _require_safe_existing_artifact(root: Path, artifact_id: str) -> Path:
     return path
 
 
+def _reject_state_symlink(path: Path) -> None:
+    if path.is_symlink():
+        raise StateStoreError(f"unsafe state path contains a symlink: {path}")
+
+
+def _require_safe_state_directory(path: Path) -> None:
+    _reject_state_symlink(path)
+    try:
+        mode = path.lstat().st_mode
+    except FileNotFoundError as exc:
+        raise StateNotFoundError(str(path)) from exc
+    if not stat.S_ISDIR(mode):
+        raise StateStoreError(f"state path is not a directory: {path}")
+
+
+def _ensure_safe_state_directory_tree(base: Path, parts: tuple[str, ...]) -> Path:
+    if base.exists() or base.is_symlink():
+        _require_safe_state_directory(base)
+    else:
+        base.mkdir(parents=True, exist_ok=True)
+        _require_safe_state_directory(base)
+
+    current = base
+    for part in parts:
+        current = current / part
+        if current.exists() or current.is_symlink():
+            _require_safe_state_directory(current)
+        else:
+            current.mkdir()
+            _require_safe_state_directory(current)
+    return current
+
+
+def _safe_existing_runs_dir(base: Path) -> Path | None:
+    if base.exists() or base.is_symlink():
+        _require_safe_state_directory(base)
+    else:
+        return None
+    runs_dir = base / "runs"
+    if runs_dir.exists() or runs_dir.is_symlink():
+        _require_safe_state_directory(runs_dir)
+        return runs_dir
+    return None
+
+
+def _ensure_safe_state_parent(base: Path, run_id: str) -> Path:
+    return _ensure_safe_state_directory_tree(base, ("runs", _require_run_id(run_id)))
+
+
+def _require_safe_existing_state_path(base: Path, run_id: str) -> Path:
+    runs_dir = _safe_existing_runs_dir(base)
+    if runs_dir is None:
+        raise StateNotFoundError(run_id)
+    run_dir = runs_dir / _require_run_id(run_id)
+    try:
+        _require_safe_state_directory(run_dir)
+    except StateNotFoundError as exc:
+        raise StateNotFoundError(run_id) from exc
+    path = run_dir / "state.json"
+    _reject_state_symlink(path)
+    try:
+        mode = path.lstat().st_mode
+    except FileNotFoundError as exc:
+        raise StateNotFoundError(run_id) from exc
+    if not stat.S_ISREG(mode):
+        raise StateNotFoundError(run_id)
+    return path
+
+
 def _fsync_directory(path: Path) -> None:
     if not hasattr(os, "O_DIRECTORY"):
         return
@@ -139,6 +208,7 @@ def _run_to_mapping(run: RunRecord) -> dict[str, Any]:
             "current_phase": run.current_phase.value if run.current_phase else None,
             "completed_phases": [phase.value for phase in run.completed_phases],
             "pending_decision": _decision_to_mapping(run.pending_decision),
+            "decision_history": [_decision_record_to_mapping(decision) for decision in run.decision_history],
             "tasks": [_task_to_mapping(task) for task in run.tasks],
             "errors": [_error_to_mapping(error) for error in run.errors],
         },
@@ -153,6 +223,18 @@ def _decision_to_mapping(decision: PendingDecision | None) -> dict[str, Any] | N
         "origin_phase": decision.origin_phase.value,
         "prompt": decision.prompt,
         "created_at": decision.created_at,
+        "options": list(decision.options),
+    }
+
+
+def _decision_record_to_mapping(decision: DecisionRecord) -> dict[str, Any]:
+    return {
+        "decision_id": decision.decision_id,
+        "origin_phase": decision.origin_phase.value,
+        "prompt": decision.prompt,
+        "response": decision.response,
+        "created_at": decision.created_at,
+        "answered_at": decision.answered_at,
         "options": list(decision.options),
     }
 
@@ -186,6 +268,7 @@ def _run_from_mapping(payload: dict[str, Any]) -> RunRecord:
             current_phase=PhaseName(data["current_phase"]) if data.get("current_phase") is not None else None,
             completed_phases=tuple(PhaseName(phase) for phase in data.get("completed_phases", ())),
             pending_decision=_decision_from_mapping(pending),
+            decision_history=tuple(_decision_record_from_mapping(item) for item in data.get("decision_history", ())),
             tasks=tuple(_task_from_mapping(task) for task in data.get("tasks", ())),
             errors=tuple(_error_from_mapping(error) for error in data.get("errors", ())),
         )
@@ -203,6 +286,20 @@ def _decision_from_mapping(data: object) -> PendingDecision | None:
         origin_phase=PhaseName(data["origin_phase"]),
         prompt=data["prompt"],
         created_at=data["created_at"],
+        options=tuple(data.get("options", ())),
+    )
+
+
+def _decision_record_from_mapping(data: object) -> DecisionRecord:
+    if not isinstance(data, dict):
+        raise StateStoreCorruptionError("decision history item must be an object")
+    return DecisionRecord(
+        decision_id=data["decision_id"],
+        origin_phase=PhaseName(data["origin_phase"]),
+        prompt=data["prompt"],
+        response=data["response"],
+        created_at=data["created_at"],
+        answered_at=data["answered_at"],
         options=tuple(data.get("options", ())),
     )
 
@@ -231,26 +328,31 @@ class FileStateStore:
         self._root = Path(root)
 
     def save(self, run: RunRecord) -> None:
-        path = self._state_path(run.run_id)
-        path.parent.mkdir(parents=True, exist_ok=True)
+        parent = _ensure_safe_state_parent(self._root, run.run_id)
+        path = parent / "state.json"
+        _reject_state_symlink(path)
         payload = json.dumps(_run_to_mapping(run), sort_keys=True, indent=2) + "\n"
-        temp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+        temp_path = parent / f".state.json.{uuid.uuid4().hex}.tmp"
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
         try:
-            with temp_path.open("w", encoding="utf-8") as handle:
+            fd = os.open(temp_path, flags, 0o666)
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
                 handle.write(payload)
                 handle.flush()
                 os.fsync(handle.fileno())
+            _reject_state_symlink(path)
             os.replace(temp_path, path)
-            _fsync_directory(path.parent)
+            _fsync_directory(parent)
         finally:
             temp_path.unlink(missing_ok=True)
 
     def get(self, run_id: str) -> RunRecord:
-        path = self._state_path(run_id)
-        if not path.is_file():
-            raise StateNotFoundError(run_id)
+        path = _require_safe_existing_state_path(self._root, run_id)
         try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
+            with path.open("r", encoding="utf-8") as handle:
+                payload = json.load(handle)
         except json.JSONDecodeError as exc:
             raise StateStoreCorruptionError(f"state file is malformed JSON: {run_id}") from exc
         if not isinstance(payload, dict):
@@ -258,10 +360,19 @@ class FileStateStore:
         return _run_from_mapping(payload)
 
     def list_all(self) -> tuple[RunRecord, ...]:
-        runs_dir = self._root / "runs"
-        if not runs_dir.exists():
+        runs_dir = _safe_existing_runs_dir(self._root)
+        if runs_dir is None:
             return ()
-        runs = [self.get(path.parent.name) for path in sorted(runs_dir.glob("*/state.json"))]
+        run_ids: list[str] = []
+        for path in sorted(runs_dir.iterdir()):
+            _require_safe_state_directory(path)
+            state_path = path / "state.json"
+            if state_path.exists() or state_path.is_symlink():
+                _reject_state_symlink(state_path)
+                if not state_path.is_file():
+                    raise StateStoreError(f"state path is not a regular file: {state_path}")
+                run_ids.append(path.name)
+        runs = [self.get(run_id) for run_id in run_ids]
         return tuple(sorted(runs, key=lambda run: run.run_id))
 
     def list_active(self) -> tuple[RunRecord, ...]:
@@ -269,9 +380,6 @@ class FileStateStore:
 
     def list_completed(self) -> tuple[RunRecord, ...]:
         return tuple(run for run in self.list_all() if run.status in _TERMINAL_STATUSES)
-
-    def _state_path(self, run_id: str) -> Path:
-        return self._root / "runs" / _require_run_id(run_id) / "state.json"
 
 
 class FileArtifactStore:

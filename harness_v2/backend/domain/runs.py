@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from harness_v2.backend.domain.decisions import PendingDecision
+from harness_v2.backend.domain.decisions import DecisionRecord, PendingDecision
 from harness_v2.backend.domain.errors import DomainValidationError, ErrorRecord, require_text
 from harness_v2.backend.domain.lifecycle import LifecycleGraph, PhaseName, RunStatus, RunStrategy
 from harness_v2.backend.domain.tasks import TaskSummary
@@ -18,6 +18,7 @@ class RunRecord:
     current_phase: PhaseName | None = None
     completed_phases: tuple[PhaseName, ...] = ()
     pending_decision: PendingDecision | None = None
+    decision_history: tuple[DecisionRecord, ...] = ()
     tasks: tuple[TaskSummary, ...] = ()
     errors: tuple[ErrorRecord, ...] = ()
 
@@ -32,6 +33,7 @@ class RunRecord:
             "completed_phases",
             tuple(PhaseName(phase) for phase in self.completed_phases),
         )
+        object.__setattr__(self, "decision_history", tuple(self.decision_history))
         object.__setattr__(self, "tasks", tuple(self.tasks))
         object.__setattr__(self, "errors", tuple(self.errors))
         self._validate_invariants()
@@ -45,6 +47,7 @@ class RunRecord:
             "current_phase": self.current_phase,
             "completed_phases": self.completed_phases,
             "pending_decision": self.pending_decision,
+            "decision_history": self.decision_history,
             "tasks": self.tasks,
             "errors": self.errors,
         }

@@ -27,7 +27,8 @@ from harness_v2.backend.application.contracts import (
     UserDecisionReceived,
     UserDecisionRequested,
 )
-from harness_v2.backend.application.run_service import DecisionRequest, RequestUserDecisionService, RunService
+from harness_v2.backend.application.decision_service import DecisionRequest, RequestUserDecisionService
+from harness_v2.backend.application.run_service import RunService
 from harness_v2.backend.domain.decisions import PendingDecision
 from harness_v2.backend.domain.lifecycle import PhaseName, RunStrategy
 from harness_v2.backend.domain.runs import RunRecord, RunStatus

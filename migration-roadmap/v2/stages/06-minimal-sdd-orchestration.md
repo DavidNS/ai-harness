@@ -35,6 +35,19 @@ For each bundle:
 
 - v2 can run a complete SDD lifecycle with fake/scripted providers.
 
+## Stage 6 Deferred Behavior
+
+- `TDD_BUNDLE` may be a tested placeholder that marks fake/scripted tasks
+  complete only to prove lifecycle wiring. The real create-test, implement, run,
+  review, rollback, and iterate loop belongs to Stage 8.
+- Retry/retry-phase and escalation are intentionally outside the Stage 6 public
+  command contract. Stage 7 owns target phase semantics and invalidation of
+  later artifacts/state. Stage 6 must fail closed instead of inventing ad hoc
+  backwards transitions.
+- The Stage 6 SDD graph is explicitly "SDD without knowledge phases". Knowledge
+  extraction, patch creation, review, and promotion are Stage 9 concerns and
+  must not be implemented through placeholder worker calls in this stage.
+
 ## Agent Handoff
 
 Port one bundle at a time. A partial SDD implementation is acceptable if each

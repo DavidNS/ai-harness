@@ -29,3 +29,23 @@ class PendingDecision:
         object.__setattr__(self, "prompt", require_text(self.prompt, "decision prompt"))
         object.__setattr__(self, "options", _normalize_options(self.options))
         object.__setattr__(self, "created_at", require_text(self.created_at, "decision timestamp"))
+
+
+@dataclass(frozen=True, slots=True)
+class DecisionRecord:
+    decision_id: str
+    origin_phase: PhaseName
+    prompt: str
+    response: str
+    created_at: str
+    answered_at: str
+    options: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "decision_id", require_text(self.decision_id, "decision ID"))
+        object.__setattr__(self, "origin_phase", PhaseName(self.origin_phase))
+        object.__setattr__(self, "prompt", require_text(self.prompt, "decision prompt"))
+        object.__setattr__(self, "response", require_text(self.response, "decision response"))
+        object.__setattr__(self, "created_at", require_text(self.created_at, "decision timestamp"))
+        object.__setattr__(self, "answered_at", require_text(self.answered_at, "decision answer timestamp"))
+        object.__setattr__(self, "options", _normalize_options(self.options))

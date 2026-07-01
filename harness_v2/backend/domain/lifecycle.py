@@ -19,6 +19,7 @@ class RunStatus(StrEnum):
 
 class RunStrategy(StrEnum):
     SDD = "SDD"
+    EXPLORER = "EXPLORER"
     EXPLORE_BUNDLE = "EXPLORE_BUNDLE"
     PROPOSAL_BUNDLE = "PROPOSAL_BUNDLE"
     SPEC_BUNDLE = "SPEC_BUNDLE"
@@ -34,6 +35,12 @@ class PhaseName(StrEnum):
     DESIGN_BUNDLE = "DESIGN_BUNDLE"
     TASKS_BUNDLE = "TASKS_BUNDLE"
     TDD_BUNDLE = "TDD_BUNDLE"
+    EXPLORER_INTAKE = "EXPLORER_INTAKE"
+    EXPLORER_DISCOVERY = "EXPLORER_DISCOVERY"
+    EXPLORER_DECISION = "EXPLORER_DECISION"
+    EXPLORER_ARTIFACT = "EXPLORER_ARTIFACT"
+    EXPLORER_REVIEW = "EXPLORER_REVIEW"
+    EXPLORER_DISTILL = "EXPLORER_DISTILL"
 
 
 class TerminalState(StrEnum):
@@ -44,6 +51,8 @@ class TerminalState(StrEnum):
 
 LifecycleNode = PhaseName | TerminalState
 
+# Stage 6 intentionally models the SDD control skeleton without knowledge
+# extraction phases. Stage 9 owns knowledge lifecycle nodes and promotion.
 SDD_PHASES: tuple[PhaseName, ...] = (
     PhaseName.EXPLORE_BUNDLE,
     PhaseName.PROPOSAL_BUNDLE,
@@ -53,8 +62,18 @@ SDD_PHASES: tuple[PhaseName, ...] = (
     PhaseName.TDD_BUNDLE,
 )
 
+EXPLORER_PHASES: tuple[PhaseName, ...] = (
+    PhaseName.EXPLORER_INTAKE,
+    PhaseName.EXPLORER_DISCOVERY,
+    PhaseName.EXPLORER_DECISION,
+    PhaseName.EXPLORER_ARTIFACT,
+    PhaseName.EXPLORER_REVIEW,
+    PhaseName.EXPLORER_DISTILL,
+)
+
 STRATEGY_GRAPHS: dict[RunStrategy, tuple[PhaseName, ...]] = {
     RunStrategy.SDD: SDD_PHASES,
+    RunStrategy.EXPLORER: EXPLORER_PHASES,
     RunStrategy.EXPLORE_BUNDLE: (PhaseName.EXPLORE_BUNDLE,),
     RunStrategy.PROPOSAL_BUNDLE: (PhaseName.PROPOSAL_BUNDLE,),
     RunStrategy.SPEC_BUNDLE: (PhaseName.SPEC_BUNDLE,),

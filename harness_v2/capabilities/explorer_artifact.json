@@ -1,0 +1,13 @@
+{
+  "commands": [],
+  "mcp_tools": [],
+  "paths": [
+    {
+      "mode": "read",
+      "pattern": "**"
+    }
+  ],
+  "phase": "explorer_artifact",
+  "schema_version": 1,
+  "skills": []
+}

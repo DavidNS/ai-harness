@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from typing import Protocol
 
 from harness_v2.backend.application.contracts import (
     CancelRun,
     Command,
     CommandResult,
-    ErrorView,
     GetAvailableActions,
     GetAvailableActionsResult,
     GetRun,
@@ -18,7 +17,6 @@ from harness_v2.backend.application.contracts import (
     GetRunStateResult,
     ListRuns,
     ListRunsResult,
-    PendingDecisionView,
     PhaseStarted,
     Query,
     QueryResult,
@@ -28,14 +26,12 @@ from harness_v2.backend.application.contracts import (
     RunResumed,
     RunStarted,
     RunSummaryView,
-    RunView,
     StartRun,
     SubmitUserDecision,
-    TaskSummaryView,
     UserDecisionReceived,
-    UserDecisionRequested,
 )
-from harness_v2.backend.domain.decisions import PendingDecision
+from harness_v2.backend.application.decision_service import pending_decision_view, run_to_view
+from harness_v2.backend.domain.decisions import DecisionRecord
 from harness_v2.backend.domain.lifecycle import LifecycleGraph, PhaseName, RunStatus, RunStrategy
 from harness_v2.backend.domain.runs import RunRecord
 from harness_v2.backend.ports.clock import ClockPort
@@ -45,78 +41,13 @@ from harness_v2.backend.ports.state_store import StateNotFoundError, StateStoreP
 INITIAL_PHASE = PhaseName.EXPLORE_BUNDLE
 
 
-def _require_text(value: str, field: str) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{field} is required")
-    return value.strip()
+class PhaseOrchestrator(Protocol):
+    def execute_current_phase(self, run_id: str) -> CommandResult | None: ...
 
 
-def _text_tuple(values: tuple[str, ...] | list[str], field: str) -> tuple[str, ...]:
-    normalized = tuple(_require_text(value, field) for value in values)
-    if len(normalized) != len(set(normalized)):
-        raise ValueError(f"{field} must not contain duplicates")
-    return normalized
-
-
-@dataclass(frozen=True, slots=True)
-class DecisionRequest:
-    run_id: str
-    decision_id: str
-    prompt: str
-    options: tuple[str, ...] = ()
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "run_id", _require_text(self.run_id, "run_id"))
-        object.__setattr__(self, "decision_id", _require_text(self.decision_id, "decision_id"))
-        object.__setattr__(self, "prompt", _require_text(self.prompt, "prompt"))
-        object.__setattr__(self, "options", _text_tuple(self.options, "options"))
-
-
-
-def _pending_decision_view(run: RunRecord) -> PendingDecisionView | None:
-    decision = run.pending_decision
-    if decision is None:
-        return None
-    return PendingDecisionView(
-        decision_id=decision.decision_id,
-        origin_phase=decision.origin_phase.value,
-        prompt=decision.prompt,
-        created_at=decision.created_at,
-        options=decision.options,
-    )
-
-
-def _task_view(task: object) -> TaskSummaryView:
-    return TaskSummaryView(
-        task_id=task.task_id,
-        title=task.title,
-        status=task.status.value,
-    )
-
-
-def _error_view(error: object) -> ErrorView:
-    return ErrorView(
-        code=error.code,
-        message=error.message,
-        phase=error.phase,
-        timestamp=error.timestamp,
-    )
-
-
-def run_to_view(run: RunRecord) -> RunView:
-    """Project the domain aggregate into a serialization-stable boundary DTO."""
-
-    return RunView(
-        run_id=run.run_id,
-        request=run.request,
-        status=run.status.value,
-        strategy=run.strategy.value,
-        current_phase=run.current_phase.value if run.current_phase else None,
-        completed_phases=tuple(phase.value for phase in run.completed_phases),
-        pending_decision=_pending_decision_view(run),
-        tasks=tuple(_task_view(task) for task in run.tasks),
-        errors=tuple(_error_view(error) for error in run.errors),
-    )
+class _UnknownClock:
+    def now_iso(self) -> str:
+        return "unknown"
 
 
 def run_to_summary(run: RunRecord) -> RunSummaryView:
@@ -159,7 +90,7 @@ class StartRunService(_RunStateAccess):
             run_id=run_id,
             request=command.request,
             status=RunStatus.PENDING,
-            strategy=RunStrategy.SDD,
+            strategy=RunStrategy(command.strategy),
         )
         self._state_store.save(run)
         return CommandResult(run=run_to_view(run), events=events)
@@ -186,36 +117,6 @@ class ResumeRunService(_RunStateAccess):
         raise InvalidRunStateError(f"run {run.run_id} cannot be resumed from {run.status.value}")
 
 
-class RequestUserDecisionService(_RunStateAccess):
-    def __init__(self, state_store: StateStorePort, clock: ClockPort) -> None:
-        super().__init__(state_store)
-        self._clock = clock
-
-    def execute(self, command: DecisionRequest) -> CommandResult:
-        run = self._get(command.run_id)
-        if run.status != RunStatus.RUNNING or run.current_phase is None:
-            raise InvalidRunStateError(f"run {run.run_id} cannot request a decision from {run.status.value}")
-        decision = PendingDecision(
-            decision_id=command.decision_id,
-            origin_phase=run.current_phase,
-            prompt=command.prompt,
-            created_at=self._clock.now_iso(),
-            options=command.options,
-        )
-        event = UserDecisionRequested(
-            run_id=run.run_id,
-            decision_id=decision.decision_id,
-            prompt=decision.prompt,
-            options=decision.options,
-        )
-        updated = run.replace(
-            status=RunStatus.WAITING_FOR_USER,
-            pending_decision=decision,
-        )
-        self._state_store.save(updated)
-        return CommandResult(run=run_to_view(updated), events=(event,))
-
-
 class CancelRunService(_RunStateAccess):
     def execute(self, command: CancelRun) -> CommandResult:
         run = self._get(command.run_id)
@@ -232,6 +133,10 @@ class CancelRunService(_RunStateAccess):
 
 
 class SubmitUserDecisionService(_RunStateAccess):
+    def __init__(self, state_store: StateStorePort, clock: ClockPort | None = None) -> None:
+        super().__init__(state_store)
+        self._clock = clock or _UnknownClock()
+
     def execute(self, command: SubmitUserDecision) -> CommandResult:
         run = self._get(command.run_id)
         if run.status != RunStatus.WAITING_FOR_USER or run.pending_decision is None:
@@ -248,9 +153,19 @@ class SubmitUserDecisionService(_RunStateAccess):
             decision_id=command.decision_id,
             response=command.response,
         )
+        history = DecisionRecord(
+            decision_id=decision.decision_id,
+            origin_phase=decision.origin_phase,
+            prompt=decision.prompt,
+            response=command.response,
+            created_at=decision.created_at,
+            answered_at=self._clock.now_iso(),
+            options=decision.options,
+        )
         updated = run.replace(
             status=RunStatus.RUNNING,
             pending_decision=None,
+            decision_history=(*run.decision_history, history),
         )
         self._state_store.save(updated)
         return CommandResult(run=run_to_view(updated), events=(event,))
@@ -273,7 +188,7 @@ class GetRunStateService(_RunStateAccess):
             run_id=run.run_id,
             status=run.status.value,
             current_phase=run.current_phase.value if run.current_phase else None,
-            pending_decision=_pending_decision_view(run),
+            pending_decision=pending_decision_view(run),
         )
 
 
@@ -290,12 +205,15 @@ class RunService:
         self,
         state_store: StateStorePort,
         id_generator: IdGeneratorPort,
+        orchestrator: PhaseOrchestrator | None = None,
+        clock: ClockPort | None = None,
     ) -> None:
         self._state_store = state_store
+        self._orchestrator = orchestrator
         self._start = StartRunService(state_store, id_generator=id_generator)
         self._resume = ResumeRunService(state_store)
         self._cancel = CancelRunService(state_store)
-        self._submit_decision = SubmitUserDecisionService(state_store)
+        self._submit_decision = SubmitUserDecisionService(state_store, clock=clock)
         self._get = GetRunService(state_store)
         self._list = ListRunsService(state_store)
         self._get_state = GetRunStateService(state_store)
@@ -305,7 +223,13 @@ class RunService:
         if isinstance(command, StartRun):
             return self._start.execute(command)
         if isinstance(command, ResumeRun):
-            return self._resume.execute(command)
+            resumed = self._resume.execute(command)
+            if self._orchestrator is None:
+                return resumed
+            phase_result = self._orchestrator.execute_current_phase(command.run_id)
+            if phase_result is None:
+                return resumed
+            return CommandResult(run=phase_result.run, events=(*resumed.events, *phase_result.events))
         if isinstance(command, CancelRun):
             return self._cancel.execute(command)
         if isinstance(command, SubmitUserDecision):

@@ -45,6 +45,33 @@ class ArchitectureContractTests(unittest.TestCase):
         self.assertTrue(all("budget" in finding.details for finding in budget_findings))
         self.assertTrue(all("over_by" in finding.details for finding in budget_findings))
 
+    def _budget_codes_for(self, relative_path: str, line_count: int) -> set[str]:
+        path = ROOT / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("# budget fixture\n" * line_count, encoding="utf-8")
+        try:
+            report = check_architecture.Report()
+            check_architecture.check_budgets(report)
+            return {finding.code for finding in report.findings if finding.path == relative_path}
+        finally:
+            path.unlink(missing_ok=True)
+
+    def test_v2_source_budget_checker_includes_harness_v2(self) -> None:
+        codes = self._budget_codes_for(
+            "harness_v2/backend/application/_budget_fixture.py",
+            check_architecture.SOURCE_LINE_BUDGET + 1,
+        )
+
+        self.assertIn("line_budget.source", codes)
+
+    def test_v2_integration_budget_checker_includes_test_v2_integration(self) -> None:
+        codes = self._budget_codes_for(
+            "test_v2/integration/test_budget_fixture.py",
+            check_architecture.INTEGRATION_LINE_BUDGET + 1,
+        )
+
+        self.assertIn("line_budget.integration", codes)
+
     def test_architecture_checker_summary_rendering(self) -> None:
         report = check_architecture.run_checks()
 
@@ -181,6 +208,51 @@ class ArchitectureContractTests(unittest.TestCase):
             with self.subTest(source=source):
                 codes = self._v2_boundary_codes_for("harness_v2/backend/ports/_bad_boundary_fixture.py", source)
                 self.assertIn("v2.ports_boundary", codes)
+
+
+    def test_v2_worker_resource_checker_requires_markdown_and_capability_files(self) -> None:
+        path = ROOT / "harness_v2" / "workers" / "purpose.md"
+        backup = path.read_text(encoding="utf-8")
+        path.unlink()
+        try:
+            report = check_architecture.Report()
+            check_architecture.check_v2_worker_resources(report)
+            codes = {finding.code for finding in report.findings}
+            self.assertIn("v2.worker_resources", codes)
+        finally:
+            path.write_text(backup, encoding="utf-8")
+
+
+    def _v2_external_effect_codes_for(self, relative_path: str, source: str) -> set[str]:
+        path = ROOT / relative_path
+        path.write_text(source, encoding="utf-8")
+        try:
+            report = check_architecture.Report()
+            check_architecture.check_v2_backend_external_effects(report)
+            return {finding.code for finding in report.findings}
+        finally:
+            path.unlink(missing_ok=True)
+
+    def test_v2_backend_external_effect_guardrail_rejects_filesystem_subprocess_and_git(self) -> None:
+        cases = (
+            ("harness_v2/backend/application/_bad_effect_fixture.py", "from pathlib import Path\nPath.cwd()\n"),
+            ("harness_v2/backend/application/_bad_effect_fixture.py", "open('state.json')\n"),
+            ("harness_v2/backend/domain/_bad_effect_fixture.py", "import subprocess\nsubprocess.run(['python3', '-V'])\n"),
+            ("harness_v2/backend/application/_bad_effect_fixture.py", "import subprocess\nsubprocess.run(['git', 'status'])\n"),
+            ("harness_v2/backend/application/_bad_effect_fixture.py", "from pathlib import Path\nPath('x').read_text()\n"),
+        )
+        for relative, source in cases:
+            with self.subTest(source=source):
+                codes = self._v2_external_effect_codes_for(relative, source)
+                self.assertIn("v2.backend_external_effect_boundary", codes)
+
+    def test_v2_backend_external_effect_guardrail_allows_artifact_port_reads(self) -> None:
+        codes = self._v2_external_effect_codes_for(
+            "harness_v2/backend/application/_good_effect_fixture.py",
+            "def f(context):\n    return context.artifacts.read_text('run-1', 'artifact.txt')\n",
+        )
+
+        self.assertNotIn("v2.backend_external_effect_boundary", codes)
 
     def test_v2_model_provider_guardrail_rejects_shell_execution(self) -> None:
         cases = (

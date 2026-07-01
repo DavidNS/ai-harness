@@ -41,6 +41,7 @@ def _parser() -> argparse.ArgumentParser:
     subcommands = parser.add_subparsers(dest="command", required=True)
 
     start = subcommands.add_parser("start", help="start a simulated v2 run")
+    start.add_argument("--strategy", default="SDD", help="run strategy, default: SDD")
     start.add_argument("request", nargs="+", help="request text")
 
     resume = subcommands.add_parser("resume", help="resume an existing run")
@@ -125,7 +126,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     host = InProcessHost(state_root=args.state_root)
     try:
         if args.command == "start":
-            _render_command_result(host.execute(StartRun(request=" ".join(args.request))))
+            _render_command_result(host.execute(StartRun(request=" ".join(args.request), strategy=args.strategy)))
             return 0
         if args.command == "resume":
             _render_command_result(host.execute(ResumeRun(run_id=args.run_id)))

@@ -13,9 +13,9 @@ class InvalidRunStateError(RuntimeError):
     """Raised when a command is not valid for the run's current state."""
 
 
-PHASE_VALUES = frozenset({"EXPLORE_BUNDLE", "PROPOSAL_BUNDLE", "SPEC_BUNDLE", "DESIGN_BUNDLE", "TASKS_BUNDLE", "TDD_BUNDLE"})
+PHASE_VALUES = frozenset({"EXPLORE_BUNDLE", "PROPOSAL_BUNDLE", "SPEC_BUNDLE", "DESIGN_BUNDLE", "TASKS_BUNDLE", "TDD_BUNDLE", "EXPLORER_INTAKE", "EXPLORER_DISCOVERY", "EXPLORER_DECISION", "EXPLORER_ARTIFACT", "EXPLORER_REVIEW", "EXPLORER_DISTILL"})
 RUN_STATUS_VALUES = frozenset({"PENDING", "RUNNING", "WAITING_FOR_USER", "COMPLETED", "FAILED", "CANCELLED"})
-RUN_STRATEGY_VALUES = frozenset({"SDD", "EXPLORE_BUNDLE", "PROPOSAL_BUNDLE", "SPEC_BUNDLE", "DESIGN_BUNDLE", "TASKS_BUNDLE", "TDD_BUNDLE"})
+RUN_STRATEGY_VALUES = frozenset({"SDD", "EXPLORER", "EXPLORE_BUNDLE", "PROPOSAL_BUNDLE", "SPEC_BUNDLE", "DESIGN_BUNDLE", "TASKS_BUNDLE", "TDD_BUNDLE"})
 
 
 def _require_text(value: str, field: str) -> str:
@@ -72,9 +72,11 @@ def _typed_tuple(values: tuple[object, ...] | list[object], expected_type: objec
 @dataclass(frozen=True, slots=True)
 class StartRun:
     request: str
+    strategy: str = "SDD"
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "request", _require_text(self.request, "request"))
+        object.__setattr__(self, "strategy", _strategy_text(self.strategy))
 
 
 @dataclass(frozen=True, slots=True)

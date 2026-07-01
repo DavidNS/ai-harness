@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 
 from harness_v2.backend.domain.errors import DomainValidationError, InvalidTransitionError
-from harness_v2.backend.domain.lifecycle import LifecycleGraph, PhaseName, RunStrategy, SDD_PHASES, TerminalState
+from harness_v2.backend.domain.lifecycle import EXPLORER_PHASES, LifecycleGraph, PhaseName, RunStrategy, SDD_PHASES, TerminalState
 
 
 class LifecycleGraphTests(unittest.TestCase):
@@ -17,6 +17,19 @@ class LifecycleGraphTests(unittest.TestCase):
         self.assertEqual(PhaseName.TASKS_BUNDLE, graph.next_after(PhaseName.DESIGN_BUNDLE))
         self.assertEqual(PhaseName.TDD_BUNDLE, graph.next_after(PhaseName.TASKS_BUNDLE))
         self.assertEqual(TerminalState.COMPLETED, graph.next_after(PhaseName.TDD_BUNDLE))
+
+
+    def test_explorer_graph_allows_ordered_stage_transitions(self) -> None:
+        graph = LifecycleGraph.for_strategy(RunStrategy.EXPLORER)
+
+        self.assertEqual(PhaseName.EXPLORER_INTAKE, graph.start_phase)
+        self.assertEqual(PhaseName.EXPLORER_DISCOVERY, graph.next_after(PhaseName.EXPLORER_INTAKE))
+        self.assertEqual(PhaseName.EXPLORER_DECISION, graph.next_after(PhaseName.EXPLORER_DISCOVERY))
+        self.assertEqual(PhaseName.EXPLORER_ARTIFACT, graph.next_after(PhaseName.EXPLORER_DECISION))
+        self.assertEqual(PhaseName.EXPLORER_REVIEW, graph.next_after(PhaseName.EXPLORER_ARTIFACT))
+        self.assertEqual(PhaseName.EXPLORER_DISTILL, graph.next_after(PhaseName.EXPLORER_REVIEW))
+        self.assertEqual(TerminalState.COMPLETED, graph.next_after(PhaseName.EXPLORER_DISTILL))
+        graph.validate_completed_prefix(EXPLORER_PHASES[:3])
 
     def test_bundle_strategies_complete_after_their_single_bundle(self) -> None:
         cases = (

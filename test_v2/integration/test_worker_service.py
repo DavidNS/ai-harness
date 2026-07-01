@@ -18,6 +18,7 @@ from harness_v2.backend.ports.model_provider import (
     TimeoutPolicy,
     TruncationPolicy,
 )
+from harness_v2.backend.ports.worker_resources import WorkerResourceSpec
 
 
 def running_run(run_id: str = "run-1", phase: PhaseName = PhaseName.EXPLORE_BUNDLE) -> RunRecord:
@@ -30,13 +31,22 @@ def request(run_id: str = "run-1", phase: PhaseName = PhaseName.EXPLORE_BUNDLE, 
         run_id=run_id,
         phase=phase,
         task_id=task_id,
-        prompt="MALFORMED raw output is still persisted",
+        inputs={"mode": "malformed"},
         working_directory=Path.cwd(),
         model=ModelSelection("fake", "test"),
-        capabilities=CapabilityProjection(paths=(PathCapability("**", "read"),)),
         timeout=TimeoutPolicy(5),
-        truncation=TruncationPolicy(128),
+        truncation=TruncationPolicy(512),
     )
+
+
+class StaticWorkerResources:
+    def get(self, task_id: str) -> WorkerResourceSpec:
+        return WorkerResourceSpec(
+            task_id=task_id,
+            playbook_markdown="# Worker\nUse the test worker.",
+            prompt_markdown="# Prompt\nReturn the requested output.",
+            capabilities=CapabilityProjection(paths=(PathCapability("src/**", "read"),)),
+        )
 
 
 class WorkerTaskServiceIntegrationTests(unittest.TestCase):
@@ -45,7 +55,7 @@ class WorkerTaskServiceIntegrationTests(unittest.TestCase):
         artifacts = InMemoryArtifactStore()
         provider = FakeModelProvider([ModelProviderResult("not json", "", 0, 0.01)])
         state.save(running_run())
-        service = WorkerTaskService(state, artifacts, provider)
+        service = WorkerTaskService(state, artifacts, provider, StaticWorkerResources())
 
         result = service.execute(request())
 
@@ -54,14 +64,19 @@ class WorkerTaskServiceIntegrationTests(unittest.TestCase):
         self.assertEqual("workers/EXPLORE_BUNDLE/task-1/result.json", result.result_artifact_id)
         stored_request = json.loads(artifacts.read("run-1", result.request_artifact_id))
         stored_result = json.loads(artifacts.read("run-1", result.result_artifact_id))
+        self.assertEqual("task-1", stored_request["task_id"])
+        self.assertEqual({"mode": "malformed"}, stored_request["inputs"])
         self.assertEqual("fake", stored_request["model"]["provider"])
+        self.assertEqual([{"pattern": "src/**", "mode": "read"}], stored_request["capabilities"]["paths"])
+        self.assertIn("# Worker", stored_request["prompt"])
+        self.assertIn('"task_id": "task-1"', stored_request["prompt"])
         self.assertEqual("not json", stored_result["stdout"])
-        self.assertEqual(["MALFORMED raw output is still persisted"], [call.prompt for call in provider.requests])
+        self.assertEqual([stored_request["prompt"]], [call.prompt for call in provider.requests])
 
     def test_worker_task_fails_closed_for_missing_inactive_or_wrong_phase_runs(self) -> None:
         state = InMemoryStateStore()
         artifacts = InMemoryArtifactStore()
-        service = WorkerTaskService(state, artifacts, FakeModelProvider())
+        service = WorkerTaskService(state, artifacts, FakeModelProvider(), StaticWorkerResources())
 
         with self.assertRaises(RunNotFoundError):
             service.execute(request())
