@@ -1,4 +1,4 @@
-"""In-memory application service for the v2 walking skeleton."""
+"""Application service for v2 run commands and queries."""
 
 from __future__ import annotations
 
@@ -25,6 +25,7 @@ from harness_v2.backend.application.contracts import (
 )
 from harness_v2.backend.domain.lifecycle import PhaseName, RunStrategy
 from harness_v2.backend.domain.runs import RunRecord, RunStatus
+from harness_v2.backend.ports.state_store import StateNotFoundError, StateStorePort
 
 INITIAL_PHASE = PhaseName.EXPLORE_BUNDLE
 
@@ -37,12 +38,12 @@ class InvalidRunStateError(RuntimeError):
     """Raised when a command is not valid for the run's current state."""
 
 
-class InMemoryRunService:
-    """Minimal authoritative backend service with no external side effects."""
+class RunService:
+    """Authoritative backend service with persistence behind ports."""
 
-    def __init__(self, id_factory: Callable[[], str] | None = None) -> None:
+    def __init__(self, state_store: StateStorePort, id_factory: Callable[[], str] | None = None) -> None:
+        self._state_store = state_store
         self._id_factory = id_factory or (lambda: uuid4().hex)
-        self._runs: dict[str, RunRecord] = {}
 
     def execute(self, command: Command) -> CommandResult:
         if isinstance(command, StartRun):
@@ -59,7 +60,7 @@ class InMemoryRunService:
         if isinstance(query, GetRun):
             return self._get(query.run_id)
         if isinstance(query, ListRuns):
-            return tuple(self._runs.values())
+            return self._state_store.list_all()
         if isinstance(query, GetRunState):
             return self._get(query.run_id).status
         if isinstance(query, GetAvailableActions):
@@ -83,7 +84,7 @@ class InMemoryRunService:
             completed_phases=(INITIAL_PHASE,),
             events=events,
         )
-        self._runs[run_id] = run
+        self._state_store.save(run)
         return CommandResult(run=run, events=events)
 
     def _cancel(self, command: CancelRun) -> CommandResult:
@@ -100,7 +101,7 @@ class InMemoryRunService:
             completed_phases=run.completed_phases,
             events=(*run.events, event),
         )
-        self._runs[command.run_id] = updated
+        self._state_store.save(updated)
         return CommandResult(run=updated, events=(event,))
 
     def _submit_decision(self, command: SubmitUserDecision) -> CommandResult:
@@ -109,8 +110,8 @@ class InMemoryRunService:
 
     def _get(self, run_id: str) -> RunRecord:
         try:
-            return self._runs[run_id]
-        except KeyError as exc:
+            return self._state_store.get(run_id)
+        except StateNotFoundError as exc:
             raise RunNotFoundError(run_id) from exc
 
     def _available_actions(self, run: RunRecord) -> tuple[str, ...]:
@@ -119,4 +120,3 @@ class InMemoryRunService:
         if run.status == RunStatus.CANCELLED:
             return ()
         return ("resume", "cancel")
-

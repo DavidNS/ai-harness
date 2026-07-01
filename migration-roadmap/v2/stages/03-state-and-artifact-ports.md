@@ -6,7 +6,7 @@ Goal: isolate persistence before porting real orchestration.
 
 - Define `StateStorePort` for authoritative run state operations.
 - Define `ArtifactStorePort` for artifact reads, writes, checksums, listing, and
-  snapshots.
+  manifests.
 - Define `RunIndexPort` or equivalent for listing active and completed runs.
 - Implement in-memory adapters first.
 - Implement file-backed adapters second.
