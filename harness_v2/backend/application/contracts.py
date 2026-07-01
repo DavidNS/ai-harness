@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from harness_v2.backend.domain.lifecycle import PhaseName
+
 
 def _require_text(value: str, field: str) -> str:
     if not isinstance(value, str) or not value.strip():
@@ -17,6 +19,13 @@ def _text_tuple(values: tuple[str, ...] | list[str], field: str) -> tuple[str, .
     if len(normalized) != len(set(normalized)):
         raise ValueError(f"{field} must not contain duplicates")
     return normalized
+
+
+def _phase_text(value: str | PhaseName, field: str = "phase") -> str:
+    try:
+        return PhaseName(_require_text(value, field)).value
+    except ValueError as exc:
+        raise ValueError(f"{field} is not a known phase") from exc
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,7 +110,7 @@ class PhaseStarted:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "run_id", _require_text(self.run_id, "run_id"))
-        object.__setattr__(self, "phase", _require_text(self.phase, "phase"))
+        object.__setattr__(self, "phase", _phase_text(self.phase))
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,7 +120,7 @@ class PhaseCompleted:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "run_id", _require_text(self.run_id, "run_id"))
-        object.__setattr__(self, "phase", _require_text(self.phase, "phase"))
+        object.__setattr__(self, "phase", _phase_text(self.phase))
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,7 +131,7 @@ class PhaseFailed:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "run_id", _require_text(self.run_id, "run_id"))
-        object.__setattr__(self, "phase", _require_text(self.phase, "phase"))
+        object.__setattr__(self, "phase", _phase_text(self.phase))
         object.__setattr__(self, "error", _require_text(self.error, "error"))
 
 

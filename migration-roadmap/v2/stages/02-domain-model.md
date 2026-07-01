@@ -36,6 +36,15 @@ Goal: move core lifecycle concepts into v2 domain code.
 
 - v2 can represent a real SDD run state independently of v1 `RunState`.
 
+## Accepted Migration Debt
+
+- The Stage 02 walking skeleton may return domain objects such as `RunRecord`
+  and `RunStatus` through the in-process host/application boundary. This is
+  accepted only because Stage 02 focuses on pure domain modeling, not stable
+  host wire contracts.
+- Before Stage 04 exits, boundary responses must be replaced with explicit
+  serialization-stable DTOs.
+
 ## Agent Handoff
 
 Do not port provider, prompt, artifact, or storage behavior in this stage. The

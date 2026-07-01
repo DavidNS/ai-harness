@@ -597,6 +597,27 @@ def check_v2_boundaries(report: Report) -> None:
                 )
 
 
+def check_v2_domain_test_boundaries(report: Report) -> None:
+    root = ROOT / "test_v2" / "unit"
+    if not root.exists():
+        return
+
+    forbidden_roots = {"harness", "ai_harness", "harness_v2"}
+    allowed_v2_domain = {"harness_v2.backend.domain"}
+    for path in sorted(root.glob("test_domain*.py")):
+        imports = imported_names(parse(path))
+        bad = _imports_with_prefix(imports, forbidden_roots)
+        bad -= _imports_with_prefix(imports, allowed_v2_domain)
+        if bad:
+            report.error(
+                "v2 domain unit tests must import only v2 domain modules from harness_v2",
+                code="v2.domain_tests_boundary",
+                category="boundary",
+                path=rel(path),
+                details={"imports": sorted(bad)},
+            )
+
+
 def run_checks() -> Report:
     report = Report()
     check_graph_contract(report)
@@ -607,6 +628,7 @@ def run_checks() -> Report:
     check_budgets(report)
     check_cli_frontend_boundaries(report)
     check_v2_boundaries(report)
+    check_v2_domain_test_boundaries(report)
     return report
 
 

@@ -59,6 +59,7 @@ class ArchitectureContractTests(unittest.TestCase):
         try:
             report = check_architecture.Report()
             check_architecture.check_v2_boundaries(report)
+            check_architecture.check_v2_domain_test_boundaries(report)
             return {finding.code for finding in report.findings}
         finally:
             path.unlink(missing_ok=True)
@@ -119,6 +120,30 @@ class ArchitectureContractTests(unittest.TestCase):
 
         self.assertIn("v2.hosts_boundary", codes)
 
+
+
+    def test_v2_domain_unit_tests_reject_application_imports(self) -> None:
+        codes = self._v2_boundary_codes_for(
+            "test_v2/unit/test_domain_bad_boundary_fixture.py",
+            "from harness_v2.backend.application import contracts\n",
+        )
+
+        self.assertIn("v2.domain_tests_boundary", codes)
+
+    def test_v2_domain_unit_tests_reject_hosts_frontends_adapters_and_v1_imports(self) -> None:
+        cases = (
+            "from harness_v2.hosts.in_process import host\n",
+            "from harness_v2.frontends import cli\n",
+            "from harness_v2.adapters import storage\n",
+            "from ai_harness.models import RunState\n",
+        )
+        for source in cases:
+            with self.subTest(source=source):
+                codes = self._v2_boundary_codes_for(
+                    "test_v2/unit/test_domain_bad_boundary_fixture.py",
+                    source,
+                )
+                self.assertIn("v2.domain_tests_boundary", codes)
 
     def test_cli_commands_module_has_no_interactive_ui_dependencies(self) -> None:
         path = ROOT / "harness" / "cli" / "commands.py"

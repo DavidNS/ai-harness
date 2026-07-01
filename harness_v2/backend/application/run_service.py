@@ -23,9 +23,10 @@ from harness_v2.backend.application.contracts import (
     StartRun,
     SubmitUserDecision,
 )
+from harness_v2.backend.domain.lifecycle import PhaseName, RunStrategy
 from harness_v2.backend.domain.runs import RunRecord, RunStatus
 
-SIMULATED_PHASE = "SIMULATED"
+INITIAL_PHASE = PhaseName.EXPLORE_BUNDLE
 
 
 class RunNotFoundError(KeyError):
@@ -69,16 +70,17 @@ class InMemoryRunService:
         run_id = self._id_factory()
         events = (
             RunStarted(run_id=run_id, request=command.request),
-            PhaseStarted(run_id=run_id, phase=SIMULATED_PHASE),
-            PhaseCompleted(run_id=run_id, phase=SIMULATED_PHASE),
+            PhaseStarted(run_id=run_id, phase=INITIAL_PHASE.value),
+            PhaseCompleted(run_id=run_id, phase=INITIAL_PHASE.value),
             RunCompleted(run_id=run_id),
         )
         run = RunRecord(
             run_id=run_id,
             request=command.request,
             status=RunStatus.COMPLETED,
+            strategy=RunStrategy.EXPLORE_BUNDLE,
             current_phase=None,
-            completed_phases=(SIMULATED_PHASE,),
+            completed_phases=(INITIAL_PHASE,),
             events=events,
         )
         self._runs[run_id] = run
@@ -93,7 +95,8 @@ class InMemoryRunService:
             run_id=run.run_id,
             request=run.request,
             status=RunStatus.CANCELLED,
-            current_phase=run.current_phase,
+            strategy=run.strategy,
+            current_phase=None,
             completed_phases=run.completed_phases,
             events=(*run.events, event),
         )

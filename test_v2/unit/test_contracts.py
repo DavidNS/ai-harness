@@ -48,9 +48,9 @@ class ContractTests(unittest.TestCase):
     def test_all_events_can_be_created_with_valid_data(self) -> None:
         events = (
             RunStarted("run-1", "Fix tests"),
-            PhaseStarted("run-1", "SIMULATED"),
-            PhaseCompleted("run-1", "SIMULATED"),
-            PhaseFailed("run-1", "SIMULATED", "failed"),
+            PhaseStarted("run-1", "EXPLORE_BUNDLE"),
+            PhaseCompleted("run-1", "EXPLORE_BUNDLE"),
+            PhaseFailed("run-1", "EXPLORE_BUNDLE", "failed"),
             UserDecisionRequested("run-1", "decision-1", "Choose", ("continue",)),
             UserDecisionReceived("run-1", "decision-1", "continue"),
             RunCompleted("run-1"),
@@ -63,7 +63,7 @@ class ContractTests(unittest.TestCase):
     def test_text_fields_are_trimmed(self) -> None:
         self.assertEqual("Fix tests", StartRun("  Fix tests  ").request)
         self.assertEqual("run-1", GetRun("  run-1  ").run_id)
-        self.assertEqual("SIMULATED", PhaseStarted("run-1", "  SIMULATED  ").phase)
+        self.assertEqual("EXPLORE_BUNDLE", PhaseStarted("run-1", "  EXPLORE_BUNDLE  ").phase)
 
     def test_commands_reject_missing_required_text(self) -> None:
         invalid_cases = (
@@ -90,13 +90,13 @@ class ContractTests(unittest.TestCase):
         invalid_cases = (
             lambda: RunStarted("", "Fix tests"),
             lambda: RunStarted("run-1", ""),
-            lambda: PhaseStarted("", "SIMULATED"),
+            lambda: PhaseStarted("", "EXPLORE_BUNDLE"),
             lambda: PhaseStarted("run-1", ""),
-            lambda: PhaseCompleted("", "SIMULATED"),
+            lambda: PhaseCompleted("", "EXPLORE_BUNDLE"),
             lambda: PhaseCompleted("run-1", ""),
-            lambda: PhaseFailed("", "SIMULATED", "failed"),
+            lambda: PhaseFailed("", "EXPLORE_BUNDLE", "failed"),
             lambda: PhaseFailed("run-1", "", "failed"),
-            lambda: PhaseFailed("run-1", "SIMULATED", ""),
+            lambda: PhaseFailed("run-1", "EXPLORE_BUNDLE", ""),
             lambda: UserDecisionRequested("", "decision-1", "Choose"),
             lambda: UserDecisionRequested("run-1", "", "Choose"),
             lambda: UserDecisionRequested("run-1", "decision-1", ""),
@@ -105,6 +105,18 @@ class ContractTests(unittest.TestCase):
             lambda: UserDecisionReceived("run-1", "decision-1", ""),
             lambda: RunCompleted(""),
             lambda: RunCancelled(""),
+        )
+
+        for create in invalid_cases:
+            with self.subTest(create=create):
+                with self.assertRaises(ValueError):
+                    create()
+
+    def test_phase_events_reject_unknown_phase(self) -> None:
+        invalid_cases = (
+            lambda: PhaseStarted("run-1", "NOT_A_PHASE"),
+            lambda: PhaseCompleted("run-1", "NOT_A_PHASE"),
+            lambda: PhaseFailed("run-1", "NOT_A_PHASE", "failed"),
         )
 
         for create in invalid_cases:

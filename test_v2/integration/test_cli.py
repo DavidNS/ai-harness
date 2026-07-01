@@ -23,8 +23,8 @@ class CliIntegrationTests(unittest.TestCase):
         self.assertIn("Run: ", completed.stdout)
         self.assertIn("Status: COMPLETED", completed.stdout)
         self.assertIn("Event: RunStarted", completed.stdout)
-        self.assertIn("Event: PhaseStarted phase=SIMULATED", completed.stdout)
-        self.assertIn("Event: PhaseCompleted phase=SIMULATED", completed.stdout)
+        self.assertIn("Event: PhaseStarted phase=EXPLORE_BUNDLE", completed.stdout)
+        self.assertIn("Event: PhaseCompleted phase=EXPLORE_BUNDLE", completed.stdout)
         self.assertIn("Event: RunCompleted", completed.stdout)
 
 

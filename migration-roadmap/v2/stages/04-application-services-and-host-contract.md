@@ -15,6 +15,9 @@ Goal: make commands and queries the stable interface to backend behavior.
 - Keep host code limited to request handling, adapter wiring, and event
   delivery.
 - Keep CLI code limited to parsing input and rendering command/query results.
+- Replace host/application boundary responses that expose raw domain objects
+  such as `RunRecord`, `RunStatus`, domain enums, or other domain aggregates
+  with explicit serialization-stable DTOs.
 
 ## Checkpoint
 
@@ -26,6 +29,8 @@ Goal: make commands and queries the stable interface to backend behavior.
 
 - The backend application core is usable without a terminal, browser, or HTTP
   server.
+- Host/backend command and query results do not expose raw domain aggregates,
+  domain enums, or non-serializable domain objects.
 
 ## Agent Handoff
 

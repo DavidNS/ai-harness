@@ -29,7 +29,7 @@ class InProcessHostIntegrationTests(unittest.TestCase):
         self.assertIsInstance(result.run, RunRecord)
         self.assertEqual("run-1", result.run.run_id)
         self.assertEqual(RunStatus.COMPLETED, result.run.status)
-        self.assertEqual(("SIMULATED",), result.run.completed_phases)
+        self.assertEqual(("EXPLORE_BUNDLE",), result.run.completed_phases)
         self.assertEqual(
             [RunStarted, PhaseStarted, PhaseCompleted, RunCompleted],
             [type(event) for event in result.events],
