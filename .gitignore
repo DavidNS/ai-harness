@@ -18,3 +18,5 @@ __pycache__/
 # Temporary refactor lifecycle control state
 refactor/control/state.json
 refactor/control/session.local.json
+# Experimental live eval outputs
+experimental/test/results/
