@@ -1,0 +1,140 @@
+{
+  "additionalProperties": true,
+  "properties": {
+    "entries": {
+      "items": {
+        "additionalProperties": true,
+        "properties": {
+          "classification": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "evidence_refs": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
+          },
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "classification",
+          "title",
+          "evidence_refs"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "evidence": {
+      "items": {
+        "additionalProperties": true,
+        "properties": {
+          "claim": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "confidence": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "code",
+              "test",
+              "documentation",
+              "knowledge",
+              "ci",
+              "git",
+              "structure",
+              "security",
+              "scope",
+              "external"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "severity": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "sources": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "status": {
+            "enum": [
+              "supported",
+              "contradicted",
+              "partial",
+              "partially_supported",
+              "unresolved",
+              "not_applicable",
+              "blocked"
+            ],
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "claim",
+          "status",
+          "confidence",
+          "severity",
+          "sources"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "exploration_map": {
+      "type": "object"
+    },
+    "kind": {
+      "const": "explore_outcome_bundle"
+    },
+    "normalized_request": {
+      "type": "object"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "status": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "triage": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "schema_version",
+    "kind",
+    "evidence",
+    "exploration_map",
+    "status",
+    "normalized_request",
+    "triage",
+    "entries"
+  ],
+  "type": "object"
+}

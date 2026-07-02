@@ -109,7 +109,7 @@ def event_view(event: Event, event_id: int | None = None) -> UiEventView:
     event_type = type(event).__name__
     run_id = getattr(event, "run_id", None)
     parts: list[str] = []
-    for name in ("phase", "origin_phase", "decision_id", "issue_id", "category", "action", "target_phase"):
+    for name in ("bundle", "phase", "origin_bundle", "decision_id", "issue_id", "category", "action", "target_bundle"):
         value = getattr(event, name, None)
         if value is not None:
             parts.append(f"{name}={value}")

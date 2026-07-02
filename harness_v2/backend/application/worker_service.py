@@ -8,7 +8,7 @@ from typing import Any
 from pathlib import Path
 
 from harness_v2.backend.application.contracts import InvalidRunStateError, RunNotFoundError
-from harness_v2.backend.domain.lifecycle import PhaseName, RunStatus
+from harness_v2.backend.domain.lifecycle import BundleName, PhaseName, RunStatus
 from harness_v2.backend.ports.artifact_store import ArtifactStorePort
 from harness_v2.backend.ports.model_provider import (
     CapabilityProjection,
@@ -39,6 +39,7 @@ def _safe_segment(value: str, field: str) -> str:
 @dataclass(frozen=True, slots=True)
 class WorkerTaskRequest:
     run_id: str
+    bundle: str | BundleName
     phase: str | PhaseName
     task_id: str
     inputs: dict[str, Any]
@@ -49,6 +50,7 @@ class WorkerTaskRequest:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "run_id", _require_text(self.run_id, "run_id"))
+        object.__setattr__(self, "bundle", BundleName(_require_text(self.bundle, "bundle")))
         object.__setattr__(self, "phase", PhaseName(_require_text(self.phase, "phase")))
         object.__setattr__(self, "task_id", _safe_segment(self.task_id, "task_id"))
         if not isinstance(self.inputs, dict):
@@ -66,6 +68,7 @@ class WorkerTaskRequest:
 @dataclass(frozen=True, slots=True)
 class WorkerTaskResult:
     run_id: str
+    bundle: str
     phase: str
     task_id: str
     request_artifact_id: str
@@ -96,10 +99,10 @@ class WorkerTaskService:
             run = self._state_store.get(command.run_id)
         except StateNotFoundError as exc:
             raise RunNotFoundError(command.run_id) from exc
-        if run.status is not RunStatus.RUNNING or run.current_phase is None:
+        if run.status is not RunStatus.RUNNING or run.current_bundle is None or run.current_phase is None:
             raise InvalidRunStateError(f"run {run.run_id} cannot request a worker task from {run.status.value}")
-        if run.current_phase != command.phase:
-            raise InvalidRunStateError(f"run {run.run_id} is in phase {run.current_phase.value}, not {command.phase.value}")
+        if run.current_bundle != command.bundle or run.current_phase != command.phase:
+            raise InvalidRunStateError(f"run {run.run_id} is in {run.current_bundle.value}/{run.current_phase.value}, not {command.bundle.value}/{command.phase.value}")
 
         spec = self._worker_resources.get(command.task_id)
         provider_request = ModelProviderRequest(
@@ -110,8 +113,8 @@ class WorkerTaskService:
             timeout=command.timeout,
             truncation=command.truncation,
         )
-        request_artifact_id = _artifact_id(command.phase, command.task_id, "request.json")
-        result_artifact_id = _artifact_id(command.phase, command.task_id, "result.json")
+        request_artifact_id = _artifact_id(command.bundle, command.phase, command.task_id, "request.json")
+        result_artifact_id = _artifact_id(command.bundle, command.phase, command.task_id, "result.json")
         self._artifact_store.write(
             run.run_id,
             request_artifact_id,
@@ -121,6 +124,7 @@ class WorkerTaskService:
         self._artifact_store.write(run.run_id, result_artifact_id, _json_bytes(_result_payload(provider_result)))
         return WorkerTaskResult(
             run_id=run.run_id,
+            bundle=command.bundle.value,
             phase=command.phase.value,
             task_id=command.task_id,
             request_artifact_id=request_artifact_id,
@@ -132,8 +136,8 @@ class WorkerTaskService:
         )
 
 
-def _artifact_id(phase: PhaseName, task_id: str, filename: str) -> str:
-    return f"workers/{phase.value}/{task_id}/{filename}"
+def _artifact_id(bundle: BundleName, phase: PhaseName, task_id: str, filename: str) -> str:
+    return f"workers/{bundle.value}/{phase.value}/{task_id}/{filename}"
 
 
 def _json_bytes(payload: dict[str, object]) -> bytes:

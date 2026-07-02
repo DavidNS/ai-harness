@@ -5,8 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from harness_v2.backend.application.contracts import Command, CommandExecutionResult, Query, QueryResult
-from harness_v2.backend.application.run_service import RunService
+from harness_v2.backend.application.run_orchestrator import RunOrchestrator
 from harness_v2.backend.ports.event_sink import EventSinkPort
+from harness_v2.backend.ports.model_provider import ModelProviderPort
 from harness_v2.backend.ports.state_store import StateStorePort
 from harness_v2.hosts.in_process.composition import build_file_backed_service, build_memory_service
 
@@ -16,7 +17,7 @@ class InProcessHost:
 
     def __init__(
         self,
-        service: RunService | None = None,
+        service: RunOrchestrator | None = None,
         state_store: StateStorePort | None = None,
         state_root: Path | str | None = None,
         event_sink: EventSinkPort | None = None,
@@ -24,6 +25,8 @@ class InProcessHost:
         allow_repository_mutation: bool = False,
         branch_mode: str = "current",
         github_ci_mode: str = "baseline",
+        model_provider: ModelProviderPort | None = None,
+        model_provider_name: str = "codex",
     ) -> None:
         configured = sum(value is not None for value in (service, state_store, state_root))
         if configured > 1:
@@ -31,7 +34,7 @@ class InProcessHost:
         if service is not None:
             if event_sink is not None:
                 raise ValueError("event_sink cannot be combined with an injected service")
-            if working_directory is not None or allow_repository_mutation or branch_mode != "current" or github_ci_mode != "baseline":
+            if working_directory is not None or allow_repository_mutation or branch_mode != "current" or github_ci_mode != "baseline" or model_provider is not None or model_provider_name != "codex":
                 raise ValueError("runtime options cannot be combined with an injected service")
             self._service = service
         elif state_root is not None:
@@ -42,6 +45,8 @@ class InProcessHost:
                 allow_repository_mutation=allow_repository_mutation,
                 branch_mode=branch_mode,
                 github_ci_mode=github_ci_mode,
+                model_provider=model_provider,
+                model_provider_name=model_provider_name,
             )
         else:
             self._service = build_memory_service(
@@ -51,6 +56,8 @@ class InProcessHost:
                 allow_repository_mutation=allow_repository_mutation,
                 branch_mode=branch_mode,
                 github_ci_mode=github_ci_mode,
+                model_provider=model_provider,
+                model_provider_name=model_provider_name,
             )
 
     def execute(self, command: Command) -> CommandExecutionResult:

@@ -16,6 +16,7 @@ from harness_v2.backend.application.contracts import (
 )
 from harness_v2.backend.domain.decisions import DecisionAction, DecisionEffect, PendingDecision
 from harness_v2.backend.domain.escalation import EscalationCategory
+from harness_v2.backend.domain import bundle_catalog
 from harness_v2.backend.domain.lifecycle import RunStatus
 from harness_v2.backend.domain.runs import RunRecord
 from harness_v2.backend.ports.clock import ClockPort
@@ -75,7 +76,7 @@ class RequestUserDecisionService:
             raise InvalidRunStateError(f"run {run.run_id} cannot request a decision from {run.status.value}")
         decision = PendingDecision(
             decision_id=command.decision_id,
-            origin_phase=run.current_phase,
+            origin_bundle=run.current_bundle,
             prompt=command.prompt,
             created_at=self._clock.now_iso(),
             options=command.options,
@@ -86,6 +87,7 @@ class RequestUserDecisionService:
         event = UserDecisionRequested(
             run_id=run.run_id,
             decision_id=decision.decision_id,
+            origin_bundle=decision.origin_bundle.value,
             prompt=decision.prompt,
             options=decision.options,
         )
@@ -100,7 +102,7 @@ def pending_decision_view(run: RunRecord) -> PendingDecisionView | None:
         return None
     return PendingDecisionView(
         decision_id=decision.decision_id,
-        origin_phase=decision.origin_phase.value,
+        origin_bundle=decision.origin_bundle.value,
         prompt=decision.prompt,
         created_at=decision.created_at,
         options=decision.options,
@@ -112,7 +114,7 @@ def task_view(task: object) -> TaskSummaryView:
 
 
 def error_view(error: object) -> ErrorView:
-    return ErrorView(code=error.code, message=error.message, phase=error.phase, timestamp=error.timestamp)
+    return ErrorView(code=error.code, message=error.message, bundle=error.bundle, phase=error.phase, timestamp=error.timestamp)
 
 
 def run_to_view(run: RunRecord) -> RunView:
@@ -120,9 +122,11 @@ def run_to_view(run: RunRecord) -> RunView:
         run_id=run.run_id,
         request=run.request,
         status=run.status.value,
-        strategy=run.strategy.value,
+        root_bundle=run.root_bundle.value,
+        current_bundle=run.current_bundle.value if run.current_bundle else None,
         current_phase=run.current_phase.value if run.current_phase else None,
         completed_phases=tuple(phase.value for phase in run.completed_phases),
+        completed_bundles=tuple(bundle.value for bundle in bundle_catalog.completed_bundles(run.root_bundle, run.completed_phases)),
         pending_decision=pending_decision_view(run),
         tasks=tuple(task_view(task) for task in run.tasks),
         errors=tuple(error_view(error) for error in run.errors),

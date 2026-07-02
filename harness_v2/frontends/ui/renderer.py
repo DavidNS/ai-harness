@@ -39,11 +39,11 @@ def _render_selected(run: RunView | None, actions: tuple[str, ...]) -> list[str]
         "Selected run",
         f"  id: {run.run_id}",
         f"  status: {run.status}",
-        f"  strategy: {run.strategy}",
+        f"  root bundle: {run.root_bundle}",
         f"  request: {run.request}",
     ]
     if run.current_phase:
-        lines.append(f"  current phase: {run.current_phase}")
+        lines.append(f"  current phase: {run.current_bundle}/{run.current_phase}")
     if run.completed_phases:
         lines.append("  completed: " + " -> ".join(run.completed_phases))
     if run.tasks:
@@ -66,7 +66,7 @@ def _render_decision(decision: PendingDecisionView) -> list[str]:
     lines = [
         "  pending decision:",
         f"    id: {decision.decision_id}",
-        f"    phase: {decision.origin_phase}",
+        f"    bundle: {decision.origin_bundle}",
         f"    prompt: {decision.prompt}",
     ]
     if decision.options:

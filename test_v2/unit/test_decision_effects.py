@@ -5,7 +5,7 @@ import unittest
 from harness_v2.backend.domain.decisions import DecisionAction, DecisionEffect, PendingDecision
 from harness_v2.backend.domain.errors import DomainValidationError
 from harness_v2.backend.domain.escalation import EscalationCategory
-from harness_v2.backend.domain.lifecycle import PhaseName
+from harness_v2.backend.domain.lifecycle import BundleName
 
 TIMESTAMP = "2026-07-01T00:00:00+00:00"
 
@@ -14,7 +14,7 @@ class DecisionEffectTests(unittest.TestCase):
     def test_option_effect_maps_answer_to_escalation_category(self) -> None:
         decision = PendingDecision(
             "decision-1",
-            PhaseName.TDD_BUNDLE,
+            BundleName.TDD_BUNDLE,
             "Continue or redesign?",
             TIMESTAMP,
             options=("continue", "redesign"),
@@ -29,7 +29,7 @@ class DecisionEffectTests(unittest.TestCase):
     def test_open_ended_decision_can_default_to_escalation(self) -> None:
         decision = PendingDecision(
             "decision-1",
-            PhaseName.EXPLORER_DECISION,
+            BundleName.EXPLORE_BUNDLE,
             "Clarify direction",
             TIMESTAMP,
             default_action=DecisionAction.ESCALATE,
@@ -48,7 +48,7 @@ class DecisionEffectTests(unittest.TestCase):
             lambda: DecisionEffect("continue", DecisionAction.CONTINUE, EscalationCategory.DESIGN_GAP),
             lambda: PendingDecision(
                 "decision-1",
-                PhaseName.TDD_BUNDLE,
+                BundleName.TDD_BUNDLE,
                 "Continue?",
                 TIMESTAMP,
                 options=("continue",),
@@ -56,7 +56,7 @@ class DecisionEffectTests(unittest.TestCase):
             ),
             lambda: PendingDecision(
                 "decision-1",
-                PhaseName.TDD_BUNDLE,
+                BundleName.TDD_BUNDLE,
                 "Continue?",
                 TIMESTAMP,
                 default_action=DecisionAction.ESCALATE,

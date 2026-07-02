@@ -13,7 +13,7 @@ from typing import Any
 from harness_v2.backend.domain.decisions import DecisionAction, DecisionEffect, DecisionRecord, PendingDecision
 from harness_v2.backend.domain.errors import DomainValidationError, ErrorRecord
 from harness_v2.backend.domain.escalation import EscalationCategory
-from harness_v2.backend.domain.lifecycle import PhaseName, RunStatus, RunStrategy
+from harness_v2.backend.domain.lifecycle import BundleName, PhaseName, RunStatus
 from harness_v2.backend.domain.runs import RunRecord
 from harness_v2.backend.domain.tasks import TaskStatus, TaskSummary
 from harness_v2.backend.ports.artifact_store import (
@@ -24,7 +24,7 @@ from harness_v2.backend.ports.artifact_store import (
 )
 from harness_v2.backend.ports.state_store import StateNotFoundError, StateStoreCorruptionError, StateStoreError
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 _ACTIVE_STATUSES = {RunStatus.PENDING, RunStatus.RUNNING, RunStatus.WAITING_FOR_USER}
 _TERMINAL_STATUSES = {RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED}
 
@@ -205,7 +205,9 @@ def _run_to_mapping(run: RunRecord) -> dict[str, Any]:
             "run_id": run.run_id,
             "request": run.request,
             "status": run.status.value,
-            "strategy": run.strategy.value,
+            "root_bundle": run.root_bundle.value,
+            "current_step_id": run.current_step_id,
+            "completed_step_ids": list(run.completed_step_ids),
             "current_phase": run.current_phase.value if run.current_phase else None,
             "completed_phases": [phase.value for phase in run.completed_phases],
             "pending_decision": _decision_to_mapping(run.pending_decision),
@@ -221,7 +223,7 @@ def _decision_to_mapping(decision: PendingDecision | None) -> dict[str, Any] | N
         return None
     return {
         "decision_id": decision.decision_id,
-        "origin_phase": decision.origin_phase.value,
+        "origin_bundle": decision.origin_bundle.value,
         "prompt": decision.prompt,
         "created_at": decision.created_at,
         "options": list(decision.options),
@@ -242,7 +244,7 @@ def _decision_effect_to_mapping(effect: DecisionEffect) -> dict[str, Any]:
 def _decision_record_to_mapping(decision: DecisionRecord) -> dict[str, Any]:
     return {
         "decision_id": decision.decision_id,
-        "origin_phase": decision.origin_phase.value,
+        "origin_bundle": decision.origin_bundle.value,
         "prompt": decision.prompt,
         "response": decision.response,
         "created_at": decision.created_at,
@@ -268,6 +270,7 @@ def _error_to_mapping(error: ErrorRecord) -> dict[str, Any]:
     return {
         "code": error.code,
         "message": error.message,
+        "bundle": error.bundle,
         "phase": error.phase,
         "timestamp": error.timestamp,
     }
@@ -285,7 +288,9 @@ def _run_from_mapping(payload: dict[str, Any]) -> RunRecord:
             run_id=data["run_id"],
             request=data["request"],
             status=RunStatus(data["status"]),
-            strategy=RunStrategy(data["strategy"]),
+            root_bundle=BundleName(data["root_bundle"]),
+            current_step_id=data.get("current_step_id"),
+            completed_step_ids=tuple(data.get("completed_step_ids", ())),
             current_phase=PhaseName(data["current_phase"]) if data.get("current_phase") is not None else None,
             completed_phases=tuple(PhaseName(phase) for phase in data.get("completed_phases", ())),
             pending_decision=_decision_from_mapping(pending),
@@ -304,7 +309,7 @@ def _decision_from_mapping(data: object) -> PendingDecision | None:
         raise StateStoreCorruptionError("pending decision must be an object")
     return PendingDecision(
         decision_id=data["decision_id"],
-        origin_phase=PhaseName(data["origin_phase"]),
+        origin_bundle=BundleName(data["origin_bundle"]),
         prompt=data["prompt"],
         created_at=data["created_at"],
         options=tuple(data.get("options", ())),
@@ -330,7 +335,7 @@ def _decision_record_from_mapping(data: object) -> DecisionRecord:
         raise StateStoreCorruptionError("decision history item must be an object")
     return DecisionRecord(
         decision_id=data["decision_id"],
-        origin_phase=PhaseName(data["origin_phase"]),
+        origin_bundle=BundleName(data["origin_bundle"]),
         prompt=data["prompt"],
         response=data["response"],
         created_at=data["created_at"],
@@ -360,6 +365,7 @@ def _error_from_mapping(data: object) -> ErrorRecord:
     return ErrorRecord(
         code=data["code"],
         message=data["message"],
+        bundle=data.get("bundle"),
         phase=data.get("phase"),
         timestamp=data["timestamp"],
     )
@@ -502,9 +508,3 @@ class FileArtifactStore:
             checksum=hashlib.sha256(content).hexdigest(),
             size=len(content),
         )
-
-    def _artifact_root(self, run_id: str) -> Path:
-        return self._root / "runs" / _require_run_id(run_id) / "artifacts"
-
-    def _artifact_path(self, run_id: str, artifact_id: str) -> Path:
-        return self._artifact_root(run_id) / _require_artifact_id(artifact_id)

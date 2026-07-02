@@ -68,18 +68,18 @@ class LocalCIAdapter(CIPort):
 
     def collect_signals(self, request: CiSignalRequest) -> dict[str, object]:
         if request.ci_mode == "off":
-            return _ci_unavailable("github", "GitHub baseline CI collection is disabled", scope="trunk_baseline")
+            return _ci_unavailable("github", "GitHub baseline CI collection is disabled", scope=request.scope, ref=request.ref)
         repository = request.repository.resolve()
         fixture = repository / "signals" / "ai-harness-signals.json"
         if not fixture.is_file():
-            return _ci_unavailable("local", "No local ai-harness CI signals artifact was found", scope="trunk_baseline")
+            return _ci_unavailable("local", "No local ai-harness CI signals artifact was found", scope=request.scope, ref=request.ref)
         try:
             payload = json.loads(fixture.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
-            return _ci_unavailable("local", "Local ai-harness CI signals artifact was malformed", status="problem_gathering_info", scope="trunk_baseline")
+            return _ci_unavailable("local", "Local ai-harness CI signals artifact was malformed", status="problem_gathering_info", scope=request.scope, ref=request.ref)
         if not isinstance(payload, dict):
-            return _ci_unavailable("local", "Local ai-harness CI signals artifact was malformed", status="problem_gathering_info", scope="trunk_baseline")
-        return _normalize_local_signals(payload)
+            return _ci_unavailable("local", "Local ai-harness CI signals artifact was malformed", status="problem_gathering_info", scope=request.scope, ref=request.ref)
+        return _normalize_local_signals(payload, request)
 
     def _install_one(self, repository: Path, provider: str, *, force: bool) -> tuple[str | None, str | None, str | None]:
         if provider == "github":
@@ -132,12 +132,13 @@ def _ci_files(repository: Path) -> list[Path]:
     return files
 
 
-def _ci_unavailable(provider: str, reason: str, *, status: str = "unavailable", scope: str = "unknown") -> dict[str, object]:
+def _ci_unavailable(provider: str, reason: str, *, status: str = "unavailable", scope: str = "unknown", ref: str | None = None) -> dict[str, object]:
     return {
         "schema_version": 2,
         "kind": "ai_harness_ci_signals",
         "provider": provider,
         "scope": scope,
+        "ref": ref,
         "status": status,
         "reason": reason,
         "providers": {provider: {"status": status, "signal_count": 0}},
@@ -148,7 +149,7 @@ def _ci_unavailable(provider: str, reason: str, *, status: str = "unavailable", 
     }
 
 
-def _normalize_local_signals(payload: dict[str, object]) -> dict[str, object]:
+def _normalize_local_signals(payload: dict[str, object], request: CiSignalRequest) -> dict[str, object]:
     signals = payload.get("signals") if isinstance(payload.get("signals"), list) else []
     path_index = payload.get("path_index") if isinstance(payload.get("path_index"), list) else []
     warnings = [item for item in payload.get("warnings", []) if isinstance(item, str)] if isinstance(payload.get("warnings"), list) else []
@@ -159,7 +160,8 @@ def _normalize_local_signals(payload: dict[str, object]) -> dict[str, object]:
         "schema_version": 2,
         "kind": "ai_harness_ci_signals",
         "provider": provider,
-        "scope": str(payload.get("scope") or "trunk_baseline"),
+        "scope": str(payload.get("scope") or request.scope),
+        "ref": ref,
         "status": status,
         "providers": {provider: {"status": status, "signal_count": len(signals)}},
         "summary": {"status": status, "signal_count": len(signals), "provider_count": 1},

@@ -1,3 +1,3 @@
 # Prompt
 
-Return Markdown starting with # Spec v1 and include Behavioral Requirements and Acceptance Criteria.
+Return a JSON object with schema_version 1, kind spec, summary, behavioral_requirements, acceptance_criteria, and non_goals.

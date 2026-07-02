@@ -1,0 +1,146 @@
+{
+  "additionalProperties": true,
+  "oneOf": [
+    {
+      "properties": {
+        "outcome": {
+          "const": "clarify"
+        }
+      },
+      "required": [
+        "question",
+        "options"
+      ]
+    },
+    {
+      "properties": {
+        "outcome": {
+          "const": "reject"
+        }
+      },
+      "required": [
+        "rejection_reason"
+      ]
+    },
+    {
+      "properties": {
+        "outcome": {
+          "enum": [
+            "proceed",
+            "adjust_scope",
+            "alternative"
+          ]
+        }
+      }
+    }
+  ],
+  "properties": {
+    "acceptance_outline": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "type": "array",
+      "uniqueItems": true
+    },
+    "approach": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "evidence_refs": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "type": "array",
+      "uniqueItems": true
+    },
+    "exclusions": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "type": "array",
+      "uniqueItems": true
+    },
+    "implementation_mode": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "kind": {
+      "const": "purpose_bundle"
+    },
+    "options": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "type": "array",
+      "uniqueItems": true
+    },
+    "outcome": {
+      "enum": [
+        "proceed",
+        "adjust_scope",
+        "alternative",
+        "clarify",
+        "reject"
+      ]
+    },
+    "problem": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "question": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "rejection_reason": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "scope": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "selected_entries": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "type": "array",
+      "uniqueItems": true
+    },
+    "structural_work": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "type": "array",
+      "uniqueItems": true
+    },
+    "summary": {
+      "minLength": 1,
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "kind",
+    "summary",
+    "implementation_mode",
+    "problem",
+    "scope",
+    "approach",
+    "outcome",
+    "selected_entries",
+    "structural_work",
+    "exclusions",
+    "acceptance_outline",
+    "evidence_refs"
+  ],
+  "type": "object"
+}

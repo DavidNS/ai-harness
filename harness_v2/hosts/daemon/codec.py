@@ -17,6 +17,8 @@ from harness_v2.backend.application.contracts import (
     Event,
     GetAvailableActions,
     GetAvailableActionsResult,
+    GetKnowledgePatch,
+    GetKnowledgePatchResult,
     GetRun,
     GetRunResult,
     GetRunState,
@@ -24,16 +26,26 @@ from harness_v2.backend.application.contracts import (
     InstallCiTemplates,
     InstallCiTemplatesResult,
     KnowledgePatchCreated,
+    KnowledgePatchRejected,
+    KnowledgePatchView,
+    ListKnowledgePatches,
+    ListKnowledgePatchesResult,
     ListRuns,
     ListRunsResult,
     PendingDecisionView,
+    BundleCompleted,
+    BundleFailed,
+    BundleRetryStarted,
+    BundleStarted,
     PhaseCompleted,
     PhaseFailed,
-    PhaseRetryStarted,
     PhaseStarted,
     Query,
     QueryResult,
+    RejectKnowledgePatch,
+    RejectKnowledgePatchResult,
     ResumeRun,
+    RetryBundle,
     RetryPhase,
     RunCancelled,
     RunCompleted,
@@ -44,83 +56,54 @@ from harness_v2.backend.application.contracts import (
     StartRun,
     SubmitUserDecision,
     TaskSummaryView,
+    TestsFinished,
+    TestsStarted,
     UserDecisionReceived,
     UserDecisionRequested,
 )
 
-_TYPES = {
-    cls.__name__: cls
-    for cls in (
-        StartRun,
-        ResumeRun,
-        RetryPhase,
-        CancelRun,
-        InstallCiTemplates,
-        SubmitUserDecision,
-        GetRun,
-        ListRuns,
-        GetRunState,
-        GetAvailableActions,
-        RunStarted,
-        PhaseStarted,
-        PhaseCompleted,
-        PhaseFailed,
-        KnowledgePatchCreated,
-        EscalationRaised,
-        EscalationResolved,
-        PhaseRetryStarted,
-        UserDecisionRequested,
-        UserDecisionReceived,
-        RunResumed,
-        RunCompleted,
-        RunCancelled,
-        CiTemplatesInstalled,
-        PendingDecisionView,
-        TaskSummaryView,
-        ErrorView,
-        RunView,
-        RunSummaryView,
-        CommandResult,
-        GetRunResult,
-        ListRunsResult,
-        GetRunStateResult,
-        GetAvailableActionsResult,
-        InstallCiTemplatesResult,
-    )
-}
+_COMMAND_CLASSES = (StartRun, ResumeRun, RetryPhase, RetryBundle, CancelRun, InstallCiTemplates, SubmitUserDecision, RejectKnowledgePatch)
+_QUERY_CLASSES = (GetRun, ListRuns, GetRunState, GetAvailableActions, ListKnowledgePatches, GetKnowledgePatch)
+_EVENT_CLASSES = (
+    RunStarted,
+    BundleStarted,
+    BundleCompleted,
+    BundleFailed,
+    BundleRetryStarted,
+    PhaseStarted,
+    PhaseCompleted,
+    PhaseFailed,
+    KnowledgePatchCreated,
+    KnowledgePatchRejected,
+    TestsStarted,
+    TestsFinished,
+    EscalationRaised,
+    EscalationResolved,
+    UserDecisionRequested,
+    UserDecisionReceived,
+    RunResumed,
+    RunCompleted,
+    RunCancelled,
+    CiTemplatesInstalled,
+)
+_RESULT_CLASSES = (
+    CommandResult,
+    GetRunResult,
+    ListRunsResult,
+    GetRunStateResult,
+    GetAvailableActionsResult,
+    GetKnowledgePatchResult,
+    ListKnowledgePatchesResult,
+    RejectKnowledgePatchResult,
+    InstallCiTemplatesResult,
+)
+_VIEW_CLASSES = (PendingDecisionView, TaskSummaryView, ErrorView, RunView, RunSummaryView, KnowledgePatchView)
 
-_COMMAND_TYPES = {cls.__name__: cls for cls in (StartRun, ResumeRun, RetryPhase, CancelRun, InstallCiTemplates, SubmitUserDecision)}
-_QUERY_TYPES = {cls.__name__: cls for cls in (GetRun, ListRuns, GetRunState, GetAvailableActions)}
-_EVENT_TYPES = {
-    cls.__name__: cls
-    for cls in (
-        RunStarted,
-        PhaseStarted,
-        PhaseCompleted,
-        PhaseFailed,
-        KnowledgePatchCreated,
-        EscalationRaised,
-        EscalationResolved,
-        PhaseRetryStarted,
-        UserDecisionRequested,
-        UserDecisionReceived,
-        RunResumed,
-        RunCompleted,
-        RunCancelled,
-        CiTemplatesInstalled,
-    )
-}
-_RESULT_TYPES = {
-    cls.__name__: cls
-    for cls in (
-        CommandResult,
-        GetRunResult,
-        ListRunsResult,
-        GetRunStateResult,
-        GetAvailableActionsResult,
-        InstallCiTemplatesResult,
-    )
-}
+_TYPES = {cls.__name__: cls for cls in (*_COMMAND_CLASSES, *_QUERY_CLASSES, *_EVENT_CLASSES, *_RESULT_CLASSES, *_VIEW_CLASSES)}
+_COMMAND_TYPES = {cls.__name__: cls for cls in _COMMAND_CLASSES}
+_QUERY_TYPES = {cls.__name__: cls for cls in _QUERY_CLASSES}
+_EVENT_TYPES = {cls.__name__: cls for cls in _EVENT_CLASSES}
+_RESULT_TYPES = {cls.__name__: cls for cls in _RESULT_CLASSES}
 
 
 class CodecError(ValueError):

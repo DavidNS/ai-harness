@@ -9,7 +9,7 @@ from harness_v2.backend.domain.knowledge import (
     KnowledgePatchStatus,
     LearningProposalBundle,
 )
-from harness_v2.backend.domain.lifecycle import PhaseName
+from harness_v2.backend.domain.lifecycle import BundleName
 
 
 class KnowledgePatchStoreError(RuntimeError):
@@ -26,7 +26,7 @@ class KnowledgePatchStorePort(Protocol):
     def create_patch(
         self,
         run_id: str,
-        origin_phase: PhaseName,
+        origin_bundle: BundleName,
         proposal: LearningProposalBundle,
         created_at: str,
     ) -> KnowledgePatchRecord: ...

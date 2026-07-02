@@ -8,6 +8,7 @@ from typing import Protocol
 
 CI_TARGETS = frozenset(("github", "gitlab", "both"))
 CI_MODES = frozenset(("off", "baseline", "branch"))
+CI_SIGNAL_SCOPES = frozenset(("trunk_baseline", "branch", "merge_request", "post_merge_refresh"))
 
 
 def _require_text(value: str, field: str) -> str:
@@ -27,6 +28,13 @@ def _target(value: str) -> str:
     normalized = _require_text(value, "target")
     if normalized not in CI_TARGETS:
         raise ValueError("target must be github, gitlab, or both")
+    return normalized
+
+
+def _scope(value: str) -> str:
+    normalized = _require_text(value, "scope")
+    if normalized not in CI_SIGNAL_SCOPES:
+        raise ValueError("scope must be trunk_baseline, branch, merge_request, or post_merge_refresh")
     return normalized
 
 
@@ -66,10 +74,14 @@ class CiInstallResult:
 class CiSignalRequest:
     repository: Path
     ci_mode: str = "baseline"
+    scope: str = "trunk_baseline"
+    ref: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "repository", Path(self.repository))
         object.__setattr__(self, "ci_mode", _mode(self.ci_mode))
+        object.__setattr__(self, "scope", _scope(self.scope))
+        object.__setattr__(self, "ref", None if self.ref is None else _require_text(self.ref, "ref"))
 
 
 class CIPort(Protocol):

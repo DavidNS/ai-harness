@@ -1,0 +1,94 @@
+{
+  "additionalProperties": true,
+  "properties": {
+    "phase": {
+      "const": "tasks"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "tasks": {
+      "items": {
+        "additionalProperties": true,
+        "properties": {
+          "acceptance_criteria": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
+          },
+          "broader_tests": {
+            "items": {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "type": "array"
+          },
+          "depends_on": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
+          },
+          "focused_tests": {
+            "items": {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "type": "array"
+          },
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "status": {
+            "const": "pending"
+          },
+          "title": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "touched_paths": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "depends_on",
+          "acceptance_criteria",
+          "touched_paths",
+          "focused_tests",
+          "broader_tests",
+          "status"
+        ],
+        "type": "object"
+      },
+      "minItems": 1,
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_version",
+    "phase",
+    "tasks"
+  ],
+  "type": "object"
+}

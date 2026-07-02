@@ -17,7 +17,7 @@ from harness_v2.backend.domain.knowledge import (
     KnowledgePatchStatus,
     LearningProposalBundle,
 )
-from harness_v2.backend.domain.lifecycle import PhaseName
+from harness_v2.backend.domain.lifecycle import BundleName
 from harness_v2.backend.ports.knowledge_patch_store import KnowledgePatchNotFoundError, KnowledgePatchStoreError
 
 MANIFEST_FILE = "proposal_manifest.json"
@@ -35,20 +35,20 @@ class InMemoryKnowledgePatchStore:
     def create_patch(
         self,
         run_id: str,
-        origin_phase: PhaseName,
+        origin_bundle: BundleName,
         proposal: LearningProposalBundle,
         created_at: str,
     ) -> KnowledgePatchRecord:
-        phase = PhaseName(origin_phase)
-        version = self._next_version(run_id, phase)
-        patch_id = _patch_id(run_id, phase, version)
+        bundle = BundleName(origin_bundle)
+        version = self._next_version(run_id, bundle)
+        patch_id = _patch_id(run_id, bundle, version)
         record = KnowledgePatchRecord(
             patch_id=patch_id,
             run_id=run_id,
-            origin_phase=phase,
+            origin_bundle=bundle,
             version=version,
             status=KnowledgePatchStatus.CANDIDATE,
-            path=_patch_path(run_id, phase, version),
+            path=_patch_path(run_id, bundle, version),
             proposal_id=str(proposal.manifest["proposal_id"]),
             summary=str(proposal.manifest["summary"]),
             created_at=created_at,
@@ -80,8 +80,8 @@ class InMemoryKnowledgePatchStore:
         self._patches[patch_id] = record
         return record
 
-    def _next_version(self, run_id: str, phase: PhaseName) -> int:
-        versions = [record.version for record in self._patches.values() if record.run_id == run_id and record.origin_phase == phase]
+    def _next_version(self, run_id: str, bundle: BundleName) -> int:
+        versions = [record.version for record in self._patches.values() if record.run_id == run_id and record.origin_bundle == bundle]
         return max(versions, default=0) + 1
 
 
@@ -94,19 +94,19 @@ class FileKnowledgePatchStore:
     def create_patch(
         self,
         run_id: str,
-        origin_phase: PhaseName,
+        origin_bundle: BundleName,
         proposal: LearningProposalBundle,
         created_at: str,
     ) -> KnowledgePatchRecord:
-        phase = PhaseName(origin_phase)
-        version = self._next_version(run_id, phase)
+        bundle = BundleName(origin_bundle)
+        version = self._next_version(run_id, bundle)
         record = KnowledgePatchRecord(
-            patch_id=_patch_id(run_id, phase, version),
+            patch_id=_patch_id(run_id, bundle, version),
             run_id=run_id,
-            origin_phase=phase,
+            origin_bundle=bundle,
             version=version,
             status=KnowledgePatchStatus.CANDIDATE,
-            path=_patch_path(run_id, phase, version),
+            path=_patch_path(run_id, bundle, version),
             proposal_id=str(proposal.manifest["proposal_id"]),
             summary=str(proposal.manifest["summary"]),
             created_at=created_at,
@@ -153,8 +153,8 @@ class FileKnowledgePatchStore:
         _fsync_directory(state_path.parent)
         return record
 
-    def _next_version(self, run_id: str, phase: PhaseName) -> int:
-        versions = [record.version for record in self.list_patches(run_id=run_id) if record.origin_phase == phase]
+    def _next_version(self, run_id: str, bundle: BundleName) -> int:
+        versions = [record.version for record in self.list_patches(run_id=run_id) if record.origin_bundle == bundle]
         return max(versions, default=0) + 1
 
     def _pending_root(self) -> Path | None:
@@ -171,12 +171,12 @@ class FileKnowledgePatchStore:
         return None
 
 
-def _patch_id(run_id: str, phase: PhaseName, version: int) -> str:
-    return f"patch.{run_id}.{phase.value.lower()}.v{version:04d}"
+def _patch_id(run_id: str, bundle: BundleName, version: int) -> str:
+    return f"patch.{run_id}.{bundle.value.lower()}.v{version:04d}"
 
 
-def _patch_path(run_id: str, phase: PhaseName, version: int) -> str:
-    return f"knowledge-source/patches/pending/{run_id}/{phase.value.lower()}/v{version:04d}"
+def _patch_path(run_id: str, bundle: BundleName, version: int) -> str:
+    return f"knowledge-source/patches/pending/{run_id}/{bundle.value.lower()}/v{version:04d}"
 
 
 def _render_jsonl(items: tuple[dict[str, object], ...]) -> str:
@@ -185,7 +185,7 @@ def _render_jsonl(items: tuple[dict[str, object], ...]) -> str:
 
 def _record_payload(record: KnowledgePatchRecord) -> dict[str, object]:
     payload = asdict(record)
-    payload["origin_phase"] = record.origin_phase.value
+    payload["origin_bundle"] = record.origin_bundle.value
     payload["status"] = record.status.value
     return payload
 
@@ -195,7 +195,7 @@ def _record_from_payload(payload: dict[str, object]) -> KnowledgePatchRecord:
         return KnowledgePatchRecord(
             patch_id=str(payload["patch_id"]),
             run_id=str(payload["run_id"]),
-            origin_phase=PhaseName(str(payload["origin_phase"])),
+            origin_bundle=BundleName(str(payload["origin_bundle"])),
             version=int(payload["version"]),
             status=KnowledgePatchStatus(str(payload["status"])),
             path=str(payload["path"]),

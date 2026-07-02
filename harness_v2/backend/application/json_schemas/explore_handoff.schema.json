@@ -1,0 +1,33 @@
+{
+  "additionalProperties": true,
+  "properties": {
+    "exploration_map": {
+      "type": "object"
+    },
+    "kind": {
+      "const": "explore_handoff"
+    },
+    "normalized_request": {
+      "type": "object"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "source_artifact": {
+      "const": "explore/outcome_bundle.json"
+    },
+    "status": {
+      "minLength": 1,
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "kind",
+    "source_artifact",
+    "status",
+    "normalized_request",
+    "exploration_map"
+  ],
+  "type": "object"
+}

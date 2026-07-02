@@ -1,0 +1,415 @@
+{
+  "additionalProperties": true,
+  "properties": {
+    "behaviors": {
+      "items": {
+        "additionalProperties": true,
+        "properties": {
+          "evidence_refs": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
+          },
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "observed",
+              "not_observed",
+              "partially_observed",
+              "contradicted",
+              "unresolved",
+              "not_applicable"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "text": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "text",
+          "evidence_refs"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "candidate_work_shapes": {
+      "items": {
+        "additionalProperties": true,
+        "properties": {
+          "counterevidence_refs": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
+          },
+          "description": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "handoff_phase": {
+            "enum": [
+              "purpose",
+              "design",
+              "tasks"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "shape": {
+            "enum": [
+              "direct_change",
+              "change_with_extraction",
+              "change_with_test_gap_closure",
+              "security_sensitive_change",
+              "performance_baseline_then_change",
+              "migration_sensitive_change",
+              "investigation_needed",
+              "documentation_only"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "supporting_evidence_refs": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "id",
+          "shape",
+          "description",
+          "supporting_evidence_refs",
+          "counterevidence_refs"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "constraints": {
+      "items": {
+        "additionalProperties": true,
+        "properties": {
+          "evidence_refs": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
+          },
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "kind": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "text": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "text",
+          "evidence_refs"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "existing_functionality": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "handoff_notes": {
+      "additionalProperties": true,
+      "properties": {
+        "design": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "purpose": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "tasks": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "purpose",
+        "design",
+        "tasks"
+      ],
+      "type": "object"
+    },
+    "kind": {
+      "const": "exploration_map"
+    },
+    "risks": {
+      "items": {
+        "additionalProperties": true,
+        "properties": {
+          "evidence_refs": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
+          },
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "kind": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "path": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "severity": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "text": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "text",
+          "evidence_refs"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "security_signals": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "similar_functionality": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "structural_signals": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "surfaces": {
+      "items": {
+        "additionalProperties": true,
+        "properties": {
+          "confidence": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "evidence_refs": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
+          },
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "implementation_surface",
+              "test_surface",
+              "documentation_surface",
+              "ci_surface",
+              "repository_surface",
+              "security_surface",
+              "performance_surface",
+              "data_surface",
+              "integration_surface"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "path": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "symbols": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
+          },
+          "why_relevant": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "why_relevant",
+          "evidence_refs"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "unknowns": {
+      "items": {
+        "additionalProperties": true,
+        "properties": {
+          "best_resolved_by": {
+            "enum": [
+              "purpose",
+              "design",
+              "tasks"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "evidence_refs": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
+          },
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "text": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "text",
+          "evidence_refs"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "verification_surfaces": {
+      "items": {
+        "additionalProperties": true,
+        "properties": {
+          "evidence_refs": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
+          },
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "kind": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "path": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "text": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "text",
+          "evidence_refs"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_version",
+    "kind",
+    "surfaces",
+    "behaviors",
+    "constraints",
+    "risks",
+    "unknowns",
+    "candidate_work_shapes",
+    "verification_surfaces",
+    "existing_functionality",
+    "similar_functionality",
+    "structural_signals",
+    "security_signals",
+    "handoff_notes"
+  ],
+  "type": "object"
+}

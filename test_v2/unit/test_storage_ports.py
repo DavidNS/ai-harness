@@ -4,7 +4,8 @@ import hashlib
 import unittest
 
 from harness_v2.adapters.storage import InMemoryArtifactStore, InMemoryStateStore
-from harness_v2.backend.domain.lifecycle import PhaseName, RunStatus, RunStrategy
+from harness_v2.backend.domain import bundle_catalog
+from harness_v2.backend.domain.lifecycle import BundleName, PhaseName, RunStatus
 from harness_v2.backend.domain.runs import RunRecord
 from harness_v2.backend.ports.artifact_store import ArtifactNotFoundError
 from harness_v2.backend.ports.state_store import StateNotFoundError
@@ -15,8 +16,8 @@ def completed_run(run_id: str = "run-1") -> RunRecord:
         run_id=run_id,
         request="Fix tests",
         status=RunStatus.COMPLETED,
-        strategy=RunStrategy.EXPLORE_BUNDLE,
-        completed_phases=(PhaseName.EXPLORE_BUNDLE,),
+        root_bundle=BundleName.EXPLORE_BUNDLE,
+        completed_phases=bundle_catalog.phases(BundleName.EXPLORE_BUNDLE),
     )
 
 
@@ -25,8 +26,7 @@ def running_run(run_id: str = "run-2") -> RunRecord:
         run_id=run_id,
         request="Fix tests",
         status=RunStatus.RUNNING,
-        strategy=RunStrategy.SDD,
-        current_phase=PhaseName.EXPLORE_BUNDLE,
+        current_phase=PhaseName.EXPLORE_REQUEST_UNDERSTANDING,
     )
 
 

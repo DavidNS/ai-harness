@@ -5,7 +5,7 @@ import unittest
 from harness_v2.adapters.storage import InMemoryKnowledgePatchStore
 from harness_v2.backend.domain.errors import DomainValidationError
 from harness_v2.backend.domain.knowledge import KnowledgePatchStatus, parse_learning_proposal
-from harness_v2.backend.domain.lifecycle import PhaseName
+from harness_v2.backend.domain.lifecycle import BundleName
 from harness_v2.backend.ports.knowledge_patch_store import KnowledgePatchNotFoundError
 
 
@@ -78,8 +78,8 @@ class InMemoryKnowledgePatchStoreTests(unittest.TestCase):
         store = InMemoryKnowledgePatchStore()
         bundle = parse_learning_proposal(proposal())
 
-        first = store.create_patch("run-1", PhaseName.EXPLORE_BUNDLE, bundle, TIMESTAMP)
-        second = store.create_patch("run-1", PhaseName.EXPLORE_BUNDLE, bundle, TIMESTAMP)
+        first = store.create_patch("run-1", BundleName.EXPLORE_BUNDLE, bundle, TIMESTAMP)
+        second = store.create_patch("run-1", BundleName.EXPLORE_BUNDLE, bundle, TIMESTAMP)
         rejected = store.reject_patch(first.patch_id, "not durable", TIMESTAMP)
 
         self.assertEqual("patch.run-1.explore_bundle.v0001", first.patch_id)

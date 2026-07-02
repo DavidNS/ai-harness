@@ -1,78 +1,25 @@
 from __future__ import annotations
 
-import tempfile
 import unittest
-from pathlib import Path
 
-from harness_v2.adapters.storage import FileArtifactStore, FileStateStore, InMemoryArtifactStore
-from harness_v2.backend.domain.decisions import DecisionAction, DecisionEffect, DecisionRecord, PendingDecision
-from harness_v2.backend.domain.escalation import EscalationCategory
-from harness_v2.backend.domain.lifecycle import PhaseName, RunStatus, RunStrategy
+from test_v2.support.runtime import memory_orchestrator
+from harness_v2.backend.application.contracts import SubmitUserDecision
+from harness_v2.backend.domain.decisions import PendingDecision
+from harness_v2.backend.domain.lifecycle import BundleName, PhaseName, RunStatus
 from harness_v2.backend.domain.runs import RunRecord
-from harness_v2.backend.ports.artifact_store import ArtifactNotFoundError
-
-TIMESTAMP = "2026-07-01T00:00:00+00:00"
 
 
-class StorageDecisionEffectIntegrationTests(unittest.TestCase):
-    def test_file_state_round_trips_pending_and_historical_decision_effects(self) -> None:
-        with tempfile.TemporaryDirectory() as temp:
-            store = FileStateStore(Path(temp))
-            pending = PendingDecision(
-                "decision-1",
-                PhaseName.DESIGN_BUNDLE,
-                "Choose",
-                TIMESTAMP,
-                options=("continue", "respec"),
-                effects=(DecisionEffect("respec", DecisionAction.ESCALATE, EscalationCategory.REQUIREMENTS_GAP),),
-                default_action=DecisionAction.ESCALATE,
-                default_category=EscalationCategory.REQUIREMENTS_GAP,
-            )
-            history = DecisionRecord(
-                "decision-0",
-                PhaseName.PROPOSAL_BUNDLE,
-                "Choose",
-                "continue",
-                TIMESTAMP,
-                TIMESTAMP,
-                options=("continue",),
-            )
-            run = RunRecord(
-                "run-1",
-                "Fix tests",
-                RunStatus.WAITING_FOR_USER,
-                RunStrategy.SDD,
-                current_phase=PhaseName.DESIGN_BUNDLE,
-                completed_phases=(PhaseName.EXPLORE_BUNDLE, PhaseName.KNOWLEDGE_EXTRACT_EXPLORE, PhaseName.PROPOSAL_BUNDLE, PhaseName.SPEC_BUNDLE),
-                pending_decision=pending,
-                decision_history=(history,),
-            )
+class UserDecisionIntegrationTests(unittest.TestCase):
+    def test_submit_decision_records_history_and_returns_to_running(self) -> None:
+        service, state, _artifacts, _knowledge = memory_orchestrator()
+        decision = PendingDecision("decision-1", BundleName.EXPLORE_BUNDLE, "Choose", "created", options=("continue",))
+        state.save(RunRecord("run-1", "Fix tests", RunStatus.WAITING_FOR_USER, current_phase=PhaseName.EXPLORE_REQUEST_UNDERSTANDING, pending_decision=decision))
 
-            store.save(run)
-            loaded = store.get("run-1")
+        result = service.execute(SubmitUserDecision("run-1", "decision-1", "continue"))
 
-            self.assertEqual(pending, loaded.pending_decision)
-            self.assertEqual((history,), loaded.decision_history)
-            self.assertEqual(DecisionAction.ESCALATE, loaded.pending_decision.effects[0].action)
-            self.assertEqual(EscalationCategory.REQUIREMENTS_GAP, loaded.pending_decision.effects[0].category)
-            self.assertEqual(DecisionAction.ESCALATE, loaded.pending_decision.default_action)
-            self.assertEqual(EscalationCategory.REQUIREMENTS_GAP, loaded.pending_decision.default_category)
-
-    def test_artifact_delete_removes_existing_artifact_and_missing_returns_false(self) -> None:
-        memory = InMemoryArtifactStore()
-        memory.write("run-1", "reports/output.txt", b"content")
-        self.assertTrue(memory.delete("run-1", "reports/output.txt"))
-        self.assertFalse(memory.delete("run-1", "reports/output.txt"))
-        with self.assertRaises(ArtifactNotFoundError):
-            memory.read("run-1", "reports/output.txt")
-
-        with tempfile.TemporaryDirectory() as temp:
-            file_store = FileArtifactStore(Path(temp))
-            file_store.write("run-1", "reports/output.txt", b"content")
-            self.assertTrue(file_store.delete("run-1", "reports/output.txt"))
-            self.assertFalse(file_store.delete("run-1", "reports/output.txt"))
-            with self.assertRaises(ArtifactNotFoundError):
-                file_store.read("run-1", "reports/output.txt")
+        self.assertEqual("RUNNING", result.run.status)
+        self.assertIsNone(result.run.pending_decision)
+        self.assertEqual("decision-1", state.get("run-1").decision_history[0].decision_id)
 
 
 if __name__ == "__main__":

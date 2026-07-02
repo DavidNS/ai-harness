@@ -1,0 +1,112 @@
+{
+  "additionalProperties": true,
+  "properties": {
+    "blockers": {
+      "items": {
+        "anyOf": [
+          {
+            "minLength": 1,
+            "type": "string"
+          },
+          {
+            "additionalProperties": true,
+            "properties": {
+              "reason": {
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "reason"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "type": "array"
+    },
+    "evidence": {
+      "items": {
+        "additionalProperties": true,
+        "properties": {
+          "claim": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "confidence": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "code",
+              "test",
+              "documentation",
+              "knowledge",
+              "ci",
+              "git",
+              "structure",
+              "security",
+              "scope",
+              "external"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "severity": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "sources": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "status": {
+            "enum": [
+              "supported",
+              "contradicted",
+              "partial",
+              "partially_supported",
+              "unresolved",
+              "not_applicable",
+              "blocked"
+            ],
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "claim",
+          "status",
+          "confidence",
+          "severity",
+          "sources"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "phase": {
+      "const": "explore_evidence_digest"
+    },
+    "schema_version": {
+      "const": 1
+    }
+  },
+  "required": [
+    "schema_version",
+    "phase",
+    "evidence",
+    "blockers"
+  ],
+  "type": "object"
+}

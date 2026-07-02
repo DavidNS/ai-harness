@@ -7,7 +7,7 @@ from enum import StrEnum
 
 from harness_v2.backend.domain.escalation import EscalationCategory
 from harness_v2.backend.domain.errors import DomainValidationError, require_text
-from harness_v2.backend.domain.lifecycle import PhaseName
+from harness_v2.backend.domain.lifecycle import BundleName
 
 
 def _normalize_options(options: tuple[str, ...] | list[str]) -> tuple[str, ...]:
@@ -62,7 +62,7 @@ def _normalize_effects(
 @dataclass(frozen=True, slots=True)
 class PendingDecision:
     decision_id: str
-    origin_phase: PhaseName
+    origin_bundle: BundleName
     prompt: str
     created_at: str
     options: tuple[str, ...] = ()
@@ -72,7 +72,7 @@ class PendingDecision:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "decision_id", require_text(self.decision_id, "decision ID"))
-        object.__setattr__(self, "origin_phase", PhaseName(self.origin_phase))
+        object.__setattr__(self, "origin_bundle", BundleName(self.origin_bundle))
         object.__setattr__(self, "prompt", require_text(self.prompt, "decision prompt"))
         options = _normalize_options(self.options)
         default_action = DecisionAction(self.default_action)
@@ -95,7 +95,7 @@ class PendingDecision:
 @dataclass(frozen=True, slots=True)
 class DecisionRecord:
     decision_id: str
-    origin_phase: PhaseName
+    origin_bundle: BundleName
     prompt: str
     response: str
     created_at: str
@@ -107,7 +107,7 @@ class DecisionRecord:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "decision_id", require_text(self.decision_id, "decision ID"))
-        object.__setattr__(self, "origin_phase", PhaseName(self.origin_phase))
+        object.__setattr__(self, "origin_bundle", BundleName(self.origin_bundle))
         object.__setattr__(self, "prompt", require_text(self.prompt, "decision prompt"))
         object.__setattr__(self, "response", require_text(self.response, "decision response"))
         object.__setattr__(self, "created_at", require_text(self.created_at, "decision timestamp"))

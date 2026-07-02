@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from harness_v2.backend.application.worker_service import WorkerTaskRequest, WorkerTaskService
-from harness_v2.backend.domain.lifecycle import PhaseName
+from harness_v2.backend.domain.lifecycle import BundleName, PhaseName
 from harness_v2.backend.domain.runs import RunRecord
 from harness_v2.backend.ports.artifact_store import ArtifactNotFoundError, ArtifactStorePort
 from harness_v2.backend.ports.model_provider import (
@@ -113,6 +113,7 @@ class BundleArtifactGateway:
     def ensure_worker_json(
         self,
         run: RunRecord,
+        bundle: BundleName,
         phase: PhaseName,
         task_id: str,
         artifact_id: str,
@@ -123,7 +124,7 @@ class BundleArtifactGateway:
         if existing is not None:
             validator(existing)
             return existing
-        stdout = self._worker_stdout(run, phase, task_id, inputs)
+        stdout = self._worker_stdout(run, bundle, phase, task_id, inputs)
         value = loads_json(stdout, task_id)
         validator(value)
         self.write_json(run.run_id, artifact_id, value)
@@ -132,6 +133,7 @@ class BundleArtifactGateway:
     def ensure_worker_text(
         self,
         run: RunRecord,
+        bundle: BundleName,
         phase: PhaseName,
         task_id: str,
         artifact_id: str,
@@ -142,7 +144,7 @@ class BundleArtifactGateway:
         if existing is not None:
             validator(existing)
             return existing
-        value = self._worker_stdout(run, phase, task_id, inputs)
+        value = self._worker_stdout(run, bundle, phase, task_id, inputs)
         validator(value)
         self.write_text(run.run_id, artifact_id, value)
         return value
@@ -151,16 +153,18 @@ class BundleArtifactGateway:
     def run_worker_text(
         self,
         run: RunRecord,
+        bundle: BundleName,
         phase: PhaseName,
         task_id: str,
         inputs: dict[str, Any],
     ) -> str:
-        return self._worker_stdout(run, phase, task_id, inputs)
+        return self._worker_stdout(run, bundle, phase, task_id, inputs)
 
-    def _worker_stdout(self, run: RunRecord, phase: PhaseName, task_id: str, inputs: dict[str, Any]) -> str:
+    def _worker_stdout(self, run: RunRecord, bundle: BundleName, phase: PhaseName, task_id: str, inputs: dict[str, Any]) -> str:
         result = self._worker_service.execute(
             WorkerTaskRequest(
                 run_id=run.run_id,
+                bundle=bundle,
                 phase=phase,
                 task_id=task_id,
                 inputs=inputs,

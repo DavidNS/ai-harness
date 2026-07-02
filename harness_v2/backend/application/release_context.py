@@ -61,9 +61,13 @@ class ReleaseContextService(ReleaseContextPort):
                 )
             )
             self._write_json(run.run_id, "git-run.json", git_result.to_artifact())
-        if self._should_write(run.run_id, "ci-signals.json"):
-            signals = self._ci.collect_signals(CiSignalRequest(repository=repository, ci_mode=self._config.ci_mode))
-            self._write_json(run.run_id, "ci-signals.json", signals)
+        scope = _scope_for_mode(self._config.ci_mode)
+        scoped_artifact = f"ci-signals/{scope.replace('_', '-')}.json"
+        if self._should_write(run.run_id, scoped_artifact):
+            signals = self._ci.collect_signals(CiSignalRequest(repository=repository, ci_mode=self._config.ci_mode, scope=scope))
+            self._write_json(run.run_id, scoped_artifact, signals)
+            if scope == "trunk_baseline":
+                self._write_json(run.run_id, "ci-signals.json", signals)
 
     def install_ci_templates(self, target: str, *, force: bool = False) -> CiInstallResult:
         return self._ci.install_templates(
@@ -82,3 +86,9 @@ class ReleaseContextService(ReleaseContextPort):
     def _write_json(self, run_id: str, artifact_id: str, value: dict[str, object]) -> None:
         content = (json.dumps(value, sort_keys=True, indent=2) + "\n").encode("utf-8")
         self._artifact_store.write(run_id, artifact_id, content)
+
+
+def _scope_for_mode(ci_mode: str) -> str:
+    if ci_mode == "branch":
+        return "branch"
+    return "trunk_baseline"

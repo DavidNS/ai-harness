@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import unittest
 
-from harness_v2.adapters.models import FakeModelProvider, ScriptedModelProvider
+from test_v2.support.model_providers import FakeModelProvider, ScriptedModelProvider
 from harness_v2.backend.ports.model_provider import (
     CapabilityProjection,
     McpToolCapability,

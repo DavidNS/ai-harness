@@ -2,7 +2,7 @@
   "commands": [],
   "mcp_tools": [],
   "paths": [
-    {"mode": "write", "pattern": "**"}
+    {"mode": "read", "pattern": "**"}
   ],
   "phase": "tdd_review",
   "schema_version": 1,

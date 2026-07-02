@@ -1,11 +1,11 @@
-"""Lifecycle graph domain model for v2 runs."""
+"""Bundle and executable phase declarations for v2 runs."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
 
-from harness_v2.backend.domain.errors import DomainValidationError, InvalidTransitionError
+from harness_v2.backend.domain.errors import DomainValidationError
 
 
 class RunStatus(StrEnum):
@@ -17,34 +17,47 @@ class RunStatus(StrEnum):
     CANCELLED = "CANCELLED"
 
 
-class RunStrategy(StrEnum):
-    SDD = "SDD"
-    KNOWLEDGE_EXTRACT_EXPLORE = "KNOWLEDGE_EXTRACT_EXPLORE"
-    KNOWLEDGE_EXTRACT_TDD = "KNOWLEDGE_EXTRACT_TDD"
-    EXPLORER = "EXPLORER"
+class BundleName(StrEnum):
+    SDD_BUNDLE = "SDD_BUNDLE"
     EXPLORE_BUNDLE = "EXPLORE_BUNDLE"
+    KNOWLEDGE_EXTRACT_EXPLORE = "KNOWLEDGE_EXTRACT_EXPLORE"
     PROPOSAL_BUNDLE = "PROPOSAL_BUNDLE"
     SPEC_BUNDLE = "SPEC_BUNDLE"
     DESIGN_BUNDLE = "DESIGN_BUNDLE"
     TASKS_BUNDLE = "TASKS_BUNDLE"
     TDD_BUNDLE = "TDD_BUNDLE"
+    KNOWLEDGE_EXTRACT_TDD = "KNOWLEDGE_EXTRACT_TDD"
 
 
 class PhaseName(StrEnum):
-    EXPLORE_BUNDLE = "EXPLORE_BUNDLE"
-    KNOWLEDGE_EXTRACT_EXPLORE = "KNOWLEDGE_EXTRACT_EXPLORE"
-    PROPOSAL_BUNDLE = "PROPOSAL_BUNDLE"
-    SPEC_BUNDLE = "SPEC_BUNDLE"
-    DESIGN_BUNDLE = "DESIGN_BUNDLE"
-    TASKS_BUNDLE = "TASKS_BUNDLE"
-    TDD_BUNDLE = "TDD_BUNDLE"
-    KNOWLEDGE_EXTRACT_TDD = "KNOWLEDGE_EXTRACT_TDD"
-    EXPLORER_INTAKE = "EXPLORER_INTAKE"
-    EXPLORER_DISCOVERY = "EXPLORER_DISCOVERY"
-    EXPLORER_DECISION = "EXPLORER_DECISION"
-    EXPLORER_ARTIFACT = "EXPLORER_ARTIFACT"
-    EXPLORER_REVIEW = "EXPLORER_REVIEW"
-    EXPLORER_DISTILL = "EXPLORER_DISTILL"
+    EXPLORE_REQUEST_UNDERSTANDING = "EXPLORE_REQUEST_UNDERSTANDING"
+    EXPLORE_CONTEXT_PACK = "EXPLORE_CONTEXT_PACK"
+    EXPLORE_EVIDENCE_DIGEST = "EXPLORE_EVIDENCE_DIGEST"
+    EXPLORE_EXPLORATION_MAP = "EXPLORE_EXPLORATION_MAP"
+    EXPLORE_OUTCOME_SYNTHESIS = "EXPLORE_OUTCOME_SYNTHESIS"
+    EXPLORE_HANDOFF = "EXPLORE_HANDOFF"
+    KNOWLEDGE_EXTRACT_EXPLORE_SYNTHESIS = "KNOWLEDGE_EXTRACT_EXPLORE_SYNTHESIS"
+    KNOWLEDGE_EXTRACT_EXPLORE_PATCH = "KNOWLEDGE_EXTRACT_EXPLORE_PATCH"
+    KNOWLEDGE_EXTRACT_TDD_SYNTHESIS = "KNOWLEDGE_EXTRACT_TDD_SYNTHESIS"
+    KNOWLEDGE_EXTRACT_TDD_PATCH = "KNOWLEDGE_EXTRACT_TDD_PATCH"
+    PROPOSAL_PURPOSE = "PROPOSAL_PURPOSE"
+    PROPOSAL_HANDOFF = "PROPOSAL_HANDOFF"
+    SPEC_DRAFT = "SPEC_DRAFT"
+    SPEC_HANDOFF = "SPEC_HANDOFF"
+    DESIGN_DRAFT = "DESIGN_DRAFT"
+    DESIGN_HANDOFF = "DESIGN_HANDOFF"
+    TASKS_DRAFT = "TASKS_DRAFT"
+    TASKS_HANDOFF = "TASKS_HANDOFF"
+    VALIDATE_JSON = "VALIDATE_JSON"
+    TDD_CREATE_TEST = "TDD_CREATE_TEST"
+    TDD_IMPLEMENT = "TDD_IMPLEMENT"
+    TDD_REVIEW = "TDD_REVIEW"
+    TDD_HANDOFF = "TDD_HANDOFF"
+
+
+class ExecutorKind(StrEnum):
+    AI_WORKER = "AI_WORKER"
+    DETERMINISTIC_FUNCTION = "DETERMINISTIC_FUNCTION"
 
 
 class TerminalState(StrEnum):
@@ -53,133 +66,113 @@ class TerminalState(StrEnum):
     CANCELLED = "CANCELLED"
 
 
-LifecycleNode = PhaseName | TerminalState
+@dataclass(frozen=True, slots=True)
+class BundleRef:
+    name: BundleName
 
-# SDD now includes candidate knowledge extraction. Promotion remains a later
-# lifecycle outside this Stage 9 candidate-patch slice.
-SDD_PHASES: tuple[PhaseName, ...] = (
-    PhaseName.EXPLORE_BUNDLE,
-    PhaseName.KNOWLEDGE_EXTRACT_EXPLORE,
-    PhaseName.PROPOSAL_BUNDLE,
-    PhaseName.SPEC_BUNDLE,
-    PhaseName.DESIGN_BUNDLE,
-    PhaseName.TASKS_BUNDLE,
-    PhaseName.TDD_BUNDLE,
-    PhaseName.KNOWLEDGE_EXTRACT_TDD,
-)
-
-EXPLORER_PHASES: tuple[PhaseName, ...] = (
-    PhaseName.EXPLORER_INTAKE,
-    PhaseName.EXPLORER_DISCOVERY,
-    PhaseName.EXPLORER_DECISION,
-    PhaseName.EXPLORER_ARTIFACT,
-    PhaseName.EXPLORER_REVIEW,
-    PhaseName.EXPLORER_DISTILL,
-)
-
-STRATEGY_GRAPHS: dict[RunStrategy, tuple[PhaseName, ...]] = {
-    RunStrategy.SDD: SDD_PHASES,
-    RunStrategy.KNOWLEDGE_EXTRACT_EXPLORE: (PhaseName.KNOWLEDGE_EXTRACT_EXPLORE,),
-    RunStrategy.KNOWLEDGE_EXTRACT_TDD: (PhaseName.KNOWLEDGE_EXTRACT_TDD,),
-    RunStrategy.EXPLORER: EXPLORER_PHASES,
-    RunStrategy.EXPLORE_BUNDLE: (PhaseName.EXPLORE_BUNDLE,),
-    RunStrategy.PROPOSAL_BUNDLE: (PhaseName.PROPOSAL_BUNDLE,),
-    RunStrategy.SPEC_BUNDLE: (PhaseName.SPEC_BUNDLE,),
-    RunStrategy.DESIGN_BUNDLE: (PhaseName.DESIGN_BUNDLE,),
-    RunStrategy.TASKS_BUNDLE: (PhaseName.TASKS_BUNDLE,),
-    RunStrategy.TDD_BUNDLE: (PhaseName.TDD_BUNDLE,),
-}
-
-
-def _coerce_node(node: LifecycleNode | str) -> LifecycleNode:
-    if isinstance(node, (PhaseName, TerminalState)):
-        return node
-    try:
-        return PhaseName(node)
-    except ValueError:
-        try:
-            return TerminalState(node)
-        except ValueError as exc:
-            raise DomainValidationError(f"unknown lifecycle node: {node}") from exc
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "name", BundleName(self.name))
 
 
 @dataclass(frozen=True, slots=True)
-class LifecycleGraph:
-    strategy: RunStrategy
-    phases: tuple[PhaseName, ...]
+class PhaseRef:
+    name: PhaseName
 
-    @classmethod
-    def for_strategy(cls, strategy: RunStrategy | str) -> "LifecycleGraph":
-        normalized = RunStrategy(strategy)
-        return cls(strategy=normalized, phases=STRATEGY_GRAPHS[normalized])
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "name", PhaseName(self.name))
+
+
+BundleChild = BundleRef | PhaseRef
+
+
+@dataclass(frozen=True, slots=True)
+class PhaseSpec:
+    name: PhaseName
+    executor: ExecutorKind
+    task_id: str | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "name", PhaseName(self.name))
+        object.__setattr__(self, "executor", ExecutorKind(self.executor))
+        if self.executor is ExecutorKind.AI_WORKER and not self.task_id:
+            raise DomainValidationError("AI worker phases require task_id")
+        if self.executor is ExecutorKind.DETERMINISTIC_FUNCTION and self.task_id is not None:
+            raise DomainValidationError("deterministic function phases must not declare task_id")
+
+
+@dataclass(frozen=True, slots=True)
+class BundleSpec:
+    name: BundleName
+    children: tuple[BundleChild, ...]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "name", BundleName(self.name))
+        object.__setattr__(self, "children", tuple(self.children))
+        if not self.children:
+            raise DomainValidationError("bundle specs require children")
+
+
+@dataclass(frozen=True, slots=True)
+class ExecutableStep:
+    step_id: str
+    step_index: int
+    root_bundle: BundleName
+    bundle_path: tuple[BundleName, ...]
+    bundle_name: BundleName
+    phase: PhaseSpec
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "step_id", str(self.step_id))
+        object.__setattr__(self, "step_index", int(self.step_index))
+        object.__setattr__(self, "root_bundle", BundleName(self.root_bundle))
+        object.__setattr__(self, "bundle_path", tuple(BundleName(bundle) for bundle in self.bundle_path))
+        object.__setattr__(self, "bundle_name", BundleName(self.bundle_name))
+        object.__setattr__(self, "phase", PhaseSpec(self.phase.name, self.phase.executor, self.phase.task_id))
+        if self.step_index < 0:
+            raise DomainValidationError("step_index must be nonnegative")
+        if not self.step_id.strip():
+            raise DomainValidationError("step_id is required")
+        if self.bundle_path and self.bundle_path[-1] is not self.bundle_name:
+            raise DomainValidationError("bundle_path must end at bundle_name")
 
     @property
-    def start_phase(self) -> PhaseName:
-        return self.phases[0]
+    def phase_name(self) -> PhaseName:
+        return self.phase.name
 
-    def next_after(self, current: LifecycleNode | str) -> LifecycleNode:
-        node = _coerce_node(current)
-        if isinstance(node, TerminalState):
-            raise InvalidTransitionError(f"{node.value} is terminal")
-        if node not in self.phases:
-            raise InvalidTransitionError(f"{node.value} is not in {self.strategy.value} graph")
-        index = self.phases.index(node)
-        if index == len(self.phases) - 1:
-            return TerminalState.COMPLETED
-        return self.phases[index + 1]
 
-    def can_transition(self, source: LifecycleNode | str, target: LifecycleNode | str) -> bool:
-        try:
-            self.validate_transition(source, target)
-        except DomainValidationError:
-            return False
-        return True
+PHASE_SPECS: dict[PhaseName, PhaseSpec] = {
+    PhaseName.EXPLORE_REQUEST_UNDERSTANDING: PhaseSpec(PhaseName.EXPLORE_REQUEST_UNDERSTANDING, ExecutorKind.AI_WORKER, "explore_request_profile"),
+    PhaseName.EXPLORE_CONTEXT_PACK: PhaseSpec(PhaseName.EXPLORE_CONTEXT_PACK, ExecutorKind.DETERMINISTIC_FUNCTION),
+    PhaseName.EXPLORE_EVIDENCE_DIGEST: PhaseSpec(PhaseName.EXPLORE_EVIDENCE_DIGEST, ExecutorKind.AI_WORKER, "explore_evidence_digest"),
+    PhaseName.EXPLORE_EXPLORATION_MAP: PhaseSpec(PhaseName.EXPLORE_EXPLORATION_MAP, ExecutorKind.DETERMINISTIC_FUNCTION),
+    PhaseName.EXPLORE_OUTCOME_SYNTHESIS: PhaseSpec(PhaseName.EXPLORE_OUTCOME_SYNTHESIS, ExecutorKind.AI_WORKER, "explore_outcome_synthesis"),
+    PhaseName.EXPLORE_HANDOFF: PhaseSpec(PhaseName.EXPLORE_HANDOFF, ExecutorKind.DETERMINISTIC_FUNCTION),
+    PhaseName.KNOWLEDGE_EXTRACT_EXPLORE_SYNTHESIS: PhaseSpec(PhaseName.KNOWLEDGE_EXTRACT_EXPLORE_SYNTHESIS, ExecutorKind.AI_WORKER, "knowledge_synthesis"),
+    PhaseName.KNOWLEDGE_EXTRACT_EXPLORE_PATCH: PhaseSpec(PhaseName.KNOWLEDGE_EXTRACT_EXPLORE_PATCH, ExecutorKind.DETERMINISTIC_FUNCTION),
+    PhaseName.KNOWLEDGE_EXTRACT_TDD_SYNTHESIS: PhaseSpec(PhaseName.KNOWLEDGE_EXTRACT_TDD_SYNTHESIS, ExecutorKind.AI_WORKER, "knowledge_synthesis"),
+    PhaseName.KNOWLEDGE_EXTRACT_TDD_PATCH: PhaseSpec(PhaseName.KNOWLEDGE_EXTRACT_TDD_PATCH, ExecutorKind.DETERMINISTIC_FUNCTION),
+    PhaseName.PROPOSAL_PURPOSE: PhaseSpec(PhaseName.PROPOSAL_PURPOSE, ExecutorKind.AI_WORKER, "purpose"),
+    PhaseName.PROPOSAL_HANDOFF: PhaseSpec(PhaseName.PROPOSAL_HANDOFF, ExecutorKind.DETERMINISTIC_FUNCTION),
+    PhaseName.SPEC_DRAFT: PhaseSpec(PhaseName.SPEC_DRAFT, ExecutorKind.AI_WORKER, "spec"),
+    PhaseName.SPEC_HANDOFF: PhaseSpec(PhaseName.SPEC_HANDOFF, ExecutorKind.DETERMINISTIC_FUNCTION),
+    PhaseName.DESIGN_DRAFT: PhaseSpec(PhaseName.DESIGN_DRAFT, ExecutorKind.AI_WORKER, "design"),
+    PhaseName.DESIGN_HANDOFF: PhaseSpec(PhaseName.DESIGN_HANDOFF, ExecutorKind.DETERMINISTIC_FUNCTION),
+    PhaseName.TASKS_DRAFT: PhaseSpec(PhaseName.TASKS_DRAFT, ExecutorKind.AI_WORKER, "tasks"),
+    PhaseName.TASKS_HANDOFF: PhaseSpec(PhaseName.TASKS_HANDOFF, ExecutorKind.DETERMINISTIC_FUNCTION),
+    PhaseName.VALIDATE_JSON: PhaseSpec(PhaseName.VALIDATE_JSON, ExecutorKind.DETERMINISTIC_FUNCTION),
+    PhaseName.TDD_CREATE_TEST: PhaseSpec(PhaseName.TDD_CREATE_TEST, ExecutorKind.AI_WORKER, "tdd_create_test"),
+    PhaseName.TDD_IMPLEMENT: PhaseSpec(PhaseName.TDD_IMPLEMENT, ExecutorKind.AI_WORKER, "tdd_implement"),
+    PhaseName.TDD_REVIEW: PhaseSpec(PhaseName.TDD_REVIEW, ExecutorKind.AI_WORKER, "tdd_review"),
+    PhaseName.TDD_HANDOFF: PhaseSpec(PhaseName.TDD_HANDOFF, ExecutorKind.DETERMINISTIC_FUNCTION),
+}
 
-    def validate_transition(self, source: LifecycleNode | str, target: LifecycleNode | str) -> None:
-        source_node = _coerce_node(source)
-        target_node = _coerce_node(target)
-        if isinstance(source_node, TerminalState):
-            raise InvalidTransitionError(f"{source_node.value} is terminal")
-        if source_node not in self.phases:
-            raise InvalidTransitionError(f"{source_node.value} is not in {self.strategy.value} graph")
-        if isinstance(target_node, TerminalState) and target_node in {
-            TerminalState.FAILED,
-            TerminalState.CANCELLED,
-        }:
-            return
-        expected = self.next_after(source_node)
-        if target_node != expected:
-            raise InvalidTransitionError(
-                f"invalid transition for {self.strategy.value}: "
-                f"{source_node.value} -> {target_node.value}; expected {expected.value}"
-            )
 
-    def phase_index(self, phase: PhaseName | str) -> int:
-        node = _coerce_node(phase)
-        if not isinstance(node, PhaseName) or node not in self.phases:
-            value = node.value if isinstance(node, (PhaseName, TerminalState)) else str(node)
-            raise InvalidTransitionError(f"{value} is not in {self.strategy.value} graph")
-        return self.phases.index(node)
+def phase_spec(name: PhaseName | str) -> PhaseSpec:
+    return PHASE_SPECS[PhaseName(name)]
 
-    def validate_rewind_target(self, source: PhaseName | str, target: PhaseName | str) -> None:
-        source_index = self.phase_index(source)
-        target_index = self.phase_index(target)
-        if target_index >= source_index:
-            raise InvalidTransitionError("escalation target must be earlier than the current phase")
 
-    def completed_prefix_before(self, phase: PhaseName | str) -> tuple[PhaseName, ...]:
-        return self.phases[: self.phase_index(phase)]
+from harness_v2.backend.domain.bundles import BUNDLE_SPECS  # noqa: E402
 
-    def phases_from(self, phase: PhaseName | str) -> tuple[PhaseName, ...]:
-        return self.phases[self.phase_index(phase) :]
 
-    def validate_completed_prefix(self, completed: tuple[PhaseName, ...]) -> None:
-        if len(completed) != len(set(completed)):
-            raise DomainValidationError("completed phases must be unique")
-        expected = self.phases[: len(completed)]
-        if completed != expected:
-            expected_values = tuple(phase.value for phase in expected)
-            actual_values = tuple(phase.value for phase in completed)
-            raise DomainValidationError(
-                f"completed phases must be a legal prefix: expected {expected_values}, got {actual_values}"
-            )
+def bundle_spec(name: BundleName | str) -> BundleSpec:
+    return BUNDLE_SPECS[BundleName(name)]

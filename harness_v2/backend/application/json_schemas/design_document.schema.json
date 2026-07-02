@@ -1,0 +1,79 @@
+{
+  "additionalProperties": true,
+  "properties": {
+    "boundaries": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "type": "array",
+      "uniqueItems": true
+    },
+    "implementation_approach": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "type": "array",
+      "uniqueItems": true
+    },
+    "invariants": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "type": "array",
+      "uniqueItems": true
+    },
+    "kind": {
+      "const": "design"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "test_strategy": {
+      "additionalProperties": true,
+      "properties": {
+        "acceptance": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "integration": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "unit": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "unit",
+        "integration",
+        "acceptance"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "schema_version",
+    "kind",
+    "boundaries",
+    "invariants",
+    "implementation_approach",
+    "test_strategy"
+  ],
+  "type": "object"
+}

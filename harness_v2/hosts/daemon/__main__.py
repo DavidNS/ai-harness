@@ -16,6 +16,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--allow-repository-mutation", action="store_true")
     parser.add_argument("--branch", choices=("off", "current", "create", "create-from-main"), default="current")
     parser.add_argument("--github-ci-mode", choices=("off", "baseline", "branch"), default="baseline")
+    parser.add_argument("--model-provider", choices=("codex", "claude"), default="codex")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
     return parser
@@ -30,6 +31,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             allow_repository_mutation=args.allow_repository_mutation,
             branch_mode=args.branch,
             github_ci_mode=args.github_ci_mode,
+            model_provider_name=args.model_provider,
             host=args.host,
             port=args.port,
         )

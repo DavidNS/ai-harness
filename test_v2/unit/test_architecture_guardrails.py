@@ -73,16 +73,62 @@ class ArchitectureGuardrailTests(unittest.TestCase):
                 with self.subTest(file=str(rel), module=module):
                     self.assertTrue(allowed, f"{rel} imports non-frontend boundary module {module}")
 
-    def test_bundles_do_not_mutate_authoritative_state_or_decisions_directly(self) -> None:
+    def test_phases_do_not_mutate_authoritative_state_or_decisions_directly(self) -> None:
         forbidden_attrs = {"state_store", "artifact_store", "decision_service"}
-        for path in python_files(HARNESS / "backend" / "application" / "bundles"):
+        for path in python_files(HARNESS / "backend" / "application" / "phases"):
             rel = path.relative_to(ROOT)
             tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
             for node in ast.walk(tree):
                 if isinstance(node, ast.Attribute) and node.attr in forbidden_attrs:
                     with self.subTest(file=str(rel), attr=node.attr, line=node.lineno):
-                        self.fail(f"{rel}:{node.lineno} accesses BundleContext.{node.attr} directly")
+                        self.fail(f"{rel}:{node.lineno} accesses PhaseExecutionContext.{node.attr} directly")
 
+    def test_application_bundles_do_not_contain_phase_implementation_modules(self) -> None:
+        bundles_dir = HARNESS / "backend" / "application" / "bundles"
+        if not bundles_dir.exists():
+            return
+        leftovers = sorted(path.name for path in bundles_dir.glob("*_phases.py"))
+        self.assertEqual([], leftovers)
+
+    def test_sdd_spec_and_design_artifacts_are_json_not_markdown(self) -> None:
+        phase_root = HARNESS / "backend" / "application" / "phases"
+        checked = (
+            phase_root / "spec_draft.py",
+            phase_root / "spec_handoff.py",
+            phase_root / "design_draft.py",
+            phase_root / "design_handoff.py",
+            phase_root / "tasks_draft.py",
+        )
+        for path in checked:
+            source = path.read_text(encoding="utf-8")
+            with self.subTest(file=str(path.relative_to(ROOT))):
+                self.assertNotIn("spec.md", source)
+                self.assertNotIn("design.md", source)
+
+    def test_private_harness_v2_helpers_are_referenced(self) -> None:
+        checked = python_files(HARNESS)
+        references: set[str] = set()
+        for path in python_files(HARNESS):
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+                    references.add(node.id)
+                elif isinstance(node, ast.Attribute):
+                    references.add(node.attr)
+
+        dead_helpers: list[str] = []
+        for path in checked:
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            for node in ast.walk(tree):
+                if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    continue
+                if not node.name.startswith("_") or node.name.startswith("__"):
+                    continue
+                if node.name not in references:
+                    rel = path.relative_to(ROOT)
+                    dead_helpers.append(f"{rel}:{node.lineno} {node.name}")
+
+        self.assertEqual([], dead_helpers)
 
 
 if __name__ == "__main__":

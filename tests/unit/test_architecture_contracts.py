@@ -240,6 +240,10 @@ class ArchitectureContractTests(unittest.TestCase):
             ("harness_v2/backend/domain/_bad_effect_fixture.py", "import subprocess\nsubprocess.run(['python3', '-V'])\n"),
             ("harness_v2/backend/application/_bad_effect_fixture.py", "import subprocess\nsubprocess.run(['git', 'status'])\n"),
             ("harness_v2/backend/application/_bad_effect_fixture.py", "from pathlib import Path\nPath('x').read_text()\n"),
+            ("harness_v2/backend/application/_bad_effect_fixture.py", "from pathlib import Path as P\np = P('x')\np.read_text()\n"),
+            ("harness_v2/backend/application/_bad_effect_fixture.py", "from pathlib import Path\np = Path('x')\np.unlink()\n"),
+            ("harness_v2/backend/application/_bad_effect_fixture.py", "from pathlib import Path\np = Path('x')\nlist(p.iterdir())\n"),
+            ("harness_v2/backend/application/_bad_effect_fixture.py", "import shutil\nshutil.rmtree('x')\n"),
         )
         for relative, source in cases:
             with self.subTest(source=source):
@@ -253,6 +257,38 @@ class ArchitectureContractTests(unittest.TestCase):
         )
 
         self.assertNotIn("v2.backend_external_effect_boundary", codes)
+
+
+    def test_v2_runtime_names_reject_fake_stub_and_skeleton_modules_or_classes(self) -> None:
+        cases = (
+            ("harness_v2/backend/application/fake.py", "class RuntimeAdapter:\n    pass\n"),
+            ("harness_v2/backend/application/stub.py", "class RuntimeAdapter:\n    pass\n"),
+            ("harness_v2/backend/application/skeleton.py", "class RuntimeAdapter:\n    pass\n"),
+            ("harness_v2/backend/application/runtime_fixture.py", "class FakeRuntimeAdapter:\n    pass\n"),
+            ("harness_v2/backend/application/runtime_fixture.py", "class RuntimeSkeleton:\n    pass\n"),
+        )
+        for relative, source in cases:
+            with self.subTest(relative=relative, source=source):
+                path = ROOT / relative
+                path.write_text(source, encoding="utf-8")
+                try:
+                    report = check_architecture.Report()
+                    check_architecture.check_v2_runtime_test_double_names(report)
+                    codes = {finding.code for finding in report.findings}
+                    self.assertIn("v2.runtime_test_double_names", codes)
+                finally:
+                    path.unlink(missing_ok=True)
+
+    def test_v2_runtime_names_reject_importing_test_support(self) -> None:
+        path = ROOT / "harness_v2" / "backend" / "application" / "runtime_fixture.py"
+        path.write_text("from test_v2.support.model_providers import ScriptedModelProvider\n", encoding="utf-8")
+        try:
+            report = check_architecture.Report()
+            check_architecture.check_v2_runtime_test_double_names(report)
+            codes = {finding.code for finding in report.findings}
+            self.assertIn("v2.runtime_test_support_import", codes)
+        finally:
+            path.unlink(missing_ok=True)
 
     def test_v2_model_provider_guardrail_rejects_shell_execution(self) -> None:
         cases = (

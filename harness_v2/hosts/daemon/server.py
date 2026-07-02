@@ -11,6 +11,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from harness_v2.backend.application.contracts import InvalidRunStateError, RunNotFoundError
+from harness_v2.backend.ports.model_provider import ModelProviderPort
 from harness_v2.hosts.daemon.codec import CodecError, decode_command, decode_query, encode_envelope
 from harness_v2.hosts.daemon.event_log import DaemonEventLog
 from harness_v2.hosts.in_process.host import InProcessHost
@@ -23,6 +24,8 @@ class DaemonConfig:
     allow_repository_mutation: bool = False
     branch_mode: str = "current"
     github_ci_mode: str = "baseline"
+    model_provider: ModelProviderPort | None = None
+    model_provider_name: str = "codex"
     host: str = "127.0.0.1"
     port: int = 8765
 
@@ -37,6 +40,8 @@ class DaemonApplication:
             allow_repository_mutation=config.allow_repository_mutation,
             branch_mode=config.branch_mode,
             github_ci_mode=config.github_ci_mode,
+            model_provider=config.model_provider,
+            model_provider_name=config.model_provider_name,
         )
 
     def execute_payload(self, payload: object) -> dict[str, object]:

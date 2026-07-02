@@ -50,7 +50,7 @@ def _dispatch(controller: UiController, state: UiState, parts: list[str]) -> UiS
     if command == "select" and len(parts) == 2:
         return controller.select(state, parts[1])
     if command == "start" and len(parts) >= 3:
-        return controller.start(state, " ".join(parts[2:]), strategy=parts[1])
+        return controller.start(state, " ".join(parts[2:]), root_bundle=parts[1])
     if command == "resume" and len(parts) == 1:
         return controller.resume(state)
     if command == "cancel" and len(parts) == 1:
@@ -64,7 +64,7 @@ def _dispatch(controller: UiController, state: UiState, parts: list[str]) -> UiS
         return controller.refresh(controller.poll_events(state, timeout=timeout))
     return with_error(
         state,
-        "commands: refresh, list, select <run_id>, start <strategy> <request>, "
+        "commands: refresh, list, select <run_id>, start <root_bundle> <request>, "
         "resume, cancel, retry <phase>, decision <response>, watch [timeout], quit",
     )
 

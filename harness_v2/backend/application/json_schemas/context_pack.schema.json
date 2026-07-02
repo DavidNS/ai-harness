@@ -1,0 +1,73 @@
+{
+  "additionalProperties": true,
+  "properties": {
+    "ci_digest": {
+      "type": "object"
+    },
+    "ci_status": {
+      "type": "object"
+    },
+    "decision_history": {
+      "items": {
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "explorer_scope": {
+      "type": "object"
+    },
+    "git": {
+      "type": "object"
+    },
+    "kind": {
+      "const": "explore_context_pack"
+    },
+    "knowledge": {
+      "items": {
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "profile": {
+      "$ref": "request_profile"
+    },
+    "related_improvements": {
+      "items": {
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "repository_observations": {
+      "items": {
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "request": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "request_profile": {
+      "$ref": "request_profile"
+    },
+    "schema_version": {
+      "const": 1
+    }
+  },
+  "required": [
+    "schema_version",
+    "kind",
+    "request",
+    "profile",
+    "request_profile",
+    "decision_history",
+    "knowledge",
+    "related_improvements",
+    "repository_observations",
+    "git",
+    "ci_status",
+    "ci_digest",
+    "explorer_scope"
+  ],
+  "type": "object"
+}

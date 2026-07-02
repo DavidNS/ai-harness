@@ -1,3 +1,3 @@
 # Prompt
 
-Return exactly a Review v1 markdown document with sections ## Verdict and ## Findings. Verdict must be APPROVE or REQUEST_CHANGES.
+Return a tdd_review JSON document with schema_version 1, kind tdd_review, verdict, findings, acceptance_criteria, and test_evidence. Do not modify repository files.

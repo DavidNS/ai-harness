@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from harness_v2.backend.domain.errors import DomainValidationError, require_text
-from harness_v2.backend.domain.lifecycle import PhaseName
+from harness_v2.backend.domain.lifecycle import BundleName
 
 
 class EscalationCategory(StrEnum):
@@ -31,7 +31,7 @@ def _text_tuple(values: tuple[str, ...] | list[str], field: str) -> tuple[str, .
 @dataclass(frozen=True, slots=True)
 class EscalationIssue:
     issue_id: str
-    origin_phase: PhaseName
+    origin_bundle: BundleName
     category: EscalationCategory
     reason: str
     evidence_artifact_ids: tuple[str, ...] = ()
@@ -40,7 +40,7 @@ class EscalationIssue:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "issue_id", require_text(self.issue_id, "escalation issue ID"))
-        object.__setattr__(self, "origin_phase", PhaseName(self.origin_phase))
+        object.__setattr__(self, "origin_bundle", BundleName(self.origin_bundle))
         object.__setattr__(self, "category", EscalationCategory(self.category))
         object.__setattr__(self, "reason", require_text(self.reason, "escalation reason"))
         object.__setattr__(self, "evidence_artifact_ids", _text_tuple(self.evidence_artifact_ids, "evidence artifact ID"))

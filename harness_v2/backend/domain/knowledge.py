@@ -8,7 +8,7 @@ import re
 from typing import Any
 
 from harness_v2.backend.domain.errors import DomainValidationError, require_text
-from harness_v2.backend.domain.lifecycle import PhaseName
+from harness_v2.backend.domain.lifecycle import BundleName
 
 
 _ID_RE = re.compile(r"[a-z0-9][a-z0-9._:-]{1,127}")
@@ -47,7 +47,7 @@ class LearningProposalBundle:
 class KnowledgePatchRecord:
     patch_id: str
     run_id: str
-    origin_phase: PhaseName
+    origin_bundle: BundleName
     version: int
     status: KnowledgePatchStatus
     path: str
@@ -60,7 +60,7 @@ class KnowledgePatchRecord:
     def __post_init__(self) -> None:
         object.__setattr__(self, "patch_id", _id(self.patch_id, "patch_id"))
         object.__setattr__(self, "run_id", _safe_segment(self.run_id, "run_id"))
-        object.__setattr__(self, "origin_phase", PhaseName(self.origin_phase))
+        object.__setattr__(self, "origin_bundle", BundleName(self.origin_bundle))
         if isinstance(self.version, bool) or not isinstance(self.version, int) or self.version < 1:
             raise DomainValidationError("knowledge patch version must be a positive integer")
         object.__setattr__(self, "status", KnowledgePatchStatus(self.status))
@@ -81,7 +81,7 @@ class KnowledgePatchRecord:
         return KnowledgePatchRecord(
             patch_id=self.patch_id,
             run_id=self.run_id,
-            origin_phase=self.origin_phase,
+            origin_bundle=self.origin_bundle,
             version=self.version,
             status=KnowledgePatchStatus.REJECTED,
             path=self.path,

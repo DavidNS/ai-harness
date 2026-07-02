@@ -56,8 +56,8 @@ class UiController:
         except Exception as exc:
             return with_error(state, str(exc))
 
-    def start(self, state: UiState, request: str, *, strategy: str = "SDD") -> UiState:
-        return self._execute_run_command(state, StartRun(request=request, strategy=strategy), "started run")
+    def start(self, state: UiState, request: str, *, root_bundle: str = "SDD_BUNDLE") -> UiState:
+        return self._execute_run_command(state, StartRun(request=request, root_bundle=root_bundle), "started run")
 
     def resume(self, state: UiState) -> UiState:
         run_id = self._selected_run_id(state)
@@ -71,11 +71,11 @@ class UiController:
             return with_error(state, "select a run before cancelling")
         return self._execute_run_command(state, CancelRun(run_id), "cancelled run")
 
-    def retry(self, state: UiState, phase: str) -> UiState:
+    def retry(self, state: UiState, bundle: str, phase: str) -> UiState:
         run_id = self._selected_run_id(state)
         if run_id is None:
             return with_error(state, "select a run before retrying")
-        return self._execute_run_command(state, RetryPhase(run_id, phase), "retry started")
+        return self._execute_run_command(state, RetryPhase(run_id, bundle, phase), "retry started")
 
     def submit_decision(self, state: UiState, response: str) -> UiState:
         run = state.selected_run

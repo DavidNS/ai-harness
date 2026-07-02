@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import json
 from fnmatch import fnmatch
 from typing import Any
 
 from harness_v2.backend.application.bundle_artifacts import BundleValidationError
-from harness_v2.backend.application.bundle_orchestration import BundleContext, BundleExecutionResult
+from harness_v2.backend.application.json_schema import validate_json_schema
+from harness_v2.backend.application.phase_artifacts.sdd import validate_tasks_document
+from harness_v2.backend.application.phase_executor import PhaseExecutionContext, PhaseResult
+from harness_v2.backend.application.contracts import TestsFinished, TestsStarted
 from harness_v2.backend.domain.escalation import EscalationCategory, EscalationIssue
-from harness_v2.backend.domain.lifecycle import PhaseName
+from harness_v2.backend.domain.lifecycle import BundleName, PhaseName
 from harness_v2.backend.domain.tasks import TaskStatus, TaskSummary
 from harness_v2.backend.ports.repository import RepositoryRollbackPort, RepositorySnapshotPort
 from harness_v2.backend.ports.tool_runner import ToolRunnerPort, ToolRunRequest, ToolRunResult
@@ -17,10 +21,10 @@ from harness_v2.backend.ports.tool_runner import ToolRunnerPort, ToolRunRequest,
 
 @dataclass(frozen=True, slots=True)
 class TddResultReporter:
-    def write_results(self, context: BundleContext, results: list[dict[str, Any]], blocked_reason: str | None) -> None:
+    def write_results(self, context: PhaseExecutionContext, results: list[dict[str, Any]], blocked_reason: str | None) -> None:
         context.artifacts.write_json(context.run.run_id, "published/tdd-results.json", _results_payload(results, blocked_reason))
 
-    def write_handoff(self, context: BundleContext, summaries: tuple[TaskSummary, ...]) -> None:
+    def write_handoff(self, context: PhaseExecutionContext, summaries: tuple[TaskSummary, ...]) -> None:
         context.artifacts.write_json(
             context.run.run_id,
             "published/tdd-handoff.json",
@@ -46,7 +50,7 @@ class TddLoopService:
         if isinstance(self.max_attempts, bool) or self.max_attempts <= 0:
             raise ValueError("max_attempts must be positive")
 
-    def execute(self, context: BundleContext) -> BundleExecutionResult:
+    def execute(self, context: PhaseExecutionContext) -> PhaseResult:
         run = context.run
         if not run.tasks:
             raise BundleValidationError("TDD_BUNDLE requires tasks from TASKS_BUNDLE")
@@ -58,9 +62,11 @@ class TddLoopService:
         task_document = context.artifacts.read_json(run.run_id, "tasks.json")
         if task_document is None:
             raise BundleValidationError("required artifact tasks.json is missing")
+        validate_tasks_document(task_document)
         task_plans = {task.task_id: task for task in _task_plans(task_document)}
         summaries = list(run.tasks)
         results: list[dict[str, Any]] = []
+        events: list[object] = []
 
         for index, summary in enumerate(summaries):
             if summary.status is TaskStatus.COMPLETED:
@@ -70,23 +76,24 @@ class TddLoopService:
                 reason = f"task {summary.task_id} is missing from tasks.json"
                 self.reporter.write_results(context, results, reason)
                 return _escalated(EscalationCategory.TASK_PLAN_GAP, reason, ("published/tdd-results.json",))
-            summary, issue = self._execute_task(context, summary, plan, results)
+            summary, issue = self._execute_task(context, summary, plan, results, events)
             summaries[index] = summary
             if issue is not None:
                 self.reporter.write_results(context, results, issue.reason)
-                return BundleExecutionResult(tasks=tuple(summaries), escalation_issue=issue)
+                return PhaseResult(tasks=tuple(summaries), escalation_issue=issue, events=tuple(events))
 
         completed = tuple(summaries)
         self.reporter.write_results(context, results, None)
         self.reporter.write_handoff(context, completed)
-        return BundleExecutionResult(tasks=completed)
+        return PhaseResult(tasks=completed, events=tuple(events))
 
     def _execute_task(
         self,
-        context: BundleContext,
+        context: PhaseExecutionContext,
         summary: TaskSummary,
         plan: "TddTaskPlan",
         results: list[dict[str, Any]],
+        events: list[object],
     ) -> tuple[TaskSummary, EscalationIssue | None]:
         current = summary
         while current.attempts < self.max_attempts:
@@ -98,11 +105,12 @@ class TddLoopService:
             try:
                 context.artifacts.run_worker_text(
                     context.run,
-                    PhaseName.TDD_BUNDLE,
+                    BundleName.TDD_BUNDLE,
+                    PhaseName.TDD_CREATE_TEST,
                     "tdd_create_test",
                     {"task": plan.to_mapping(), "attempt": attempt},
                 )
-                red_runs = self._run_commands(context, plan.focused_tests)
+                red_runs = self._run_test_group(context, current.task_id, "red", attempt, plan.focused_tests, events)
                 attempt_result["red_tests"] = [_command_payload(item) for item in red_runs]
                 red_issue = _red_step_issue(red_runs)
                 if red_issue is not None:
@@ -115,7 +123,8 @@ class TddLoopService:
 
                 context.artifacts.run_worker_text(
                     context.run,
-                    PhaseName.TDD_BUNDLE,
+                    BundleName.TDD_BUNDLE,
+                    PhaseName.TDD_IMPLEMENT,
                     "tdd_implement",
                     {"task": plan.to_mapping(), "attempt": attempt, "red_tests": attempt_result["red_tests"]},
                 )
@@ -135,8 +144,8 @@ class TddLoopService:
                         ("published/tdd-results.json",),
                     )
 
-                focused = self._run_commands(context, plan.focused_tests)
-                broader = self._run_commands(context, plan.broader_tests)
+                focused = self._run_test_group(context, current.task_id, "focused", attempt, plan.focused_tests, events)
+                broader = self._run_test_group(context, current.task_id, "broader", attempt, plan.broader_tests, events)
                 attempt_result["focused_tests"] = [_command_payload(item) for item in focused]
                 attempt_result["broader_tests"] = [_command_payload(item) for item in broader]
                 infra_reason = _infra_issue((*focused, *broader))
@@ -154,12 +163,31 @@ class TddLoopService:
                     current = current.replace(status=TaskStatus.PENDING, last_failure=reason)
                     continue
 
+                review_snapshot = self.repository.capture(context.runtime.working_directory)
                 review_text = context.artifacts.run_worker_text(
                     context.run,
-                    PhaseName.TDD_BUNDLE,
+                    BundleName.TDD_BUNDLE,
+                    PhaseName.TDD_REVIEW,
                     "tdd_review",
-                    {"task": plan.to_mapping(), "attempt": attempt, "diff": attempt_result["diff"]},
+                    {
+                        "task": plan.to_mapping(),
+                        "attempt": attempt,
+                        "diff": attempt_result["diff"],
+                        "red_tests": attempt_result["red_tests"],
+                        "focused_tests": attempt_result["focused_tests"],
+                        "broader_tests": attempt_result["broader_tests"],
+                        "acceptance_criteria": list(plan.acceptance_criteria),
+                    },
                 )
+                review_diff = self.repository.diff(review_snapshot, self.repository.capture(context.runtime.working_directory))
+                if review_diff.changed_paths:
+                    reason = "TDD review changed repository files despite read-only contract: " + ", ".join(review_diff.changed_paths)
+                    self.rollback.restore(context.runtime.working_directory, snapshot)
+                    return current.replace(status=TaskStatus.FAILED, last_failure=reason), _issue(
+                        EscalationCategory.VALIDATION_BLOCKED,
+                        reason,
+                        ("published/tdd-results.json",),
+                    )
                 review = parse_tdd_review(review_text)
                 attempt_result["review"] = review
                 if review["verdict"] == "APPROVE":
@@ -191,7 +219,22 @@ class TddLoopService:
             ("published/tdd-results.json",),
         )
 
-    def _run_commands(self, context: BundleContext, commands: tuple[tuple[str, ...], ...]) -> tuple[ToolRunResult, ...]:
+    def _run_test_group(
+        self,
+        context: PhaseExecutionContext,
+        task_id: str,
+        group: str,
+        attempt: int,
+        commands: tuple[tuple[str, ...], ...],
+        events: list[object],
+    ) -> tuple[ToolRunResult, ...]:
+        events.append(TestsStarted(context.run.run_id, task_id, group, attempt))
+        results = self._run_commands(context, commands)
+        failed = len([result for result in results if not result.succeeded])
+        events.append(TestsFinished(context.run.run_id, task_id, group, attempt, len(results), failed))
+        return results
+
+    def _run_commands(self, context: PhaseExecutionContext, commands: tuple[tuple[str, ...], ...]) -> tuple[ToolRunResult, ...]:
         return tuple(
             self.tool_runner.run(
                 ToolRunRequest(
@@ -225,32 +268,23 @@ class TddTaskPlan:
 
 
 def parse_tdd_review(text: str) -> dict[str, Any]:
-    verdict: str | None = None
-    escalation_category: str | None = None
-    findings: list[str] = []
-    section: str | None = None
-    for raw_line in text.splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-        if line.startswith("## "):
-            section = line[3:].strip()
-            continue
-        if section == "Verdict" and verdict is None:
-            if line not in {"APPROVE", "REQUEST_CHANGES"}:
-                raise BundleValidationError("TDD review verdict must be APPROVE or REQUEST_CHANGES")
-            verdict = line
-            continue
-        if section == "Escalation Category" and escalation_category is None:
-            escalation_category = _review_escalation_category(line).value
-            continue
-        if section == "Findings" and line.startswith("-"):
-            findings.append(line.lstrip("- ").strip())
-    if verdict not in {"APPROVE", "REQUEST_CHANGES"}:
-        raise BundleValidationError("TDD review missing verdict")
-    if verdict == "APPROVE" and escalation_category is not None:
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise BundleValidationError("TDD review must be JSON") from exc
+    validate_json_schema(payload, "tdd_review")
+    escalation_category = None
+    if payload.get("escalation_category") is not None:
+        escalation_category = _review_escalation_category(str(payload["escalation_category"])).value
+    if payload["verdict"] == "APPROVE" and escalation_category is not None:
         raise BundleValidationError("approved TDD review must not include escalation category")
-    return {"verdict": verdict, "findings": findings, "escalation_category": escalation_category}
+    return {
+        "verdict": payload["verdict"],
+        "findings": _text_tuple(payload["findings"], "findings"),
+        "acceptance_criteria": _text_tuple(payload["acceptance_criteria"], "acceptance_criteria"),
+        "test_evidence": dict(payload["test_evidence"]),
+        "escalation_category": escalation_category,
+    }
 
 
 def _review_escalation_category(value: str) -> EscalationCategory:
@@ -270,44 +304,26 @@ def _review_escalation_category(value: str) -> EscalationCategory:
 
 
 def _task_plans(document: dict[str, Any]) -> tuple[TddTaskPlan, ...]:
-    raw_tasks = document.get("tasks")
-    if not isinstance(raw_tasks, list):
-        raise BundleValidationError("tasks.json tasks must be a list")
-    return tuple(_task_plan(item) for item in raw_tasks)
+    return tuple(_task_plan(item) for item in document["tasks"])
 
 
-def _task_plan(value: object) -> TddTaskPlan:
-    if not isinstance(value, dict):
-        raise BundleValidationError("task item must be an object")
+def _task_plan(value: dict[str, Any]) -> TddTaskPlan:
     return TddTaskPlan(
-        task_id=_text(value.get("id"), "task id"),
-        title=_text(value.get("title"), "task title"),
-        touched_paths=_text_tuple(value.get("touched_paths"), "touched_paths"),
-        focused_tests=_commands(value.get("focused_tests"), "focused_tests"),
-        broader_tests=_commands(value.get("broader_tests"), "broader_tests"),
-        acceptance_criteria=_text_tuple(value.get("acceptance_criteria"), "acceptance_criteria"),
+        task_id=value["id"].strip(),
+        title=value["title"].strip(),
+        touched_paths=_text_tuple(value["touched_paths"], "touched_paths"),
+        focused_tests=_commands(value["focused_tests"], "focused_tests"),
+        broader_tests=_commands(value["broader_tests"], "broader_tests"),
+        acceptance_criteria=_text_tuple(value["acceptance_criteria"], "acceptance_criteria"),
     )
 
 
-def _commands(value: object, field: str) -> tuple[tuple[str, ...], ...]:
-    if not isinstance(value, list):
-        raise BundleValidationError(f"{field} must be a list")
-    commands: list[tuple[str, ...]] = []
-    for command in value:
-        commands.append(_text_tuple(command, field))
-    return tuple(commands)
+def _commands(value: list[list[str]], field: str) -> tuple[tuple[str, ...], ...]:
+    return tuple(_text_tuple(command, field) for command in value)
 
 
-def _text_tuple(value: object, field: str) -> tuple[str, ...]:
-    if not isinstance(value, list) or any(not isinstance(item, str) or not item.strip() for item in value):
-        raise BundleValidationError(f"{field} must be a list of nonempty strings")
+def _text_tuple(value: list[str], _field: str) -> tuple[str, ...]:
     return tuple(item.strip() for item in value)
-
-
-def _text(value: object, field: str) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise BundleValidationError(f"{field} is required")
-    return value.strip()
 
 
 def _red_step_issue(results: tuple[ToolRunResult, ...]) -> str | None:
@@ -358,12 +374,12 @@ def _results_payload(results: list[dict[str, Any]], blocked_reason: str | None) 
 def _issue(category: EscalationCategory, reason: str, evidence: tuple[str, ...]) -> EscalationIssue:
     return EscalationIssue(
         issue_id="tdd-loop-blocked",
-        origin_phase=PhaseName.TDD_BUNDLE,
+        origin_bundle=BundleName.TDD_BUNDLE,
         category=category,
         reason=reason,
         evidence_artifact_ids=evidence,
     )
 
 
-def _escalated(category: EscalationCategory, reason: str, evidence: tuple[str, ...]) -> BundleExecutionResult:
-    return BundleExecutionResult(escalation_issue=_issue(category, reason, evidence))
+def _escalated(category: EscalationCategory, reason: str, evidence: tuple[str, ...]) -> PhaseResult:
+    return PhaseResult(escalation_issue=_issue(category, reason, evidence))

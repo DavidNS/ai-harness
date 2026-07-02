@@ -1,0 +1,48 @@
+{
+  "additionalProperties": true,
+  "properties": {
+    "acceptance_criteria": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "type": "array",
+      "uniqueItems": true
+    },
+    "behavioral_requirements": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "type": "array",
+      "uniqueItems": true
+    },
+    "kind": {
+      "const": "spec"
+    },
+    "non_goals": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "type": "array",
+      "uniqueItems": true
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "summary": {
+      "minLength": 1,
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "kind",
+    "summary",
+    "behavioral_requirements",
+    "acceptance_criteria",
+    "non_goals"
+  ],
+  "type": "object"
+}

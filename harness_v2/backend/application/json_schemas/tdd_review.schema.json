@@ -1,0 +1,49 @@
+{
+  "additionalProperties": true,
+  "properties": {
+    "acceptance_criteria": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "type": "array",
+      "uniqueItems": true
+    },
+    "escalation_category": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "findings": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "type": "array",
+      "uniqueItems": true
+    },
+    "kind": {
+      "const": "tdd_review"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "test_evidence": {
+      "type": "object"
+    },
+    "verdict": {
+      "enum": [
+        "APPROVE",
+        "REQUEST_CHANGES"
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "kind",
+    "verdict",
+    "findings",
+    "acceptance_criteria",
+    "test_evidence"
+  ],
+  "type": "object"
+}

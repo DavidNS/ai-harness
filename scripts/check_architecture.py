@@ -57,9 +57,9 @@ STATE_UPDATE_ALLOWLIST = {
 SOURCE_LINE_BUDGET = 400
 SOURCE_LINE_EXCEPTIONS = {
     Path("harness/ai_harness/orchestrator/publishing.py"): 525,
-    # Stage 6 skeleton debt: EXPLORE is intentionally covered by budgets while
-    # remaining temporarily above the default until bundle helpers are split.
-    Path("harness_v2/backend/application/bundles/explore.py"): 1200,
+    # EXPLORE is intentionally covered by budgets while remaining temporarily
+    # above the default until bundle helpers are split.
+    Path("harness_v2/backend/application/phase_artifacts/explore.py"): 1200,
     # File-backed state and artifacts share security helpers until storage
     # adapters are split by backend port.
     Path("harness_v2/adapters/storage/file.py"): 525,
@@ -189,7 +189,11 @@ def python_files(*roots: Path) -> list[Path]:
 
 
 def parse(path: Path) -> ast.Module:
-    return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    try:
+        source = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return ast.Module(body=[], type_ignores=[])
+    return ast.parse(source, filename=str(path))
 
 
 def phase_value(value: object) -> str:
@@ -752,25 +756,69 @@ def _string_constants(node: ast.AST) -> list[str]:
 
 def _v2_backend_external_effect_findings(tree: ast.Module) -> list[dict[str, object]]:
     findings: list[dict[str, object]] = []
+    path_names = {"Path"}
+    path_vars: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module == "pathlib":
+            for alias in node.names:
+                if alias.name == "Path":
+                    path_names.add(alias.asname or alias.name)
+        elif isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
+            if _call_name(node.value) in path_names:
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        path_vars.add(target.id)
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and isinstance(node.value, ast.Call):
+            if _call_name(node.value) in path_names:
+                path_vars.add(node.target.id)
+
+    path_effect_attrs = {"read_text", "write_text", "read_bytes", "write_bytes", "open"}
+    path_mutation_attrs = {"unlink", "mkdir", "rmdir", "rename", "replace", "touch", "chmod"}
+    path_traversal_attrs = {"glob", "rglob", "iterdir"}
+    os_effects = {"os.remove", "os.unlink", "os.mkdir", "os.makedirs", "os.rmdir", "os.rename", "os.replace"}
+    shutil_effects = {"shutil.rmtree", "shutil.copy", "shutil.copy2", "shutil.copytree", "shutil.move"}
+    subprocess_effects = {"subprocess.run", "subprocess.Popen", "subprocess.call", "subprocess.check_call", "subprocess.check_output"}
+
+    def path_call_kind(call: ast.Call) -> str | None:
+        if not isinstance(call.func, ast.Attribute):
+            return None
+        attr = call.func.attr
+        value = call.func.value
+        is_path_value = False
+        if isinstance(value, ast.Call) and _call_name(value) in path_names:
+            is_path_value = True
+        elif isinstance(value, ast.Name) and value.id in path_vars:
+            is_path_value = True
+        if not is_path_value:
+            return None
+        if attr in path_effect_attrs:
+            return "filesystem access must be behind a port/adapter"
+        if attr in path_mutation_attrs:
+            return "filesystem mutation must be behind a port/adapter"
+        if attr in path_traversal_attrs:
+            return "filesystem traversal must be behind a port/adapter"
+        return None
+
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
         name = _call_name(node)
-        if name in {"subprocess.run", "subprocess.Popen", "subprocess.call", "subprocess.check_call", "subprocess.check_output"}:
+        if name in subprocess_effects:
             findings.append({"call": name, "reason": "subprocess must be behind a port/adapter"})
             if any(part == "git" or part.startswith("git ") for part in _string_constants(node)):
                 findings.append({"call": name, "reason": "git execution must be behind a port/adapter"})
         elif name == "os.system":
             findings.append({"call": name, "reason": "shell execution must be behind a port/adapter"})
-        elif name == "Path.cwd":
+        elif name in os_effects or name in shutil_effects:
+            findings.append({"call": name, "reason": "filesystem mutation must be behind a port/adapter"})
+        elif name == "Path.cwd" or any(name == f"{path_name}.cwd" for path_name in path_names):
             findings.append({"call": name, "reason": "working directory must be injected by host/runtime"})
         elif name == "open":
             findings.append({"call": name, "reason": "filesystem access must be behind a port/adapter"})
-        elif name in {"Path.read_text", "Path.write_text", "Path.read_bytes", "Path.write_bytes", "Path.open"}:
-            findings.append({"call": name, "reason": "filesystem access must be behind a port/adapter"})
-        elif isinstance(node.func, ast.Attribute) and node.func.attr in {"read_text", "write_text", "read_bytes", "write_bytes", "open"}:
-            if isinstance(node.func.value, ast.Call) and _call_name(node.func.value) == "Path":
-                findings.append({"call": f"Path(...).{node.func.attr}", "reason": "filesystem access must be behind a port/adapter"})
+        else:
+            reason = path_call_kind(node)
+            if reason is not None:
+                findings.append({"call": name, "reason": reason})
     return findings
 
 
@@ -848,6 +896,130 @@ def check_v2_worker_resources(report: Report) -> None:
             )
 
 
+def check_v2_runtime_test_double_names(report: Report) -> None:
+    root = ROOT / "harness_v2"
+    if not root.exists():
+        return
+    forbidden_filenames = {"fake.py", "stub.py", "skeleton.py"}
+    forbidden_prefixes = ("Fake", "Stub")
+    forbidden_suffixes = ("Skeleton",)
+    for path in python_files(root):
+        if path.name in forbidden_filenames:
+            report.error(
+                "v2 runtime code must not keep fake, stub, or skeleton modules",
+                code="v2.runtime_test_double_names",
+                category="boundary",
+                path=rel(path),
+                details={"filename": path.name},
+            )
+        tree = parse(path)
+        test_imports = _imports_with_prefix(imported_names(tree), {"test_v2"})
+        if test_imports:
+            report.error(
+                "v2 runtime code must not import test support",
+                code="v2.runtime_test_support_import",
+                category="boundary",
+                path=rel(path),
+                details={"imports": sorted(test_imports)},
+            )
+        bad_classes = sorted(
+            node.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ClassDef) and (node.name.startswith(forbidden_prefixes) or node.name.endswith(forbidden_suffixes))
+        )
+        if bad_classes:
+            report.error(
+                "v2 runtime code must not define fake, stub, or skeleton classes",
+                code="v2.runtime_test_double_names",
+                category="boundary",
+                path=rel(path),
+                details={"classes": bad_classes},
+            )
+
+
+
+def check_v2_bundle_phase_schema(report: Report) -> None:
+    root = ROOT / "harness_v2"
+    if not root.exists():
+        return
+    forbidden_tokens = {
+        "RunStrategy",
+        "WorkflowName",
+        "InternalPhaseName",
+        "LifecycleGraph",
+        "PhaseRetryStarted",
+        "origin_phase",
+        "BundlePlan",
+        "BundleOrchestrator",
+        "RunService",
+        "BundleExecutionResult",
+        "PhaseHandlerRegistry",
+        "default_bundle_registry",
+        "default_phase_handler_registry",
+        "_tdd_noop",
+    }
+    for path in python_files(root):
+        source = path.read_text(encoding="utf-8")
+        found = sorted(token for token in forbidden_tokens if token in source)
+        if found:
+            report.error(
+                "v2 runtime must use bundle/phase composition terminology only",
+                code="v2.bundle_phase_schema_legacy_names",
+                category="boundary",
+                path=rel(path),
+                details={"tokens": found},
+            )
+    try:
+        if str(ROOT) not in sys.path:
+            sys.path.insert(0, str(ROOT))
+        from harness_v2.backend.domain import bundle_catalog
+        from harness_v2.backend.domain.lifecycle import BundleName, BundleRef, PhaseRef, bundle_spec
+    except Exception as exc:
+        report.error(
+            "v2 bundle/phase schema must be importable",
+            code="v2.bundle_phase_schema_import",
+            category="boundary",
+            details={"error": str(exc)},
+        )
+        return
+    sdd = bundle_spec(BundleName.SDD_BUNDLE)
+    if not sdd.children or not all(isinstance(child, BundleRef) for child in sdd.children):
+        report.error(
+            "SDD_BUNDLE must compose other bundles, not executable phases directly",
+            code="v2.sdd_bundle_composition",
+            category="boundary",
+            path="harness_v2/backend/domain/lifecycle.py",
+        )
+    for bundle in BundleName:
+        spec = bundle_spec(bundle)
+        if not spec.children:
+            report.error(
+                "v2 bundle specs must declare children",
+                code="v2.empty_bundle_spec",
+                category="boundary",
+                path="harness_v2/backend/domain/lifecycle.py",
+                details={"bundle": bundle.value},
+            )
+        for child in spec.children:
+            if not isinstance(child, (BundleRef, PhaseRef)):
+                report.error(
+                    "v2 bundle children must be BundleRef or PhaseRef",
+                    code="v2.invalid_bundle_child",
+                    category="boundary",
+                    path="harness_v2/backend/domain/lifecycle.py",
+                    details={"bundle": bundle.value, "child_type": type(child).__name__},
+                )
+    phase_values = [step.phase_name.value for step in bundle_catalog.linearize_bundle(BundleName.SDD_BUNDLE)]
+    duplicate_phases = {phase for phase in phase_values if phase_values.count(phase) > 1}
+    if duplicate_phases - {"VALIDATE_JSON"}:
+        report.error(
+            "SDD_BUNDLE executable phases may only repeat for VALIDATE_JSON",
+            code="v2.duplicate_executable_phases",
+            category="boundary",
+            path="harness_v2/backend/domain/lifecycle.py",
+            details={"duplicate_phases": sorted(duplicate_phases)},
+        )
+
 def run_checks() -> Report:
     report = Report()
     check_graph_contract(report)
@@ -858,6 +1030,8 @@ def run_checks() -> Report:
     check_budgets(report)
     check_cli_frontend_boundaries(report)
     check_v2_boundaries(report)
+    check_v2_runtime_test_double_names(report)
+    check_v2_bundle_phase_schema(report)
     check_v2_model_provider_execution(report)
     check_v2_backend_external_effects(report)
     check_v2_worker_resources(report)

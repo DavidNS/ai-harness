@@ -2,93 +2,110 @@ from __future__ import annotations
 
 import unittest
 
-from harness_v2.backend.domain.errors import DomainValidationError, InvalidTransitionError
-from harness_v2.backend.domain.lifecycle import EXPLORER_PHASES, LifecycleGraph, PhaseName, RunStrategy, SDD_PHASES, TerminalState
+from harness_v2.backend.domain import bundle_catalog
+from harness_v2.backend.domain.errors import DomainValidationError
+from harness_v2.backend.domain.lifecycle import (
+    BUNDLE_SPECS,
+    BundleName,
+    BundleRef,
+    ExecutorKind,
+    PhaseName,
+    PhaseRef,
+    PhaseSpec,
+    TerminalState,
+    bundle_spec,
+)
 
 
-class LifecycleGraphTests(unittest.TestCase):
-    def test_sdd_graph_allows_ordered_bundle_transitions(self) -> None:
-        graph = LifecycleGraph.for_strategy(RunStrategy.SDD)
+class BundlePhaseSchemaTests(unittest.TestCase):
+    def test_sdd_bundle_is_declarative_composition_of_bundles(self) -> None:
+        spec = bundle_spec(BundleName.SDD_BUNDLE)
 
-        self.assertEqual(PhaseName.EXPLORE_BUNDLE, graph.start_phase)
-        self.assertEqual(PhaseName.KNOWLEDGE_EXTRACT_EXPLORE, graph.next_after(PhaseName.EXPLORE_BUNDLE))
-        self.assertEqual(PhaseName.PROPOSAL_BUNDLE, graph.next_after(PhaseName.KNOWLEDGE_EXTRACT_EXPLORE))
-        self.assertEqual(PhaseName.SPEC_BUNDLE, graph.next_after(PhaseName.PROPOSAL_BUNDLE))
-        self.assertEqual(PhaseName.DESIGN_BUNDLE, graph.next_after(PhaseName.SPEC_BUNDLE))
-        self.assertEqual(PhaseName.TASKS_BUNDLE, graph.next_after(PhaseName.DESIGN_BUNDLE))
-        self.assertEqual(PhaseName.TDD_BUNDLE, graph.next_after(PhaseName.TASKS_BUNDLE))
-        self.assertEqual(PhaseName.KNOWLEDGE_EXTRACT_TDD, graph.next_after(PhaseName.TDD_BUNDLE))
-        self.assertEqual(TerminalState.COMPLETED, graph.next_after(PhaseName.KNOWLEDGE_EXTRACT_TDD))
-
-
-    def test_explorer_graph_allows_ordered_stage_transitions(self) -> None:
-        graph = LifecycleGraph.for_strategy(RunStrategy.EXPLORER)
-
-        self.assertEqual(PhaseName.EXPLORER_INTAKE, graph.start_phase)
-        self.assertEqual(PhaseName.EXPLORER_DISCOVERY, graph.next_after(PhaseName.EXPLORER_INTAKE))
-        self.assertEqual(PhaseName.EXPLORER_DECISION, graph.next_after(PhaseName.EXPLORER_DISCOVERY))
-        self.assertEqual(PhaseName.EXPLORER_ARTIFACT, graph.next_after(PhaseName.EXPLORER_DECISION))
-        self.assertEqual(PhaseName.EXPLORER_REVIEW, graph.next_after(PhaseName.EXPLORER_ARTIFACT))
-        self.assertEqual(PhaseName.EXPLORER_DISTILL, graph.next_after(PhaseName.EXPLORER_REVIEW))
-        self.assertEqual(TerminalState.COMPLETED, graph.next_after(PhaseName.EXPLORER_DISTILL))
-        graph.validate_completed_prefix(EXPLORER_PHASES[:3])
-
-    def test_bundle_strategies_complete_after_their_single_bundle(self) -> None:
-        cases = (
-            (RunStrategy.EXPLORE_BUNDLE, PhaseName.EXPLORE_BUNDLE),
-            (RunStrategy.KNOWLEDGE_EXTRACT_EXPLORE, PhaseName.KNOWLEDGE_EXTRACT_EXPLORE),
-            (RunStrategy.PROPOSAL_BUNDLE, PhaseName.PROPOSAL_BUNDLE),
-            (RunStrategy.SPEC_BUNDLE, PhaseName.SPEC_BUNDLE),
-            (RunStrategy.DESIGN_BUNDLE, PhaseName.DESIGN_BUNDLE),
-            (RunStrategy.TASKS_BUNDLE, PhaseName.TASKS_BUNDLE),
-            (RunStrategy.TDD_BUNDLE, PhaseName.TDD_BUNDLE),
-            (RunStrategy.KNOWLEDGE_EXTRACT_TDD, PhaseName.KNOWLEDGE_EXTRACT_TDD),
+        self.assertTrue(spec.children)
+        self.assertTrue(all(isinstance(child, BundleRef) for child in spec.children))
+        self.assertEqual(
+            (
+                BundleName.EXPLORE_BUNDLE,
+                BundleName.KNOWLEDGE_EXTRACT_EXPLORE,
+                BundleName.PROPOSAL_BUNDLE,
+                BundleName.SPEC_BUNDLE,
+                BundleName.DESIGN_BUNDLE,
+                BundleName.TASKS_BUNDLE,
+                BundleName.TDD_BUNDLE,
+                BundleName.KNOWLEDGE_EXTRACT_TDD,
+            ),
+            tuple(child.name for child in spec.children),
         )
-        for strategy, phase in cases:
-            with self.subTest(strategy=strategy):
-                graph = LifecycleGraph.for_strategy(strategy)
-                self.assertEqual(phase, graph.start_phase)
-                self.assertEqual(TerminalState.COMPLETED, graph.next_after(phase))
 
-    def test_invalid_transitions_fail_closed(self) -> None:
-        graph = LifecycleGraph.for_strategy(RunStrategy.SDD)
+    def test_explore_bundle_is_composed_of_phases(self) -> None:
+        spec = bundle_spec(BundleName.EXPLORE_BUNDLE)
 
-        for source, target in (
-            (PhaseName.EXPLORE_BUNDLE, PhaseName.SPEC_BUNDLE),
-            (PhaseName.DESIGN_BUNDLE, PhaseName.SPEC_BUNDLE),
-            (PhaseName.PROPOSAL_BUNDLE, TerminalState.COMPLETED),
-        ):
-            with self.subTest(source=source, target=target):
-                with self.assertRaises(InvalidTransitionError):
-                    graph.validate_transition(source, target)
+        self.assertTrue(all(isinstance(child, PhaseRef) for child in spec.children))
+        self.assertEqual(
+            (
+                PhaseName.EXPLORE_REQUEST_UNDERSTANDING,
+                PhaseName.EXPLORE_CONTEXT_PACK,
+                PhaseName.EXPLORE_EVIDENCE_DIGEST,
+                PhaseName.EXPLORE_EXPLORATION_MAP,
+                PhaseName.EXPLORE_OUTCOME_SYNTHESIS,
+                PhaseName.EXPLORE_HANDOFF,
+            ),
+            tuple(child.name for child in spec.children),
+        )
 
-        single = LifecycleGraph.for_strategy(RunStrategy.EXPLORE_BUNDLE)
-        for terminal in TerminalState:
-            with self.subTest(terminal=terminal):
-                with self.assertRaises(InvalidTransitionError):
-                    single.validate_transition(PhaseName.PROPOSAL_BUNDLE, terminal)
+    def test_phase_executors_are_ai_workers_or_deterministic_functions(self) -> None:
+        steps = bundle_catalog.linearize_bundle(BundleName.EXPLORE_BUNDLE)
 
-    def test_terminal_transitions_and_unknown_nodes_are_rejected(self) -> None:
-        graph = LifecycleGraph.for_strategy(RunStrategy.SDD)
+        self.assertEqual(
+            (
+                ExecutorKind.AI_WORKER,
+                ExecutorKind.DETERMINISTIC_FUNCTION,
+                ExecutorKind.AI_WORKER,
+                ExecutorKind.DETERMINISTIC_FUNCTION,
+                ExecutorKind.AI_WORKER,
+                ExecutorKind.DETERMINISTIC_FUNCTION,
+            ),
+            tuple(step.phase.executor for step in steps),
+        )
 
-        graph.validate_transition(PhaseName.DESIGN_BUNDLE, TerminalState.FAILED)
-        graph.validate_transition(PhaseName.DESIGN_BUNDLE, TerminalState.CANCELLED)
-        with self.assertRaises(InvalidTransitionError):
-            graph.validate_transition(TerminalState.COMPLETED, PhaseName.EXPLORE_BUNDLE)
+    def test_catalog_flattens_sdd_with_reused_validation_phases(self) -> None:
+        steps = bundle_catalog.linearize_bundle(BundleName.SDD_BUNDLE)
+        phase_names = tuple(step.phase_name for step in steps)
+
+        self.assertEqual(25, len(phase_names))
+        self.assertEqual(3, phase_names.count(PhaseName.VALIDATE_JSON))
+        self.assertEqual(PhaseName.EXPLORE_REQUEST_UNDERSTANDING, phase_names[0])
+        self.assertEqual(PhaseName.KNOWLEDGE_EXTRACT_TDD_PATCH, phase_names[-1])
+        self.assertEqual(BundleName.EXPLORE_BUNDLE, steps[0].bundle_name)
+        self.assertEqual(BundleName.SDD_BUNDLE, steps[0].root_bundle)
+
+    def test_catalog_derives_next_parent_and_completed_bundles(self) -> None:
+        first = bundle_catalog.start_step(BundleName.SDD_BUNDLE)
+        second = bundle_catalog.next_after(BundleName.SDD_BUNDLE, first.phase_name)
+
+        self.assertEqual(BundleName.EXPLORE_BUNDLE, first.bundle_name)
+        self.assertEqual(PhaseName.EXPLORE_CONTEXT_PACK, second.phase_name)
+        self.assertEqual(BundleName.EXPLORE_BUNDLE, bundle_catalog.parent_bundle(BundleName.SDD_BUNDLE, first.phase_name))
+        completed = bundle_catalog.completed_bundles(BundleName.SDD_BUNDLE, tuple(bundle_catalog.phases(BundleName.EXPLORE_BUNDLE)))
+        self.assertIn(BundleName.EXPLORE_BUNDLE, completed)
+        self.assertNotIn(BundleName.PROPOSAL_BUNDLE, completed)
+
+    def test_completed_prefix_must_be_ordered_and_unique(self) -> None:
+        prefix = tuple(bundle_catalog.phases(BundleName.SDD_BUNDLE))[:2]
+        bundle_catalog.validate_completed_prefix(BundleName.SDD_BUNDLE, prefix)
+
         with self.assertRaises(DomainValidationError):
-            graph.validate_transition("UNKNOWN", PhaseName.EXPLORE_BUNDLE)
+            bundle_catalog.validate_completed_prefix(BundleName.SDD_BUNDLE, (PhaseName.PROPOSAL_PURPOSE,))
         with self.assertRaises(DomainValidationError):
-            graph.validate_transition(PhaseName.EXPLORE_BUNDLE, "UNKNOWN")
-        self.assertFalse(graph.can_transition("UNKNOWN", PhaseName.EXPLORE_BUNDLE))
+            bundle_catalog.validate_completed_prefix(BundleName.SDD_BUNDLE, (prefix[0], prefix[0]))
 
-    def test_completed_prefix_must_be_unique_and_ordered(self) -> None:
-        graph = LifecycleGraph.for_strategy(RunStrategy.SDD)
-
-        graph.validate_completed_prefix(SDD_PHASES[:2])
+    def test_specs_require_consistent_phase_metadata(self) -> None:
         with self.assertRaises(DomainValidationError):
-            graph.validate_completed_prefix((PhaseName.PROPOSAL_BUNDLE,))
+            PhaseSpec(PhaseName.SPEC_DRAFT, ExecutorKind.AI_WORKER)
         with self.assertRaises(DomainValidationError):
-            graph.validate_completed_prefix((PhaseName.EXPLORE_BUNDLE, PhaseName.EXPLORE_BUNDLE))
+            PhaseSpec(PhaseName.SPEC_HANDOFF, ExecutorKind.DETERMINISTIC_FUNCTION, "handoff")
+        self.assertEqual(TerminalState.COMPLETED, TerminalState("COMPLETED"))
+        self.assertEqual(set(BundleName), set(BUNDLE_SPECS))
 
 
 if __name__ == "__main__":

@@ -5,12 +5,12 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from harness_v2.adapters.ci.fake import FakeCIAdapter
+from test_v2.support.release_fakes import FakeCIAdapter
 from harness_v2.adapters.ci.local import LocalCIAdapter
-from harness_v2.adapters.git.fake import FakeGitAdapter
+from test_v2.support.release_fakes import FakeGitAdapter
 from harness_v2.adapters.storage import InMemoryArtifactStore
 from harness_v2.backend.application.release_context import ReleaseContextService, ReleaseRuntimeConfig
-from harness_v2.backend.domain.lifecycle import PhaseName, RunStatus, RunStrategy
+from harness_v2.backend.domain.lifecycle import BundleName, PhaseName, RunStatus
 from harness_v2.backend.domain.runs import RunRecord
 from harness_v2.backend.ports.ci import CiInstallRequest, CiInstallResult, CiSignalRequest
 from harness_v2.backend.ports.git import GitRunRequest, GitRunResult
@@ -42,7 +42,7 @@ class ReleasePortTests(unittest.TestCase):
             ci,
             ReleaseRuntimeConfig(Path.cwd(), branch_mode="current", ci_mode="baseline"),
         )
-        run = RunRecord("run-1", "Fix tests", RunStatus.RUNNING, RunStrategy.EXPLORE_BUNDLE, current_phase=PhaseName.EXPLORE_BUNDLE)
+        run = RunRecord("run-1", "Fix tests", RunStatus.RUNNING, root_bundle=BundleName.EXPLORE_BUNDLE, current_phase=PhaseName.EXPLORE_REQUEST_UNDERSTANDING)
 
         service.ensure_initial_context(run)
         service.ensure_initial_context(run)
