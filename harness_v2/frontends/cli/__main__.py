@@ -13,6 +13,8 @@ from harness_v2.backend.application.contracts import (
     GetAvailableActions,
     GetAvailableActionsResult,
     GetRun,
+    InstallCiTemplates,
+    InstallCiTemplatesResult,
     InvalidRunStateError,
     GetRunResult,
     GetRunState,
@@ -50,6 +52,18 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="allow TDD workers and validation commands to mutate the configured working directory",
     )
+    parser.add_argument(
+        "--branch",
+        choices=("off", "current", "create", "create-from-main"),
+        default="current",
+        help="git branch behavior for release context, default: current",
+    )
+    parser.add_argument(
+        "--github-ci-mode",
+        choices=("off", "baseline", "branch"),
+        default="baseline",
+        help="CI evidence mode for release context, default: baseline",
+    )
     subcommands = parser.add_subparsers(dest="command", required=True)
 
     start = subcommands.add_parser("start", help="start a simulated v2 run")
@@ -79,6 +93,10 @@ def _parser() -> argparse.ArgumentParser:
 
     actions = subcommands.add_parser("actions", help="show available run actions")
     actions.add_argument("run_id")
+
+    install = subcommands.add_parser("install-ci", help="install managed CI templates")
+    install.add_argument("target", nargs="?", default="github", choices=("github", "gitlab", "both"))
+    install.add_argument("--force", action="store_true", help="replace an existing unmanaged CI file")
 
     subcommands.add_parser("list", help="list runs")
     return parser
@@ -112,6 +130,8 @@ def _render_events(result: CommandResult) -> None:
             suffix = f" issue={event.issue_id} action={event.action}{target}"
         elif type(event).__name__ == "PhaseRetryStarted":
             suffix = f" phase={event.phase}"
+        elif type(event).__name__ == "KnowledgePatchCreated":
+            suffix = f" patch={event.patch_id} origin={event.origin_phase} path={event.path}"
         else:
             suffix = ""
         print(f"Event: {type(event).__name__}{suffix}")
@@ -120,6 +140,16 @@ def _render_events(result: CommandResult) -> None:
 def _render_command_result(result: CommandResult) -> None:
     _render_run(result.run)
     _render_events(result)
+
+
+def _render_install_result(result: InstallCiTemplatesResult) -> None:
+    print(f"CI target: {result.target}")
+    print(f"Installed: {', '.join(result.installed) if result.installed else 'none'}")
+    print(f"Skipped: {', '.join(result.skipped) if result.skipped else 'none'}")
+    for warning in result.warnings:
+        print(f"Warning: {warning}")
+    for event in result.events:
+        print(f"Event: {type(event).__name__}")
 
 
 def _render_get(result: GetRunResult) -> None:
@@ -156,8 +186,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         state_root=args.state_root,
         working_directory=args.working_directory,
         allow_repository_mutation=args.allow_repository_mutation,
+        branch_mode=args.branch,
+        github_ci_mode=args.github_ci_mode,
     )
     try:
+        if args.command == "install-ci":
+            _render_install_result(host.execute(InstallCiTemplates(target=args.target, force=args.force)))
+            return 0
         if args.command == "start":
             _render_command_result(host.execute(StartRun(request=" ".join(args.request), strategy=args.strategy)))
             return 0

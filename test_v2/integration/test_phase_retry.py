@@ -44,7 +44,7 @@ def failed_design_run() -> RunRecord:
         "Fix tests",
         RunStatus.FAILED,
         RunStrategy.SDD,
-        completed_phases=(PhaseName.EXPLORE_BUNDLE, PhaseName.PROPOSAL_BUNDLE, PhaseName.SPEC_BUNDLE),
+        completed_phases=(PhaseName.EXPLORE_BUNDLE, PhaseName.KNOWLEDGE_EXTRACT_EXPLORE, PhaseName.PROPOSAL_BUNDLE, PhaseName.SPEC_BUNDLE),
         errors=(ErrorRecord("DESIGN_BUNDLE_FAILED", "bad design", phase="DESIGN_BUNDLE", timestamp=TIMESTAMP),),
     )
 
@@ -65,7 +65,7 @@ class PhaseRetryIntegrationTests(unittest.TestCase):
 
         self.assertEqual("RUNNING", result.run.status)
         self.assertEqual("DESIGN_BUNDLE", result.run.current_phase)
-        self.assertEqual(("EXPLORE_BUNDLE", "PROPOSAL_BUNDLE", "SPEC_BUNDLE"), result.run.completed_phases)
+        self.assertEqual(("EXPLORE_BUNDLE", "KNOWLEDGE_EXTRACT_EXPLORE", "PROPOSAL_BUNDLE", "SPEC_BUNDLE"), result.run.completed_phases)
         self.assertEqual(["PhaseRetryStarted", "PhaseStarted"], [type(event).__name__ for event in result.events])
         persisted = state.get("run-1")
         self.assertEqual(RunStatus.RUNNING, persisted.status)

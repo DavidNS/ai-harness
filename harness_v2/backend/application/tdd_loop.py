@@ -28,7 +28,7 @@ class TddResultReporter:
                 "schema_version": 1,
                 "bundle": "tdd",
                 "artifacts": ["tasks.json", "published/tdd-results.json"],
-                "next_bundle": None,
+                "next_bundle": "KNOWLEDGE_EXTRACT_TDD",
                 "completed_tasks": [task.task_id for task in summaries if task.status is TaskStatus.COMPLETED],
             },
         )

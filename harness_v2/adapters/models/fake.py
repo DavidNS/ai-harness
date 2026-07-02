@@ -211,6 +211,36 @@ def _scripted_output(prompt: str) -> str | None:
             "## Recommendation\nUse the v2 bundle orchestrator for Explorer phases.\n"
         )
 
+    if task_id == "knowledge_synthesis":
+        source_phase = str(inputs.get("source_phase", "EXPLORE_BUNDLE")).lower()
+        source_artifacts = inputs.get("source_artifacts") if isinstance(inputs.get("source_artifacts"), dict) else {}
+        return _json({
+            "schema_version": 1,
+            "phase": "learning",
+            "proposal_manifest": {
+                "schema_version": 1,
+                "proposal_id": f"proposal.v2.{source_phase}.001",
+                "summary": f"Candidate knowledge extracted from {source_phase}.",
+                "source_artifacts": list(source_artifacts.keys()),
+                "claims_file": "proposed_claims.jsonl",
+            },
+            "proposed_claims": [{
+                "id": f"claim.v2.{source_phase}.001",
+                "domain": "harness",
+                "subjects": ["V2KnowledgeLifecycle"],
+                "files": ["harness_v2/backend/domain/lifecycle.py"],
+                "symbols": [],
+                "claim_type": "behavior",
+                "text": f"The v2 lifecycle produced candidate knowledge after {source_phase}.",
+                "status": "active",
+                "evidence": [{"type": "code", "file": "harness_v2/backend/domain/lifecycle.py"}],
+                "valid_from": None,
+                "valid_until": None,
+                "last_verified": None,
+            }],
+            "proposed_relations": [],
+        })
+
     if task_id == "purpose":
         return _json({
             "schema_version": 1,

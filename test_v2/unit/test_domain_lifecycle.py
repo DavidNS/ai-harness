@@ -11,12 +11,14 @@ class LifecycleGraphTests(unittest.TestCase):
         graph = LifecycleGraph.for_strategy(RunStrategy.SDD)
 
         self.assertEqual(PhaseName.EXPLORE_BUNDLE, graph.start_phase)
-        self.assertEqual(PhaseName.PROPOSAL_BUNDLE, graph.next_after(PhaseName.EXPLORE_BUNDLE))
+        self.assertEqual(PhaseName.KNOWLEDGE_EXTRACT_EXPLORE, graph.next_after(PhaseName.EXPLORE_BUNDLE))
+        self.assertEqual(PhaseName.PROPOSAL_BUNDLE, graph.next_after(PhaseName.KNOWLEDGE_EXTRACT_EXPLORE))
         self.assertEqual(PhaseName.SPEC_BUNDLE, graph.next_after(PhaseName.PROPOSAL_BUNDLE))
         self.assertEqual(PhaseName.DESIGN_BUNDLE, graph.next_after(PhaseName.SPEC_BUNDLE))
         self.assertEqual(PhaseName.TASKS_BUNDLE, graph.next_after(PhaseName.DESIGN_BUNDLE))
         self.assertEqual(PhaseName.TDD_BUNDLE, graph.next_after(PhaseName.TASKS_BUNDLE))
-        self.assertEqual(TerminalState.COMPLETED, graph.next_after(PhaseName.TDD_BUNDLE))
+        self.assertEqual(PhaseName.KNOWLEDGE_EXTRACT_TDD, graph.next_after(PhaseName.TDD_BUNDLE))
+        self.assertEqual(TerminalState.COMPLETED, graph.next_after(PhaseName.KNOWLEDGE_EXTRACT_TDD))
 
 
     def test_explorer_graph_allows_ordered_stage_transitions(self) -> None:
@@ -34,11 +36,13 @@ class LifecycleGraphTests(unittest.TestCase):
     def test_bundle_strategies_complete_after_their_single_bundle(self) -> None:
         cases = (
             (RunStrategy.EXPLORE_BUNDLE, PhaseName.EXPLORE_BUNDLE),
+            (RunStrategy.KNOWLEDGE_EXTRACT_EXPLORE, PhaseName.KNOWLEDGE_EXTRACT_EXPLORE),
             (RunStrategy.PROPOSAL_BUNDLE, PhaseName.PROPOSAL_BUNDLE),
             (RunStrategy.SPEC_BUNDLE, PhaseName.SPEC_BUNDLE),
             (RunStrategy.DESIGN_BUNDLE, PhaseName.DESIGN_BUNDLE),
             (RunStrategy.TASKS_BUNDLE, PhaseName.TASKS_BUNDLE),
             (RunStrategy.TDD_BUNDLE, PhaseName.TDD_BUNDLE),
+            (RunStrategy.KNOWLEDGE_EXTRACT_TDD, PhaseName.KNOWLEDGE_EXTRACT_TDD),
         )
         for strategy, phase in cases:
             with self.subTest(strategy=strategy):

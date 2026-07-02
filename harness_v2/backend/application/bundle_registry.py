@@ -7,6 +7,7 @@ from harness_v2.backend.application.bundles import (
     DesignBundleDefinition,
     ExploreBundleDefinition,
     explorer_bundle_definitions,
+    knowledge_bundle_definitions,
     ProposalBundleDefinition,
     SpecBundleDefinition,
     TasksBundleDefinition,
@@ -18,11 +19,13 @@ def default_bundle_registry(tdd_loop: object | None = None) -> BundleRegistry:
     registry = BundleRegistry(
         (
             ExploreBundleDefinition(),
+            knowledge_bundle_definitions()[0],
             ProposalBundleDefinition(),
             SpecBundleDefinition(),
             DesignBundleDefinition(),
             TasksBundleDefinition(),
             TddBundleDefinition(tdd_loop=tdd_loop),
+            knowledge_bundle_definitions()[1],
             *explorer_bundle_definitions(),
         )
     )

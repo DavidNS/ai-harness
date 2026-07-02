@@ -32,6 +32,8 @@ class BundleRegistryTests(unittest.TestCase):
 
         self.assertIn("published/explore-handoff.json", rules[PhaseName.EXPLORE_BUNDLE].artifacts)
         self.assertIn("explore/", rules[PhaseName.EXPLORE_BUNDLE].prefixes)
+        self.assertIn("workers/KNOWLEDGE_EXTRACT_EXPLORE/", rules[PhaseName.KNOWLEDGE_EXTRACT_EXPLORE].prefixes)
+        self.assertEqual((), rules[PhaseName.KNOWLEDGE_EXTRACT_EXPLORE].artifacts)
         self.assertIn("design.md", rules[PhaseName.DESIGN_BUNDLE].artifacts)
         self.assertIn("tasks.json", rules[PhaseName.TASKS_BUNDLE].artifacts)
 

@@ -79,10 +79,10 @@ class RunDomainTests(unittest.TestCase):
             "run-1",
             "Fix tests",
             RunStatus.RUNNING,
-            current_phase=PhaseName.PROPOSAL_BUNDLE,
+            current_phase=PhaseName.KNOWLEDGE_EXTRACT_EXPLORE,
             completed_phases=(PhaseName.EXPLORE_BUNDLE,),
         )
-        self.assertEqual(PhaseName.PROPOSAL_BUNDLE, valid.current_phase)
+        self.assertEqual(PhaseName.KNOWLEDGE_EXTRACT_EXPLORE, valid.current_phase)
 
         invalid_cases = (
             lambda: RunRecord(
@@ -128,7 +128,7 @@ class RunDomainTests(unittest.TestCase):
             request="Fix tests",
             status=RunStatus.WAITING_FOR_USER,
             current_phase=PhaseName.PROPOSAL_BUNDLE,
-            completed_phases=(PhaseName.EXPLORE_BUNDLE,),
+            completed_phases=(PhaseName.EXPLORE_BUNDLE, PhaseName.KNOWLEDGE_EXTRACT_EXPLORE),
             pending_decision=proposal_decision,
         )
         self.assertEqual(proposal_decision, proposal_waiting.pending_decision)
@@ -146,6 +146,7 @@ class RunDomainTests(unittest.TestCase):
                 request="Fix tests",
                 status=RunStatus.WAITING_FOR_USER,
                 current_phase=PhaseName.PROPOSAL_BUNDLE,
+                completed_phases=(PhaseName.EXPLORE_BUNDLE, PhaseName.KNOWLEDGE_EXTRACT_EXPLORE),
                 pending_decision=decision,
             )
         with self.assertRaises(DomainValidationError):

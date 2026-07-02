@@ -22,6 +22,7 @@ from harness_v2.backend.application.artifact_invalidation import ArtifactInvalid
 from harness_v2.backend.application.decision_service import DecisionRequest, RequestUserDecisionService, run_to_view
 from harness_v2.backend.application.escalation_service import EscalationPolicyService
 from harness_v2.backend.application.worker_service import WorkerTaskService
+from harness_v2.backend.application.release_context import ReleaseContextPort
 from harness_v2.backend.domain.errors import ErrorRecord
 from harness_v2.backend.domain.escalation import EscalationIssue
 from harness_v2.backend.domain.lifecycle import LifecycleGraph, PhaseName, RunStatus, SDD_PHASES, TerminalState
@@ -29,6 +30,7 @@ from harness_v2.backend.domain.runs import RunRecord
 from harness_v2.backend.domain.tasks import TaskSummary
 from harness_v2.backend.ports.artifact_store import ArtifactStorePort
 from harness_v2.backend.ports.clock import ClockPort
+from harness_v2.backend.ports.knowledge_patch_store import KnowledgePatchStorePort
 from harness_v2.backend.ports.state_store import StateStorePort
 
 
@@ -38,6 +40,8 @@ class BundleContext:
     worker_service: WorkerTaskService
     artifacts: BundleArtifactGateway
     runtime: BundleRuntimeConfig
+    clock: ClockPort
+    knowledge_patches: KnowledgePatchStorePort | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,10 +49,12 @@ class BundleExecutionResult:
     decision_request: DecisionRequest | None = None
     escalation_issue: EscalationIssue | None = None
     tasks: tuple[TaskSummary, ...] | None = None
+    events: tuple[object, ...] = ()
 
     def __post_init__(self) -> None:
         if self.tasks is not None:
             object.__setattr__(self, "tasks", tuple(self.tasks))
+        object.__setattr__(self, "events", tuple(self.events))
 
 
 class BundleDefinition(Protocol):
@@ -104,6 +110,8 @@ class BundleOrchestrator:
         clock: ClockPort,
         registry: BundleRegistry,
         runtime: BundleRuntimeConfig,
+        knowledge_patches: KnowledgePatchStorePort | None = None,
+        release_context: ReleaseContextPort | None = None,
     ) -> None:
         self._state_store = state_store
         self._artifact_store = artifact_store
@@ -111,6 +119,8 @@ class BundleOrchestrator:
         self._clock = clock
         self._registry = registry
         self._runtime = runtime
+        self._knowledge_patches = knowledge_patches
+        self._release_context = release_context
         self._decision_service = RequestUserDecisionService(state_store, clock)
         self._escalation_policy = EscalationPolicyService(state_store, artifact_store, clock, registry.invalidation_rules())
         self._artifact_gateway = BundleArtifactGateway(artifact_store, worker_service, self._runtime)
@@ -120,6 +130,8 @@ class BundleOrchestrator:
         if run.status is not RunStatus.RUNNING or run.current_phase is None:
             return None
         try:
+            if run.current_phase is PhaseName.EXPLORE_BUNDLE and self._release_context is not None:
+                self._release_context.ensure_initial_context(run)
             bundle = self._registry.get(run.current_phase)
             result = bundle.execute(
                 BundleContext(
@@ -127,6 +139,8 @@ class BundleOrchestrator:
                     worker_service=self._worker_service,
                     artifacts=self._artifact_gateway,
                     runtime=self._runtime,
+                    clock=self._clock,
+                    knowledge_patches=self._knowledge_patches,
                 )
             )
             if result.tasks is not None:
@@ -135,18 +149,18 @@ class BundleOrchestrator:
                 return self._decision_service.execute(result.decision_request)
             if result.escalation_issue is not None:
                 return self._escalation_policy.execute(run.run_id, result.escalation_issue)
-            return self._complete_phase(run.run_id, bundle.phase)
+            return self._complete_phase(run.run_id, bundle.phase, extra_events=result.events)
         except Exception as exc:
             return self._fail(run_id, run.current_phase, exc)
 
-    def _complete_phase(self, run_id: str, phase: PhaseName) -> CommandResult:
+    def _complete_phase(self, run_id: str, phase: PhaseName, *, extra_events: tuple[object, ...] = ()) -> CommandResult:
         run = self._state_store.get(run_id)
         if run.status is not RunStatus.RUNNING or run.current_phase != phase:
             raise InvalidRunStateError(f"run {run.run_id} is not running {phase.value}")
         graph = LifecycleGraph.for_strategy(run.strategy)
         next_node = graph.next_after(phase)
         completed = (*run.completed_phases, phase)
-        events: list[object] = [PhaseCompleted(run.run_id, phase.value)]
+        events: list[object] = [*extra_events, PhaseCompleted(run.run_id, phase.value)]
         if next_node is TerminalState.COMPLETED:
             updated = run.replace(status=RunStatus.COMPLETED, current_phase=None, completed_phases=completed)
             events.append(RunCompleted(run.run_id))

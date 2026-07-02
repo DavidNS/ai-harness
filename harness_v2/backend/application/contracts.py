@@ -14,9 +14,10 @@ class InvalidRunStateError(RuntimeError):
     """Raised when a command is not valid for the run's current state."""
 
 
-PHASE_VALUES = frozenset(("EXPLORE_BUNDLE", "PROPOSAL_BUNDLE", "SPEC_BUNDLE", "DESIGN_BUNDLE", "TASKS_BUNDLE", "TDD_BUNDLE", "EXPLORER_INTAKE", "EXPLORER_DISCOVERY", "EXPLORER_DECISION", "EXPLORER_ARTIFACT", "EXPLORER_REVIEW", "EXPLORER_DISTILL"))
+PHASE_VALUES = frozenset(("EXPLORE_BUNDLE", "KNOWLEDGE_EXTRACT_EXPLORE", "PROPOSAL_BUNDLE", "SPEC_BUNDLE", "DESIGN_BUNDLE", "TASKS_BUNDLE", "TDD_BUNDLE", "KNOWLEDGE_EXTRACT_TDD", "EXPLORER_INTAKE", "EXPLORER_DISCOVERY", "EXPLORER_DECISION", "EXPLORER_ARTIFACT", "EXPLORER_REVIEW", "EXPLORER_DISTILL"))
 RUN_STATUS_VALUES = frozenset(("PENDING", "RUNNING", "WAITING_FOR_USER", "COMPLETED", "FAILED", "CANCELLED"))
-RUN_STRATEGY_VALUES = frozenset(("SDD", "EXPLORER", "EXPLORE_BUNDLE", "PROPOSAL_BUNDLE", "SPEC_BUNDLE", "DESIGN_BUNDLE", "TASKS_BUNDLE", "TDD_BUNDLE"))
+RUN_STRATEGY_VALUES = frozenset(("SDD", "KNOWLEDGE_EXTRACT_EXPLORE", "KNOWLEDGE_EXTRACT_TDD", "EXPLORER", "EXPLORE_BUNDLE", "PROPOSAL_BUNDLE", "SPEC_BUNDLE", "DESIGN_BUNDLE", "TASKS_BUNDLE", "TDD_BUNDLE"))
+CI_TARGET_VALUES = frozenset(("github", "gitlab", "both"))
 
 
 def _require_text(value: str, field: str) -> str:
@@ -50,6 +51,13 @@ def _strategy_text(value: str, field: str = "strategy") -> str:
     normalized = _require_text(value, field)
     if normalized not in RUN_STRATEGY_VALUES:
         raise ValueError(f"{field} is not a known run strategy")
+    return normalized
+
+
+def _ci_target_text(value: str, field: str = "target") -> str:
+    normalized = _require_text(value, field)
+    if normalized not in CI_TARGET_VALUES:
+        raise ValueError(f"{field} must be github, gitlab, or both")
     return normalized
 
 
@@ -104,6 +112,17 @@ class CancelRun:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "run_id", _require_text(self.run_id, "run_id"))
+
+
+@dataclass(frozen=True, slots=True)
+class InstallCiTemplates:
+    target: str = "github"
+    force: bool = False
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "target", _ci_target_text(self.target))
+        if not isinstance(self.force, bool):
+            raise TypeError("force must be bool")
 
 
 @dataclass(frozen=True, slots=True)
@@ -187,6 +206,20 @@ class PhaseFailed:
         object.__setattr__(self, "run_id", _require_text(self.run_id, "run_id"))
         object.__setattr__(self, "phase", _phase_text(self.phase))
         object.__setattr__(self, "error", _require_text(self.error, "error"))
+
+
+@dataclass(frozen=True, slots=True)
+class KnowledgePatchCreated:
+    run_id: str
+    patch_id: str
+    origin_phase: str
+    path: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "run_id", _require_text(self.run_id, "run_id"))
+        object.__setattr__(self, "patch_id", _require_text(self.patch_id, "patch_id"))
+        object.__setattr__(self, "origin_phase", _phase_text(self.origin_phase, "origin_phase"))
+        object.__setattr__(self, "path", _require_text(self.path, "path"))
 
 
 @dataclass(frozen=True, slots=True)
@@ -290,13 +323,44 @@ class RunCancelled:
         object.__setattr__(self, "run_id", _require_text(self.run_id, "run_id"))
 
 
-Command = StartRun | ResumeRun | RetryPhase | CancelRun | SubmitUserDecision
+@dataclass(frozen=True, slots=True)
+class CiTemplatesInstalled:
+    target: str
+    installed: tuple[str, ...] = ()
+    skipped: tuple[str, ...] = ()
+    warnings: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "target", _ci_target_text(self.target))
+        object.__setattr__(self, "installed", _text_tuple(self.installed, "installed"))
+        object.__setattr__(self, "skipped", _text_tuple(self.skipped, "skipped"))
+        object.__setattr__(self, "warnings", _text_tuple(self.warnings, "warnings"))
+
+
+@dataclass(frozen=True, slots=True)
+class InstallCiTemplatesResult:
+    target: str
+    installed: tuple[str, ...] = ()
+    skipped: tuple[str, ...] = ()
+    warnings: tuple[str, ...] = ()
+    events: tuple[object, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "target", _ci_target_text(self.target))
+        object.__setattr__(self, "installed", _text_tuple(self.installed, "installed"))
+        object.__setattr__(self, "skipped", _text_tuple(self.skipped, "skipped"))
+        object.__setattr__(self, "warnings", _text_tuple(self.warnings, "warnings"))
+        object.__setattr__(self, "events", _typed_tuple(self.events, CiTemplatesInstalled, "events"))
+
+
+Command = StartRun | ResumeRun | RetryPhase | CancelRun | InstallCiTemplates | SubmitUserDecision
 Query = GetRun | ListRuns | GetRunState | GetAvailableActions
 Event = (
     RunStarted
     | PhaseStarted
     | PhaseCompleted
     | PhaseFailed
+    | KnowledgePatchCreated
     | EscalationRaised
     | EscalationResolved
     | PhaseRetryStarted
@@ -305,6 +369,7 @@ Event = (
     | RunResumed
     | RunCompleted
     | RunCancelled
+    | CiTemplatesInstalled
 )
 
 
@@ -462,4 +527,5 @@ class GetAvailableActionsResult:
         object.__setattr__(self, "actions", _text_tuple(self.actions, "actions"))
 
 
+CommandExecutionResult = CommandResult | InstallCiTemplatesResult
 QueryResult = GetRunResult | ListRunsResult | GetRunStateResult | GetAvailableActionsResult

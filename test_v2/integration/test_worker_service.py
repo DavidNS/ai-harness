@@ -22,7 +22,7 @@ from harness_v2.backend.ports.worker_resources import WorkerResourceSpec
 
 
 def running_run(run_id: str = "run-1", phase: PhaseName = PhaseName.EXPLORE_BUNDLE) -> RunRecord:
-    completed = (PhaseName.EXPLORE_BUNDLE,) if phase == PhaseName.PROPOSAL_BUNDLE else ()
+    completed = (PhaseName.EXPLORE_BUNDLE, PhaseName.KNOWLEDGE_EXTRACT_EXPLORE) if phase == PhaseName.PROPOSAL_BUNDLE else ()
     return RunRecord(run_id, "Fix tests", RunStatus.RUNNING, RunStrategy.SDD, current_phase=phase, completed_phases=completed)
 
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from harness_v2.backend.application.contracts import Command, CommandResult, Query, QueryResult
+from harness_v2.backend.application.contracts import Command, CommandExecutionResult, Query, QueryResult
 from harness_v2.backend.application.run_service import RunService
 from harness_v2.backend.ports.event_sink import EventSinkPort
 from harness_v2.backend.ports.state_store import StateStorePort
@@ -22,6 +22,8 @@ class InProcessHost:
         event_sink: EventSinkPort | None = None,
         working_directory: Path | str | None = None,
         allow_repository_mutation: bool = False,
+        branch_mode: str = "current",
+        github_ci_mode: str = "baseline",
     ) -> None:
         configured = sum(value is not None for value in (service, state_store, state_root))
         if configured > 1:
@@ -29,8 +31,8 @@ class InProcessHost:
         if service is not None:
             if event_sink is not None:
                 raise ValueError("event_sink cannot be combined with an injected service")
-            if working_directory is not None or allow_repository_mutation:
-                raise ValueError("runtime TDD options cannot be combined with an injected service")
+            if working_directory is not None or allow_repository_mutation or branch_mode != "current" or github_ci_mode != "baseline":
+                raise ValueError("runtime options cannot be combined with an injected service")
             self._service = service
         elif state_root is not None:
             self._service = build_file_backed_service(
@@ -38,6 +40,8 @@ class InProcessHost:
                 event_sink=event_sink,
                 working_directory=working_directory,
                 allow_repository_mutation=allow_repository_mutation,
+                branch_mode=branch_mode,
+                github_ci_mode=github_ci_mode,
             )
         else:
             self._service = build_memory_service(
@@ -45,9 +49,11 @@ class InProcessHost:
                 event_sink=event_sink,
                 working_directory=working_directory,
                 allow_repository_mutation=allow_repository_mutation,
+                branch_mode=branch_mode,
+                github_ci_mode=github_ci_mode,
             )
 
-    def execute(self, command: Command) -> CommandResult:
+    def execute(self, command: Command) -> CommandExecutionResult:
         return self._service.execute(command)
 
     def query(self, query: Query) -> QueryResult:

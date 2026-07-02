@@ -31,8 +31,10 @@ class CliIntegrationTests(unittest.TestCase):
     def test_cli_module_starts_pending_run_then_resume_executes_explore_and_advances_to_proposal(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             state_root = Path(temp) / "runtime"
+            workdir = Path(temp) / "work"
+            workdir.mkdir()
 
-            started = self.run_cli(state_root, "start", "Fix", "tests")
+            started = self.run_cli(state_root, "--working-directory", str(workdir), "start", "Fix", "tests")
             self.assertEqual(0, started.returncode, started.stderr)
             self.assertIn("Run: ", started.stdout)
             self.assertIn("Status: PENDING", started.stdout)
@@ -50,14 +52,21 @@ class CliIntegrationTests(unittest.TestCase):
             self.assertIn(f"Run: {run_id}", fetched.stdout)
             self.assertIn("Request: Fix tests", fetched.stdout)
 
-            resumed = self.run_cli(state_root, "resume", run_id)
+            resumed = self.run_cli(state_root, "--working-directory", str(workdir), "resume", run_id)
             self.assertEqual(0, resumed.returncode, resumed.stderr)
             self.assertIn("Status: RUNNING", resumed.stdout)
-            self.assertIn("Current phase: PROPOSAL_BUNDLE", resumed.stdout)
+            self.assertIn("Current phase: KNOWLEDGE_EXTRACT_EXPLORE", resumed.stdout)
             self.assertIn("Completed phases: EXPLORE_BUNDLE", resumed.stdout)
             self.assertIn("Event: RunResumed", resumed.stdout)
             self.assertIn("Event: PhaseStarted phase=EXPLORE_BUNDLE", resumed.stdout)
             self.assertIn("Event: PhaseCompleted phase=EXPLORE_BUNDLE", resumed.stdout)
+            self.assertIn("Event: PhaseStarted phase=KNOWLEDGE_EXTRACT_EXPLORE", resumed.stdout)
+
+            resumed = self.run_cli(state_root, "--working-directory", str(workdir), "resume", run_id)
+            self.assertEqual(0, resumed.returncode, resumed.stderr)
+            self.assertIn("Current phase: PROPOSAL_BUNDLE", resumed.stdout)
+            self.assertIn("Completed phases: EXPLORE_BUNDLE, KNOWLEDGE_EXTRACT_EXPLORE", resumed.stdout)
+            self.assertIn("Event: KnowledgePatchCreated", resumed.stdout)
             self.assertIn("Event: PhaseStarted phase=PROPOSAL_BUNDLE", resumed.stdout)
 
             state = self.run_cli(state_root, "state", run_id)
@@ -74,24 +83,27 @@ class CliIntegrationTests(unittest.TestCase):
     def test_cli_sdd_completes_with_successive_resumes(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             state_root = Path(temp) / "runtime"
-            started = self.run_cli(state_root, "start", "Fix", "tests")
+            workdir = Path(temp) / "work"
+            workdir.mkdir()
+            started = self.run_cli(state_root, "--working-directory", str(workdir), "start", "Fix", "tests")
             self.assertEqual(0, started.returncode, started.stderr)
             run_id = next(line.split(": ", 1)[1] for line in started.stdout.splitlines() if line.startswith("Run: "))
 
             outputs = []
-            for _ in range(6):
-                resumed = self.run_cli(state_root, "resume", run_id)
+            for _ in range(7):
+                resumed = self.run_cli(state_root, "--working-directory", str(workdir), "resume", run_id)
                 self.assertEqual(0, resumed.returncode, resumed.stderr)
                 outputs.append(resumed.stdout)
 
-            self.assertIn("Current phase: PROPOSAL_BUNDLE", outputs[0])
-            self.assertIn("Current phase: SPEC_BUNDLE", outputs[1])
-            self.assertIn("Current phase: DESIGN_BUNDLE", outputs[2])
-            self.assertIn("Current phase: TASKS_BUNDLE", outputs[3])
-            self.assertIn("Current phase: TDD_BUNDLE", outputs[4])
-            self.assertIn("Status: FAILED", outputs[5])
-            self.assertIn("Event: EscalationRaised issue=tdd-loop-blocked phase=TDD_BUNDLE category=VALIDATION_BLOCKED", outputs[5])
-            self.assertIn("Event: PhaseFailed phase=TDD_BUNDLE", outputs[5])
+            self.assertIn("Current phase: KNOWLEDGE_EXTRACT_EXPLORE", outputs[0])
+            self.assertIn("Current phase: PROPOSAL_BUNDLE", outputs[1])
+            self.assertIn("Current phase: SPEC_BUNDLE", outputs[2])
+            self.assertIn("Current phase: DESIGN_BUNDLE", outputs[3])
+            self.assertIn("Current phase: TASKS_BUNDLE", outputs[4])
+            self.assertIn("Current phase: TDD_BUNDLE", outputs[5])
+            self.assertIn("Status: FAILED", outputs[6])
+            self.assertIn("Event: EscalationRaised issue=tdd-loop-blocked phase=TDD_BUNDLE category=VALIDATION_BLOCKED", outputs[6])
+            self.assertIn("Event: PhaseFailed phase=TDD_BUNDLE", outputs[6])
 
     def test_cli_tdd_with_mutation_opt_in_uses_configured_working_directory(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -111,7 +123,7 @@ class CliIntegrationTests(unittest.TestCase):
             run_id = next(line.split(": ", 1)[1] for line in started.stdout.splitlines() if line.startswith("Run: "))
 
             outputs = []
-            for _ in range(6):
+            for _ in range(7):
                 resumed = self.run_cli(
                     state_root,
                     "--working-directory",
@@ -123,9 +135,9 @@ class CliIntegrationTests(unittest.TestCase):
                 self.assertEqual(0, resumed.returncode, resumed.stderr)
                 outputs.append(resumed.stdout)
 
-            self.assertIn("Current phase: TDD_BUNDLE", outputs[4])
-            self.assertIn("Status: FAILED", outputs[5])
-            self.assertIn("category=IMPLEMENTATION_BLOCKED", outputs[5])
+            self.assertIn("Current phase: TDD_BUNDLE", outputs[5])
+            self.assertIn("Status: FAILED", outputs[6])
+            self.assertIn("category=IMPLEMENTATION_BLOCKED", outputs[6])
             tdd_results = json.loads(FileArtifactStore(state_root).read(run_id, "published/tdd-results.json"))
             self.assertNotIn("mutation-enabled", tdd_results["blocked_reason"])
 
@@ -220,7 +232,7 @@ class CliIntegrationTests(unittest.TestCase):
                     status=RunStatus.WAITING_FOR_USER,
                     strategy=RunStrategy.SDD,
                     current_phase=PhaseName.DESIGN_BUNDLE,
-                    completed_phases=(PhaseName.EXPLORE_BUNDLE, PhaseName.PROPOSAL_BUNDLE, PhaseName.SPEC_BUNDLE),
+                    completed_phases=(PhaseName.EXPLORE_BUNDLE, PhaseName.KNOWLEDGE_EXTRACT_EXPLORE, PhaseName.PROPOSAL_BUNDLE, PhaseName.SPEC_BUNDLE),
                     pending_decision=PendingDecision(
                         decision_id="decision-1",
                         origin_phase=PhaseName.DESIGN_BUNDLE,
@@ -258,7 +270,7 @@ class CliIntegrationTests(unittest.TestCase):
                     request="Fix design",
                     status=RunStatus.FAILED,
                     strategy=RunStrategy.SDD,
-                    completed_phases=(PhaseName.EXPLORE_BUNDLE, PhaseName.PROPOSAL_BUNDLE, PhaseName.SPEC_BUNDLE),
+                    completed_phases=(PhaseName.EXPLORE_BUNDLE, PhaseName.KNOWLEDGE_EXTRACT_EXPLORE, PhaseName.PROPOSAL_BUNDLE, PhaseName.SPEC_BUNDLE),
                     errors=(ErrorRecord("DESIGN_BUNDLE_FAILED", "bad design", phase="DESIGN_BUNDLE", timestamp=TIMESTAMP),),
                 )
             )

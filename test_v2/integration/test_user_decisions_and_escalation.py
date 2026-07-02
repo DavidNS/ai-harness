@@ -55,6 +55,7 @@ def waiting_tdd_run() -> RunRecord:
         current_phase=PhaseName.TDD_BUNDLE,
         completed_phases=(
             PhaseName.EXPLORE_BUNDLE,
+            PhaseName.KNOWLEDGE_EXTRACT_EXPLORE,
             PhaseName.PROPOSAL_BUNDLE,
             PhaseName.SPEC_BUNDLE,
             PhaseName.DESIGN_BUNDLE,
@@ -86,7 +87,7 @@ class UserDecisionEscalationIntegrationTests(unittest.TestCase):
                 RunStatus.RUNNING,
                 RunStrategy.SDD,
                 current_phase=PhaseName.DESIGN_BUNDLE,
-                completed_phases=(PhaseName.EXPLORE_BUNDLE, PhaseName.PROPOSAL_BUNDLE, PhaseName.SPEC_BUNDLE),
+                completed_phases=(PhaseName.EXPLORE_BUNDLE, PhaseName.KNOWLEDGE_EXTRACT_EXPLORE, PhaseName.PROPOSAL_BUNDLE, PhaseName.SPEC_BUNDLE),
             )
         )
         decision_service = RequestUserDecisionService(state, StaticClock())
@@ -160,11 +161,11 @@ class UserDecisionEscalationIntegrationTests(unittest.TestCase):
 
         self.assertEqual("RUNNING", result.run.status)
         self.assertEqual("DESIGN_BUNDLE", result.run.current_phase)
-        self.assertEqual(("EXPLORE_BUNDLE", "PROPOSAL_BUNDLE", "SPEC_BUNDLE"), result.run.completed_phases)
+        self.assertEqual(("EXPLORE_BUNDLE", "KNOWLEDGE_EXTRACT_EXPLORE", "PROPOSAL_BUNDLE", "SPEC_BUNDLE"), result.run.completed_phases)
         self.assertEqual(["UserDecisionReceived", "EscalationRaised", "EscalationResolved", "PhaseStarted"], [type(event).__name__ for event in result.events])
         persisted = state.get("run-1")
         self.assertEqual(PhaseName.DESIGN_BUNDLE, persisted.current_phase)
-        self.assertEqual((PhaseName.EXPLORE_BUNDLE, PhaseName.PROPOSAL_BUNDLE, PhaseName.SPEC_BUNDLE), persisted.completed_phases)
+        self.assertEqual((PhaseName.EXPLORE_BUNDLE, PhaseName.KNOWLEDGE_EXTRACT_EXPLORE, PhaseName.PROPOSAL_BUNDLE, PhaseName.SPEC_BUNDLE), persisted.completed_phases)
         self.assertEqual((), persisted.tasks)
         self.assertEqual("redesign", persisted.decision_history[0].response)
 
@@ -212,7 +213,7 @@ class UserDecisionEscalationIntegrationTests(unittest.TestCase):
                 RunStatus.WAITING_FOR_USER,
                 RunStrategy.SDD,
                 current_phase=PhaseName.SPEC_BUNDLE,
-                completed_phases=(PhaseName.EXPLORE_BUNDLE, PhaseName.PROPOSAL_BUNDLE),
+                completed_phases=(PhaseName.EXPLORE_BUNDLE, PhaseName.KNOWLEDGE_EXTRACT_EXPLORE, PhaseName.PROPOSAL_BUNDLE),
                 pending_decision=PendingDecision(
                     "decision-1",
                     PhaseName.SPEC_BUNDLE,

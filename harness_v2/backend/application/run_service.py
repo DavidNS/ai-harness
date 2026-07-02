@@ -10,7 +10,11 @@ from harness_v2.backend.application.contracts import (
     CommandResult,
     GetAvailableActions,
     GetAvailableActionsResult,
+    CiTemplatesInstalled,
+    CommandExecutionResult,
     GetRun,
+    InstallCiTemplates,
+    InstallCiTemplatesResult,
     InvalidRunStateError,
     GetRunResult,
     GetRunState,
@@ -35,6 +39,7 @@ from harness_v2.backend.application.contracts import (
 from harness_v2.backend.application.artifact_invalidation import ArtifactInvalidationRule, invalidate_phase_artifacts, restore_invalidated_artifacts
 from harness_v2.backend.application.decision_service import pending_decision_view, run_to_view
 from harness_v2.backend.application.escalation_service import EscalationPolicyService
+from harness_v2.backend.application.release_context import ReleaseContextService
 from harness_v2.backend.domain.decisions import DecisionAction, DecisionRecord
 from harness_v2.backend.domain.escalation import EscalationIssue
 from harness_v2.backend.domain.errors import DomainValidationError
@@ -291,6 +296,7 @@ class RunService:
         artifact_store: ArtifactStorePort | None = None,
         invalidation_rules: dict[PhaseName, ArtifactInvalidationRule] | None = None,
         event_sink: EventSinkPort | None = None,
+        release_context: ReleaseContextService | None = None,
     ) -> None:
         if invalidation_rules is None and artifact_store is not None:
             from harness_v2.backend.application.bundle_registry import default_bundle_registry
@@ -299,6 +305,7 @@ class RunService:
         self._state_store = state_store
         self._orchestrator = orchestrator
         self._event_sink = event_sink
+        self._release_context = release_context
         self._start = StartRunService(state_store, id_generator=id_generator)
         self._resume = ResumeRunService(state_store)
         self._retry = RetryPhaseService(state_store, artifact_store=artifact_store, invalidation_rules=invalidation_rules)
@@ -314,7 +321,13 @@ class RunService:
         self._get_state = GetRunStateService(state_store)
         self._get_actions = GetAvailableActionsService(state_store)
 
-    def execute(self, command: Command) -> CommandResult:
+    def execute(self, command: Command) -> CommandExecutionResult:
+        if isinstance(command, InstallCiTemplates):
+            if self._release_context is None:
+                raise InvalidRunStateError("install-ci requires a release context service")
+            result = self._release_context.install_ci_templates(command.target, force=command.force)
+            event = CiTemplatesInstalled(command.target, result.installed, result.skipped, result.warnings)
+            return self._publish(InstallCiTemplatesResult(command.target, result.installed, result.skipped, result.warnings, (event,)))
         if isinstance(command, StartRun):
             return self._publish(self._start.execute(command))
         if isinstance(command, ResumeRun):
@@ -333,7 +346,7 @@ class RunService:
             return self._publish(self._submit_decision.execute(command))
         raise TypeError(f"unsupported command: {type(command).__name__}")
 
-    def _publish(self, result: CommandResult) -> CommandResult:
+    def _publish(self, result: CommandExecutionResult) -> CommandExecutionResult:
         if self._event_sink is not None:
             for event in result.events:
                 self._event_sink.emit(event)

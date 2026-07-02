@@ -12,8 +12,12 @@ from harness_v2.backend.application.contracts import (
     GetAvailableActionsResult,
     GetRun,
     GetRunResult,
+    InstallCiTemplates,
+    InstallCiTemplatesResult,
     GetRunState,
     GetRunStateResult,
+    CiTemplatesInstalled,
+    KnowledgePatchCreated,
     ListRuns,
     ListRunsResult,
     PendingDecisionView,
@@ -46,9 +50,11 @@ class ContractTests(unittest.TestCase):
         commands = (
             StartRun("Fix tests"),
             StartRun("Explore architecture", strategy="EXPLORER"),
+            StartRun("Extract knowledge", strategy="KNOWLEDGE_EXTRACT_EXPLORE"),
             ResumeRun("run-1"),
             RetryPhase("run-1", "EXPLORE_BUNDLE"),
             CancelRun("run-1"),
+            InstallCiTemplates("github", force=True),
             SubmitUserDecision("run-1", "decision-1", "continue"),
         )
 
@@ -70,7 +76,9 @@ class ContractTests(unittest.TestCase):
             RunStarted("run-1", "Fix tests"),
             PhaseStarted("run-1", "EXPLORE_BUNDLE"),
             PhaseStarted("run-1", "EXPLORER_INTAKE"),
+            PhaseStarted("run-1", "KNOWLEDGE_EXTRACT_EXPLORE"),
             PhaseCompleted("run-1", "EXPLORE_BUNDLE"),
+            KnowledgePatchCreated("run-1", "patch.run-1.explore_bundle.v0001", "EXPLORE_BUNDLE", "knowledge-source/patches/pending/run-1/explore_bundle/v0001"),
             PhaseFailed("run-1", "EXPLORE_BUNDLE", "failed"),
             EscalationRaised("run-1", "issue-1", "TDD_BUNDLE", "DESIGN_GAP", "needs design"),
             EscalationResolved("run-1", "issue-1", "REWIND", "DESIGN_BUNDLE"),
@@ -80,6 +88,7 @@ class ContractTests(unittest.TestCase):
             RunResumed("run-1"),
             RunCompleted("run-1"),
             RunCancelled("run-1"),
+            CiTemplatesInstalled("github", (".github/workflows/ai-harness-ci.yml",)),
         )
 
         self.assertEqual("run-1", events[0].run_id)
@@ -107,6 +116,7 @@ class ContractTests(unittest.TestCase):
             ListRunsResult(runs=(RunSummaryView("run-1", "Fix tests", "WAITING_FOR_USER", "EXPLORE_BUNDLE"),)),
             GetRunStateResult("run-1", "WAITING_FOR_USER", "EXPLORE_BUNDLE", decision),
             GetAvailableActionsResult("run-1", ("submit-user-decision", "cancel")),
+            InstallCiTemplatesResult("github", installed=(".github/workflows/ai-harness-ci.yml",), events=(CiTemplatesInstalled("github", (".github/workflows/ai-harness-ci.yml",)),)),
         )
 
         self.assertTrue(all(result is not None for result in results))
@@ -196,6 +206,7 @@ class ContractTests(unittest.TestCase):
             lambda: RetryPhase("run-1", ""),
             lambda: RetryPhase("run-1", "NOT_A_PHASE"),
             lambda: CancelRun(""),
+            lambda: InstallCiTemplates("jenkins"),
             lambda: SubmitUserDecision("", "decision-1", "continue"),
             lambda: SubmitUserDecision("run-1", "", "continue"),
             lambda: SubmitUserDecision("run-1", "decision-1", ""),
@@ -246,6 +257,7 @@ class ContractTests(unittest.TestCase):
             lambda: RunResumed(""),
             lambda: RunCompleted(""),
             lambda: RunCancelled(""),
+            lambda: CiTemplatesInstalled("jenkins"),
         )
 
         for create in invalid_cases:

@@ -19,6 +19,8 @@ class RunStatus(StrEnum):
 
 class RunStrategy(StrEnum):
     SDD = "SDD"
+    KNOWLEDGE_EXTRACT_EXPLORE = "KNOWLEDGE_EXTRACT_EXPLORE"
+    KNOWLEDGE_EXTRACT_TDD = "KNOWLEDGE_EXTRACT_TDD"
     EXPLORER = "EXPLORER"
     EXPLORE_BUNDLE = "EXPLORE_BUNDLE"
     PROPOSAL_BUNDLE = "PROPOSAL_BUNDLE"
@@ -30,11 +32,13 @@ class RunStrategy(StrEnum):
 
 class PhaseName(StrEnum):
     EXPLORE_BUNDLE = "EXPLORE_BUNDLE"
+    KNOWLEDGE_EXTRACT_EXPLORE = "KNOWLEDGE_EXTRACT_EXPLORE"
     PROPOSAL_BUNDLE = "PROPOSAL_BUNDLE"
     SPEC_BUNDLE = "SPEC_BUNDLE"
     DESIGN_BUNDLE = "DESIGN_BUNDLE"
     TASKS_BUNDLE = "TASKS_BUNDLE"
     TDD_BUNDLE = "TDD_BUNDLE"
+    KNOWLEDGE_EXTRACT_TDD = "KNOWLEDGE_EXTRACT_TDD"
     EXPLORER_INTAKE = "EXPLORER_INTAKE"
     EXPLORER_DISCOVERY = "EXPLORER_DISCOVERY"
     EXPLORER_DECISION = "EXPLORER_DECISION"
@@ -51,15 +55,17 @@ class TerminalState(StrEnum):
 
 LifecycleNode = PhaseName | TerminalState
 
-# Stage 6 intentionally models the SDD control skeleton without knowledge
-# extraction phases. Stage 9 owns knowledge lifecycle nodes and promotion.
+# SDD now includes candidate knowledge extraction. Promotion remains a later
+# lifecycle outside this Stage 9 candidate-patch slice.
 SDD_PHASES: tuple[PhaseName, ...] = (
     PhaseName.EXPLORE_BUNDLE,
+    PhaseName.KNOWLEDGE_EXTRACT_EXPLORE,
     PhaseName.PROPOSAL_BUNDLE,
     PhaseName.SPEC_BUNDLE,
     PhaseName.DESIGN_BUNDLE,
     PhaseName.TASKS_BUNDLE,
     PhaseName.TDD_BUNDLE,
+    PhaseName.KNOWLEDGE_EXTRACT_TDD,
 )
 
 EXPLORER_PHASES: tuple[PhaseName, ...] = (
@@ -73,6 +79,8 @@ EXPLORER_PHASES: tuple[PhaseName, ...] = (
 
 STRATEGY_GRAPHS: dict[RunStrategy, tuple[PhaseName, ...]] = {
     RunStrategy.SDD: SDD_PHASES,
+    RunStrategy.KNOWLEDGE_EXTRACT_EXPLORE: (PhaseName.KNOWLEDGE_EXTRACT_EXPLORE,),
+    RunStrategy.KNOWLEDGE_EXTRACT_TDD: (PhaseName.KNOWLEDGE_EXTRACT_TDD,),
     RunStrategy.EXPLORER: EXPLORER_PHASES,
     RunStrategy.EXPLORE_BUNDLE: (PhaseName.EXPLORE_BUNDLE,),
     RunStrategy.PROPOSAL_BUNDLE: (PhaseName.PROPOSAL_BUNDLE,),

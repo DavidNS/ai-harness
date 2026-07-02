@@ -96,7 +96,8 @@ class TddLoopIntegrationTests(unittest.TestCase):
             result = orchestrator.execute_current_phase("run-1")
 
             self.assertIsNotNone(result)
-            self.assertEqual("COMPLETED", result.run.status)
+            self.assertEqual("RUNNING", result.run.status)
+            self.assertEqual("KNOWLEDGE_EXTRACT_TDD", result.run.current_phase)
             self.assertEqual("def answer():\n    return 42\n", (root / "feature.py").read_text(encoding="utf-8"))
             persisted = state.get("run-1")
             self.assertEqual(TaskStatus.COMPLETED, persisted.tasks[0].status)
@@ -229,6 +230,7 @@ def _seed_tdd_run(state: InMemoryStateStore, artifacts: InMemoryArtifactStore) -
             current_phase=PhaseName.TDD_BUNDLE,
             completed_phases=(
                 PhaseName.EXPLORE_BUNDLE,
+                PhaseName.KNOWLEDGE_EXTRACT_EXPLORE,
                 PhaseName.PROPOSAL_BUNDLE,
                 PhaseName.SPEC_BUNDLE,
                 PhaseName.DESIGN_BUNDLE,

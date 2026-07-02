@@ -43,7 +43,7 @@ class StorageDecisionEffectIntegrationTests(unittest.TestCase):
                 RunStatus.WAITING_FOR_USER,
                 RunStrategy.SDD,
                 current_phase=PhaseName.DESIGN_BUNDLE,
-                completed_phases=(PhaseName.EXPLORE_BUNDLE, PhaseName.PROPOSAL_BUNDLE, PhaseName.SPEC_BUNDLE),
+                completed_phases=(PhaseName.EXPLORE_BUNDLE, PhaseName.KNOWLEDGE_EXTRACT_EXPLORE, PhaseName.PROPOSAL_BUNDLE, PhaseName.SPEC_BUNDLE),
                 pending_decision=pending,
                 decision_history=(history,),
             )

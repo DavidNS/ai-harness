@@ -5,7 +5,7 @@ from pathlib import Path
 import unittest
 
 from harness_v2.adapters.models import FakeModelProvider, ScriptedModelProvider
-from harness_v2.adapters.storage import InMemoryArtifactStore, InMemoryStateStore
+from harness_v2.adapters.storage import InMemoryArtifactStore, InMemoryKnowledgePatchStore, InMemoryStateStore
 from harness_v2.adapters.worker_resources import FileWorkerResourceStore
 from harness_v2.backend.application.contracts import (
     PhaseCompleted,
@@ -181,7 +181,15 @@ def service(
     provider = provider or ScriptedModelProvider()
     clock = StaticClock()
     worker = WorkerTaskService(state, artifacts, provider, FileWorkerResourceStore())
-    orchestrator = BundleOrchestrator(state, artifacts, worker, clock, default_bundle_registry(), BundleRuntimeConfig(working_directory=Path.cwd()))
+    orchestrator = BundleOrchestrator(
+        state,
+        artifacts,
+        worker,
+        clock,
+        default_bundle_registry(),
+        BundleRuntimeConfig(working_directory=Path.cwd()),
+        knowledge_patches=InMemoryKnowledgePatchStore(),
+    )
     return RunService(state, StaticIdGenerator(), orchestrator=orchestrator, clock=clock), state, artifacts, provider
 
 
@@ -205,19 +213,19 @@ class ExploreOrchestrationIntegrationTests(unittest.TestCase):
         self.assertIn("explore/outcome_bundle.json", artifact_ids)
         self.assertIn("published/explore-handoff.json", artifact_ids)
 
-    def test_resume_sdd_advances_from_explore_to_proposal_and_stops(self) -> None:
+    def test_resume_sdd_advances_from_explore_to_knowledge_and_stops(self) -> None:
         app, state, _artifacts, _provider = service()
         app.execute(StartRun("Fix tests"))
 
         result = app.execute(ResumeRun("run-1"))
 
         self.assertEqual("RUNNING", result.run.status)
-        self.assertEqual("PROPOSAL_BUNDLE", result.run.current_phase)
+        self.assertEqual("KNOWLEDGE_EXTRACT_EXPLORE", result.run.current_phase)
         self.assertEqual(("EXPLORE_BUNDLE",), result.run.completed_phases)
         self.assertIsInstance(result.events[-2], PhaseCompleted)
         self.assertIsInstance(result.events[-1], PhaseStarted)
         persisted = state.get("run-1")
-        self.assertEqual(PhaseName.PROPOSAL_BUNDLE, persisted.current_phase)
+        self.assertEqual(PhaseName.KNOWLEDGE_EXTRACT_EXPLORE, persisted.current_phase)
 
 
     def test_sdd_skeleton_advances_to_tdd_then_fails_without_mutation_enabled(self) -> None:
@@ -225,11 +233,12 @@ class ExploreOrchestrationIntegrationTests(unittest.TestCase):
         app.execute(StartRun("Fix tests"))
 
         expected = [
-            ("PROPOSAL_BUNDLE", ("EXPLORE_BUNDLE",)),
-            ("SPEC_BUNDLE", ("EXPLORE_BUNDLE", "PROPOSAL_BUNDLE")),
-            ("DESIGN_BUNDLE", ("EXPLORE_BUNDLE", "PROPOSAL_BUNDLE", "SPEC_BUNDLE")),
-            ("TASKS_BUNDLE", ("EXPLORE_BUNDLE", "PROPOSAL_BUNDLE", "SPEC_BUNDLE", "DESIGN_BUNDLE")),
-            ("TDD_BUNDLE", ("EXPLORE_BUNDLE", "PROPOSAL_BUNDLE", "SPEC_BUNDLE", "DESIGN_BUNDLE", "TASKS_BUNDLE")),
+            ("KNOWLEDGE_EXTRACT_EXPLORE", ("EXPLORE_BUNDLE",)),
+            ("PROPOSAL_BUNDLE", ("EXPLORE_BUNDLE", "KNOWLEDGE_EXTRACT_EXPLORE")),
+            ("SPEC_BUNDLE", ("EXPLORE_BUNDLE", "KNOWLEDGE_EXTRACT_EXPLORE", "PROPOSAL_BUNDLE")),
+            ("DESIGN_BUNDLE", ("EXPLORE_BUNDLE", "KNOWLEDGE_EXTRACT_EXPLORE", "PROPOSAL_BUNDLE", "SPEC_BUNDLE")),
+            ("TASKS_BUNDLE", ("EXPLORE_BUNDLE", "KNOWLEDGE_EXTRACT_EXPLORE", "PROPOSAL_BUNDLE", "SPEC_BUNDLE", "DESIGN_BUNDLE")),
+            ("TDD_BUNDLE", ("EXPLORE_BUNDLE", "KNOWLEDGE_EXTRACT_EXPLORE", "PROPOSAL_BUNDLE", "SPEC_BUNDLE", "DESIGN_BUNDLE", "TASKS_BUNDLE")),
         ]
         for current_phase, completed in expected:
             result = app.execute(ResumeRun("run-1"))
@@ -240,7 +249,7 @@ class ExploreOrchestrationIntegrationTests(unittest.TestCase):
 
         self.assertEqual("FAILED", result.run.status)
         self.assertIsNone(result.run.current_phase)
-        self.assertEqual(("EXPLORE_BUNDLE", "PROPOSAL_BUNDLE", "SPEC_BUNDLE", "DESIGN_BUNDLE", "TASKS_BUNDLE"), result.run.completed_phases)
+        self.assertEqual(("EXPLORE_BUNDLE", "KNOWLEDGE_EXTRACT_EXPLORE", "PROPOSAL_BUNDLE", "SPEC_BUNDLE", "DESIGN_BUNDLE", "TASKS_BUNDLE"), result.run.completed_phases)
         self.assertEqual(RunStatus.FAILED, state.get("run-1").status)
         artifact_ids = [item.artifact_id for item in artifacts.list("run-1")]
         for artifact_id in (
