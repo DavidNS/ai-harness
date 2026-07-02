@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from collections.abc import Sequence
 from pathlib import Path
-import sys
 
 from harness_v2.backend.application.contracts import (
     CancelRun,
@@ -13,12 +13,12 @@ from harness_v2.backend.application.contracts import (
     GetAvailableActions,
     GetAvailableActionsResult,
     GetRun,
-    InstallCiTemplates,
-    InstallCiTemplatesResult,
-    InvalidRunStateError,
     GetRunResult,
     GetRunState,
     GetRunStateResult,
+    InstallCiTemplates,
+    InstallCiTemplatesResult,
+    InvalidRunStateError,
     ListRuns,
     ListRunsResult,
     ResumeRun,
@@ -28,6 +28,7 @@ from harness_v2.backend.application.contracts import (
     StartRun,
     SubmitUserDecision,
 )
+from harness_v2.hosts.daemon.client import DaemonClient
 from harness_v2.hosts.in_process.host import InProcessHost
 
 DEFAULT_STATE_ROOT = Path(".ai-harness") / "v2"
@@ -63,6 +64,17 @@ def _parser() -> argparse.ArgumentParser:
         choices=("off", "baseline", "branch"),
         default="baseline",
         help="CI evidence mode for release context, default: baseline",
+    )
+    parser.add_argument(
+        "--host-mode",
+        choices=("in-process", "daemon"),
+        default="in-process",
+        help="backend host mode, default: in-process",
+    )
+    parser.add_argument(
+        "--daemon-url",
+        default="http://127.0.0.1:8765",
+        help="daemon base URL when --host-mode daemon is used",
     )
     subcommands = parser.add_subparsers(dest="command", required=True)
 
@@ -182,13 +194,16 @@ def _render_actions(result: GetAvailableActionsResult) -> None:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    host = InProcessHost(
-        state_root=args.state_root,
-        working_directory=args.working_directory,
-        allow_repository_mutation=args.allow_repository_mutation,
-        branch_mode=args.branch,
-        github_ci_mode=args.github_ci_mode,
-    )
+    if args.host_mode == "daemon":
+        host = DaemonClient(args.daemon_url)
+    else:
+        host = InProcessHost(
+            state_root=args.state_root,
+            working_directory=args.working_directory,
+            allow_repository_mutation=args.allow_repository_mutation,
+            branch_mode=args.branch,
+            github_ci_mode=args.github_ci_mode,
+        )
     try:
         if args.command == "install-ci":
             _render_install_result(host.execute(InstallCiTemplates(target=args.target, force=args.force)))
