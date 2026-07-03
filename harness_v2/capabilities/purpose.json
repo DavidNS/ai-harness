@@ -1,6 +1,7 @@
 {
   "commands": [],
   "mcp_tools": [],
+  "output_schema": "purpose_bundle",
   "paths": [
     {
       "mode": "read",

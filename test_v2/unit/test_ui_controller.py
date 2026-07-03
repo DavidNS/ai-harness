@@ -11,9 +11,10 @@ from harness_v2.backend.application.contracts import (
     ListRuns,
     ListRunsResult,
     PendingDecisionView,
-    PhaseStarted,
+    StepStarted,
     RunSummaryView,
     RunView,
+    StepView,
     StartRun,
     SubmitUserDecision,
 )
@@ -34,14 +35,14 @@ class FakeUiBackend:
             self.run = RunView("run-2", command.request, "PENDING", command.root_bundle)
             return CommandResult(self.run, ())
         if isinstance(command, SubmitUserDecision):
-            self.run = RunView(command.run_id, "Choose", "RUNNING", "SDD_BUNDLE", current_bundle="EXPLORE_BUNDLE", current_phase="EXPLORE_CONTEXT_PACK")
+            self.run = RunView(command.run_id, "Choose", "RUNNING", "SDD_BUNDLE", current_step=StepView("SDD_BUNDLE:002", "EXPLORE_BUNDLE", "EXPLORE_CONTEXT_PACK", 1))
             return CommandResult(self.run, ())
         return CommandResult(self.run, ())
 
     def query(self, query: object) -> object:
         self.queries.append(query)
         if isinstance(query, ListRuns):
-            return ListRunsResult((RunSummaryView(self.run.run_id, self.run.request, self.run.status, self.run.current_bundle, self.run.current_phase),))
+            return ListRunsResult((RunSummaryView(self.run.run_id, self.run.request, self.run.status, self.run.current_step),))
         if isinstance(query, GetRun):
             return GetRunResult(self.run)
         if isinstance(query, GetAvailableActions):
@@ -50,7 +51,7 @@ class FakeUiBackend:
 
     def events_after(self, event_id: int, *, timeout: float = 0.0) -> tuple[tuple[int, object], ...]:
         self.events_cursor.append(event_id)
-        return ((event_id + 1, PhaseStarted("run-1", "EXPLORE_BUNDLE", "EXPLORE_REQUEST_UNDERSTANDING")),)
+        return ((event_id + 1, StepStarted("run-1", "SDD_BUNDLE:001", "EXPLORE_BUNDLE", "EXPLORE_REQUEST_UNDERSTANDING")),)
 
 
 class UiControllerTests(unittest.TestCase):
@@ -82,8 +83,7 @@ class UiControllerTests(unittest.TestCase):
             "Choose",
             "WAITING_FOR_USER",
             "SDD_BUNDLE",
-            current_bundle="EXPLORE_BUNDLE",
-            current_phase="EXPLORE_REQUEST_UNDERSTANDING",
+            current_step=StepView("SDD_BUNDLE:001", "EXPLORE_BUNDLE", "EXPLORE_REQUEST_UNDERSTANDING", 0),
             pending_decision=PendingDecisionView("decision-1", "EXPLORE_BUNDLE", "Choose", "now", ("continue",)),
         )
         controller = UiController(backend)
@@ -105,7 +105,7 @@ class UiControllerTests(unittest.TestCase):
 
         self.assertEqual([4], backend.events_cursor)
         self.assertEqual(5, state.event_cursor)
-        self.assertEqual("PhaseStarted", state.events[0].event_type)
+        self.assertEqual("StepStarted", state.events[0].event_type)
 
 
 if __name__ == "__main__":

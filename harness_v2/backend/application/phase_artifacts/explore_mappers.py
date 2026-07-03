@@ -56,6 +56,9 @@ def compact_repository_observations(
         if not path:
             continue
         item: dict[str, object] = {"kind": kind or "repository", "path": path}
+        source_id = _text(observation.get("id"))
+        if source_id:
+            item["id"] = source_id
         score = observation.get("score")
         if isinstance(score, int) and not isinstance(score, bool):
             item["score"] = score
@@ -68,6 +71,9 @@ def compact_repository_observations(
         matches = _string_items(observation.get("matches"))
         if matches:
             item["matches"] = matches[:3]
+        snippets = [dict(snippet) for snippet in _mapping_list(observation.get("snippets"))[:3]]
+        if snippets:
+            item["snippets"] = snippets
         compacted.append(item)
         if len(compacted) >= limit:
             break

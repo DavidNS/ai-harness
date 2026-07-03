@@ -41,6 +41,7 @@ class WorkerTaskRequest:
     run_id: str
     bundle: str | BundleName
     phase: str | PhaseName
+    step_id: str
     task_id: str
     inputs: dict[str, Any]
     working_directory: Path
@@ -52,6 +53,7 @@ class WorkerTaskRequest:
         object.__setattr__(self, "run_id", _require_text(self.run_id, "run_id"))
         object.__setattr__(self, "bundle", BundleName(_require_text(self.bundle, "bundle")))
         object.__setattr__(self, "phase", PhaseName(_require_text(self.phase, "phase")))
+        object.__setattr__(self, "step_id", _require_text(self.step_id, "step_id"))
         object.__setattr__(self, "task_id", _safe_segment(self.task_id, "task_id"))
         if not isinstance(self.inputs, dict):
             raise TypeError("inputs must be a dict")
@@ -70,6 +72,7 @@ class WorkerTaskResult:
     run_id: str
     bundle: str
     phase: str
+    step_id: str
     task_id: str
     request_artifact_id: str
     result_artifact_id: str
@@ -101,8 +104,8 @@ class WorkerTaskService:
             raise RunNotFoundError(command.run_id) from exc
         if run.status is not RunStatus.RUNNING or run.current_bundle is None or run.current_phase is None:
             raise InvalidRunStateError(f"run {run.run_id} cannot request a worker task from {run.status.value}")
-        if run.current_bundle != command.bundle or run.current_phase != command.phase:
-            raise InvalidRunStateError(f"run {run.run_id} is in {run.current_bundle.value}/{run.current_phase.value}, not {command.bundle.value}/{command.phase.value}")
+        if run.current_step_id != command.step_id or run.current_bundle != command.bundle or run.current_phase != command.phase:
+            raise InvalidRunStateError(f"run {run.run_id} is in {run.current_step_id}/{run.current_bundle.value}/{run.current_phase.value}, not {command.step_id}/{command.bundle.value}/{command.phase.value}")
 
         spec = self._worker_resources.get(command.task_id)
         provider_request = ModelProviderRequest(
@@ -110,11 +113,12 @@ class WorkerTaskService:
             working_directory=command.working_directory,
             model=command.model,
             capabilities=spec.capabilities,
+            output_schema=spec.output_schema,
             timeout=command.timeout,
             truncation=command.truncation,
         )
-        request_artifact_id = _artifact_id(command.bundle, command.phase, command.task_id, "request.json")
-        result_artifact_id = _artifact_id(command.bundle, command.phase, command.task_id, "result.json")
+        request_artifact_id = _artifact_id(command.step_id, command.task_id, "request.json")
+        result_artifact_id = _artifact_id(command.step_id, command.task_id, "result.json")
         self._artifact_store.write(
             run.run_id,
             request_artifact_id,
@@ -126,6 +130,7 @@ class WorkerTaskService:
             run_id=run.run_id,
             bundle=command.bundle.value,
             phase=command.phase.value,
+            step_id=command.step_id,
             task_id=command.task_id,
             request_artifact_id=request_artifact_id,
             result_artifact_id=result_artifact_id,
@@ -136,8 +141,12 @@ class WorkerTaskService:
         )
 
 
-def _artifact_id(bundle: BundleName, phase: PhaseName, task_id: str, filename: str) -> str:
-    return f"workers/{bundle.value}/{phase.value}/{task_id}/{filename}"
+def _artifact_id(step_id: str, task_id: str, filename: str) -> str:
+    return f"workers/{_safe_step_id(step_id)}/{task_id}/{filename}"
+
+
+def _safe_step_id(step_id: str) -> str:
+    return step_id.replace(":", "_")
 
 
 def _json_bytes(payload: dict[str, object]) -> bytes:

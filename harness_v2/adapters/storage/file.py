@@ -24,7 +24,7 @@ from harness_v2.backend.ports.artifact_store import (
 )
 from harness_v2.backend.ports.state_store import StateNotFoundError, StateStoreCorruptionError, StateStoreError
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 _ACTIVE_STATUSES = {RunStatus.PENDING, RunStatus.RUNNING, RunStatus.WAITING_FOR_USER}
 _TERMINAL_STATUSES = {RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED}
 
@@ -208,8 +208,6 @@ def _run_to_mapping(run: RunRecord) -> dict[str, Any]:
             "root_bundle": run.root_bundle.value,
             "current_step_id": run.current_step_id,
             "completed_step_ids": list(run.completed_step_ids),
-            "current_phase": run.current_phase.value if run.current_phase else None,
-            "completed_phases": [phase.value for phase in run.completed_phases],
             "pending_decision": _decision_to_mapping(run.pending_decision),
             "decision_history": [_decision_record_to_mapping(decision) for decision in run.decision_history],
             "tasks": [_task_to_mapping(task) for task in run.tasks],
@@ -270,6 +268,7 @@ def _error_to_mapping(error: ErrorRecord) -> dict[str, Any]:
     return {
         "code": error.code,
         "message": error.message,
+        "step_id": error.step_id,
         "bundle": error.bundle,
         "phase": error.phase,
         "timestamp": error.timestamp,
@@ -291,8 +290,6 @@ def _run_from_mapping(payload: dict[str, Any]) -> RunRecord:
             root_bundle=BundleName(data["root_bundle"]),
             current_step_id=data.get("current_step_id"),
             completed_step_ids=tuple(data.get("completed_step_ids", ())),
-            current_phase=PhaseName(data["current_phase"]) if data.get("current_phase") is not None else None,
-            completed_phases=tuple(PhaseName(phase) for phase in data.get("completed_phases", ())),
             pending_decision=_decision_from_mapping(pending),
             decision_history=tuple(_decision_record_from_mapping(item) for item in data.get("decision_history", ())),
             tasks=tuple(_task_from_mapping(task) for task in data.get("tasks", ())),
@@ -365,6 +362,7 @@ def _error_from_mapping(data: object) -> ErrorRecord:
     return ErrorRecord(
         code=data["code"],
         message=data["message"],
+        step_id=data.get("step_id"),
         bundle=data.get("bundle"),
         phase=data.get("phase"),
         timestamp=data["timestamp"],

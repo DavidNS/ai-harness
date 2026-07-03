@@ -1,0 +1,14 @@
+{
+  "commands": [],
+  "mcp_tools": [],
+  "output_schema": "json_artifact_delta",
+  "paths": [
+    {
+      "mode": "read",
+      "pattern": "**"
+    }
+  ],
+  "phase": "artifact_delta_repair",
+  "schema_version": 1,
+  "skills": []
+}

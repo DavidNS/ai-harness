@@ -3,29 +3,36 @@ from __future__ import annotations
 import unittest
 
 from test_v2.support.runtime import memory_orchestrator
-from harness_v2.backend.application.contracts import RetryBundle, RetryPhase
+from harness_v2.backend.application.contracts import RetryBundle, RetryStep
 from harness_v2.backend.domain.errors import ErrorRecord
 from harness_v2.backend.domain.lifecycle import BundleName, PhaseName, RunStatus
 from harness_v2.backend.domain.runs import RunRecord
 
 
 class PhaseRetryIntegrationTests(unittest.TestCase):
-    def test_retry_phase_rewinds_to_failed_phase_and_invalidates_tail(self) -> None:
-        service, state, _artifacts, _knowledge = memory_orchestrator()
+    def test_retry_step_rewinds_to_failed_step_and_invalidates_tail(self) -> None:
+        service, state, artifacts, _knowledge = memory_orchestrator()
         state.save(RunRecord(
             "run-1",
             "Fix tests",
             RunStatus.FAILED,
             root_bundle=BundleName.EXPLORE_BUNDLE,
             completed_phases=(PhaseName.EXPLORE_REQUEST_UNDERSTANDING,),
-            errors=(ErrorRecord("EXPLORE_CONTEXT_PACK_FAILED", "failed", bundle="EXPLORE_BUNDLE", phase="EXPLORE_CONTEXT_PACK", timestamp="now"),),
+            errors=(ErrorRecord("EXPLORE_CONTEXT_PACK_FAILED", "failed", step_id="EXPLORE_BUNDLE:002", bundle="EXPLORE_BUNDLE", phase="EXPLORE_CONTEXT_PACK", timestamp="now"),),
         ))
 
-        result = service.execute(RetryPhase("run-1", "EXPLORE_BUNDLE", "EXPLORE_CONTEXT_PACK"))
+        artifacts.write("run-1", "validation/EXPLORE_BUNDLE_001-failure.json", b"first")
+        artifacts.write("run-1", "validation/EXPLORE_BUNDLE_002-failure.json", b"second")
+
+        result = service.execute(RetryStep("run-1", "EXPLORE_BUNDLE:002"))
 
         self.assertEqual("RUNNING", result.run.status)
-        self.assertEqual("EXPLORE_CONTEXT_PACK", result.run.current_phase)
-        self.assertEqual(("EXPLORE_REQUEST_UNDERSTANDING",), result.run.completed_phases)
+        self.assertEqual("EXPLORE_BUNDLE:002", result.run.current_step.step_id)
+        self.assertEqual("EXPLORE_CONTEXT_PACK", result.run.current_step.phase)
+        self.assertEqual(("EXPLORE_BUNDLE:001",), tuple(step.step_id for step in result.run.completed_steps))
+        self.assertEqual(b"first", artifacts.read("run-1", "validation/EXPLORE_BUNDLE_001-failure.json"))
+        with self.assertRaises(Exception):
+            artifacts.read("run-1", "validation/EXPLORE_BUNDLE_002-failure.json")
 
     def test_retry_bundle_rewinds_to_first_phase_of_bundle(self) -> None:
         service, state, _artifacts, _knowledge = memory_orchestrator()
@@ -39,7 +46,7 @@ class PhaseRetryIntegrationTests(unittest.TestCase):
 
         result = service.execute(RetryBundle("run-1", "EXPLORE_BUNDLE"))
 
-        self.assertEqual("EXPLORE_REQUEST_UNDERSTANDING", result.run.current_phase)
+        self.assertEqual("EXPLORE_REQUEST_UNDERSTANDING", result.run.current_step.phase)
 
 
 if __name__ == "__main__":

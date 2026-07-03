@@ -142,6 +142,48 @@
       },
       "type": "array"
     },
+    "duplicate_search": {
+      "additionalProperties": true,
+      "properties": {
+        "matches": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "no_match_claims": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "searched_surfaces": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "searched_terms": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "searched_terms",
+        "searched_surfaces",
+        "matches",
+        "no_match_claims"
+      ],
+      "type": "object"
+    },
     "existing_functionality": {
       "items": {
         "additionalProperties": true,
@@ -407,6 +449,7 @@
     "verification_surfaces",
     "existing_functionality",
     "similar_functionality",
+    "duplicate_search",
     "structural_signals",
     "security_signals",
     "handoff_notes"

@@ -35,6 +35,18 @@ def _text_tuple(values: tuple[str, ...] | list[str], field: str) -> tuple[str, .
 
 
 @dataclass(frozen=True, slots=True)
+class OutputSchema:
+    name: str
+    schema: dict[str, object]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "name", _require_text(self.name, "output schema name"))
+        if not isinstance(self.schema, dict) or not self.schema:
+            raise ValueError("output schema must be a nonempty JSON object")
+        object.__setattr__(self, "schema", dict(self.schema))
+
+
+@dataclass(frozen=True, slots=True)
 class ModelSelection:
     provider: str
     model: str | None = None
@@ -121,6 +133,7 @@ class ModelProviderRequest:
     working_directory: Path
     model: ModelSelection
     capabilities: CapabilityProjection
+    output_schema: OutputSchema | None = None
     timeout: TimeoutPolicy = TimeoutPolicy()
     truncation: TruncationPolicy = TruncationPolicy()
 
@@ -131,6 +144,8 @@ class ModelProviderRequest:
             raise TypeError("model must be ModelSelection")
         if not isinstance(self.capabilities, CapabilityProjection):
             raise TypeError("capabilities must be CapabilityProjection")
+        if self.output_schema is not None and not isinstance(self.output_schema, OutputSchema):
+            raise TypeError("output_schema must be OutputSchema or None")
         if not isinstance(self.timeout, TimeoutPolicy):
             raise TypeError("timeout must be TimeoutPolicy")
         if not isinstance(self.truncation, TruncationPolicy):

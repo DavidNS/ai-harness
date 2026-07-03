@@ -23,6 +23,7 @@ def require_text(value: str, field: str) -> str:
 class ErrorRecord:
     code: str
     message: str
+    step_id: str | None = None
     bundle: str | None = None
     phase: str | None = None
     timestamp: str = ""
@@ -30,6 +31,8 @@ class ErrorRecord:
     def __post_init__(self) -> None:
         object.__setattr__(self, "code", require_text(self.code, "error code"))
         object.__setattr__(self, "message", require_text(self.message, "error message"))
+        if self.step_id is not None:
+            object.__setattr__(self, "step_id", require_text(self.step_id, "error step_id"))
         if self.bundle is not None:
             object.__setattr__(self, "bundle", require_text(self.bundle, "error bundle"))
         if self.phase is not None:

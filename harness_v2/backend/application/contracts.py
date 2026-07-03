@@ -32,9 +32,10 @@ PHASE_VALUES = frozenset((
     "EXPLORE_EXPLORATION_MAP",
     "EXPLORE_OUTCOME_SYNTHESIS",
     "EXPLORE_HANDOFF",
-    "KNOWLEDGE_EXTRACT_EXPLORE_SYNTHESIS",
-    "KNOWLEDGE_EXTRACT_EXPLORE_PATCH",
-    "PROPOSAL_PURPOSE",
+    "KNOWLEDGE_EXTRACT_SYNTHESIS",
+    "KNOWLEDGE_EXTRACT_PATCH",
+    "PROPOSAL_DRAFT",
+    "VALIDATE_JSON",
     "PROPOSAL_HANDOFF",
     "SPEC_DRAFT",
     "SPEC_HANDOFF",
@@ -42,13 +43,8 @@ PHASE_VALUES = frozenset((
     "DESIGN_HANDOFF",
     "TASKS_DRAFT",
     "TASKS_HANDOFF",
-    "VALIDATE_JSON",
-    "TDD_CREATE_TEST",
-    "TDD_IMPLEMENT",
-    "TDD_REVIEW",
+    "TDD_EXECUTE",
     "TDD_HANDOFF",
-    "KNOWLEDGE_EXTRACT_TDD_SYNTHESIS",
-    "KNOWLEDGE_EXTRACT_TDD_PATCH",
 ))
 RUN_STATUS_VALUES = frozenset(("PENDING", "RUNNING", "WAITING_FOR_USER", "COMPLETED", "FAILED", "CANCELLED"))
 CI_TARGET_VALUES = frozenset(("github", "gitlab", "both"))
@@ -140,15 +136,13 @@ class ResumeRun:
 
 
 @dataclass(frozen=True, slots=True)
-class RetryPhase:
+class RetryStep:
     run_id: str
-    bundle: str
-    phase: str
+    step_id: str
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "run_id", _require_text(self.run_id, "run_id"))
-        object.__setattr__(self, "bundle", _bundle_text(self.bundle))
-        object.__setattr__(self, "phase", _phase_text(self.phase))
+        object.__setattr__(self, "step_id", _require_text(self.step_id, "step_id"))
 
 
 @dataclass(frozen=True, slots=True)
@@ -304,38 +298,44 @@ class BundleRetryStarted:
 
 
 @dataclass(frozen=True, slots=True)
-class PhaseStarted:
+class StepStarted:
     run_id: str
+    step_id: str
     bundle: str
     phase: str
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "run_id", _require_text(self.run_id, "run_id"))
+        object.__setattr__(self, "step_id", _require_text(self.step_id, "step_id"))
         object.__setattr__(self, "bundle", _bundle_text(self.bundle))
         object.__setattr__(self, "phase", _phase_text(self.phase))
 
 
 @dataclass(frozen=True, slots=True)
-class PhaseCompleted:
+class StepCompleted:
     run_id: str
+    step_id: str
     bundle: str
     phase: str
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "run_id", _require_text(self.run_id, "run_id"))
+        object.__setattr__(self, "step_id", _require_text(self.step_id, "step_id"))
         object.__setattr__(self, "bundle", _bundle_text(self.bundle))
         object.__setattr__(self, "phase", _phase_text(self.phase))
 
 
 @dataclass(frozen=True, slots=True)
-class PhaseFailed:
+class StepFailed:
     run_id: str
+    step_id: str
     bundle: str
     phase: str
     error: str
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "run_id", _require_text(self.run_id, "run_id"))
+        object.__setattr__(self, "step_id", _require_text(self.step_id, "step_id"))
         object.__setattr__(self, "bundle", _bundle_text(self.bundle))
         object.__setattr__(self, "phase", _phase_text(self.phase))
         object.__setattr__(self, "error", _require_text(self.error, "error"))
@@ -507,11 +507,11 @@ class CiTemplatesInstalled:
 
 
 Event = (
-    RunStarted | BundleStarted | BundleCompleted | BundleFailed | BundleRetryStarted | PhaseStarted | PhaseCompleted | PhaseFailed |
+    RunStarted | BundleStarted | BundleCompleted | BundleFailed | BundleRetryStarted | StepStarted | StepCompleted | StepFailed |
     KnowledgePatchCreated | KnowledgePatchRejected | TestsStarted | TestsFinished | EscalationRaised | EscalationResolved |
     UserDecisionRequested | UserDecisionReceived | RunResumed | RunCompleted | RunCancelled | CiTemplatesInstalled
 )
-Command = StartRun | ResumeRun | RetryPhase | RetryBundle | CancelRun | InstallCiTemplates | SubmitUserDecision | RejectKnowledgePatch
+Command = StartRun | ResumeRun | RetryStep | RetryBundle | CancelRun | InstallCiTemplates | SubmitUserDecision | RejectKnowledgePatch
 Query = GetRun | ListRuns | GetRunState | GetAvailableActions | ListKnowledgePatches | GetKnowledgePatch
 
 
@@ -550,9 +550,25 @@ class TaskSummaryView:
 
 
 @dataclass(frozen=True, slots=True)
+class StepView:
+    step_id: str
+    bundle: str
+    phase: str
+    step_index: int
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "step_id", _require_text(self.step_id, "step_id"))
+        object.__setattr__(self, "bundle", _bundle_text(self.bundle, "bundle"))
+        object.__setattr__(self, "phase", _phase_text(self.phase, "phase"))
+        if isinstance(self.step_index, bool) or not isinstance(self.step_index, int) or self.step_index < 0:
+            raise ValueError("step_index must be a non-negative integer")
+
+
+@dataclass(frozen=True, slots=True)
 class ErrorView:
     code: str
     message: str
+    step_id: str | None = None
     bundle: str | None = None
     phase: str | None = None
     timestamp: str = "unknown"
@@ -560,6 +576,7 @@ class ErrorView:
     def __post_init__(self) -> None:
         object.__setattr__(self, "code", _require_text(self.code, "code"))
         object.__setattr__(self, "message", _require_text(self.message, "message"))
+        object.__setattr__(self, "step_id", None if self.step_id is None else _require_text(self.step_id, "step_id"))
         object.__setattr__(self, "bundle", None if self.bundle is None else _bundle_text(self.bundle, "bundle"))
         object.__setattr__(self, "phase", None if self.phase is None else _phase_text(self.phase))
         object.__setattr__(self, "timestamp", _require_text(self.timestamp, "timestamp"))
@@ -602,9 +619,8 @@ class RunView:
     request: str
     status: str
     root_bundle: str
-    current_bundle: str | None = None
-    current_phase: str | None = None
-    completed_phases: tuple[str, ...] = ()
+    current_step: StepView | None = None
+    completed_steps: tuple[StepView, ...] = ()
     completed_bundles: tuple[str, ...] = ()
     pending_decision: PendingDecisionView | None = None
     tasks: tuple[TaskSummaryView, ...] = ()
@@ -615,9 +631,9 @@ class RunView:
         object.__setattr__(self, "request", _require_text(self.request, "request"))
         object.__setattr__(self, "status", _status_text(self.status))
         object.__setattr__(self, "root_bundle", _bundle_text(self.root_bundle, "root_bundle"))
-        object.__setattr__(self, "current_bundle", None if self.current_bundle is None else _bundle_text(self.current_bundle, "current_bundle"))
-        object.__setattr__(self, "current_phase", None if self.current_phase is None else _phase_text(self.current_phase, "current_phase"))
-        object.__setattr__(self, "completed_phases", tuple(_phase_text(phase, "completed_phases") for phase in self.completed_phases))
+        if self.current_step is not None:
+            _require_instance(self.current_step, StepView, "current_step")
+        object.__setattr__(self, "completed_steps", _typed_tuple(self.completed_steps, StepView, "completed_steps"))
         object.__setattr__(self, "completed_bundles", tuple(_bundle_text(bundle, "completed_bundles") for bundle in self.completed_bundles))
         if self.pending_decision is not None:
             _require_instance(self.pending_decision, PendingDecisionView, "pending_decision")
@@ -630,15 +646,14 @@ class RunSummaryView:
     run_id: str
     request: str
     status: str
-    current_bundle: str | None = None
-    current_phase: str | None = None
+    current_step: StepView | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "run_id", _require_text(self.run_id, "run_id"))
         object.__setattr__(self, "request", _require_text(self.request, "request"))
         object.__setattr__(self, "status", _status_text(self.status))
-        object.__setattr__(self, "current_bundle", None if self.current_bundle is None else _bundle_text(self.current_bundle, "current_bundle"))
-        object.__setattr__(self, "current_phase", None if self.current_phase is None else _phase_text(self.current_phase, "current_phase"))
+        if self.current_step is not None:
+            _require_instance(self.current_step, StepView, "current_step")
 
 
 @dataclass(frozen=True, slots=True)
@@ -683,15 +698,13 @@ class ListRunsResult:
 class GetRunStateResult:
     run_id: str
     status: str
-    current_bundle: str | None = None
-    current_phase: str | None = None
+    current_step: StepView | None = None
     pending_decision: PendingDecisionView | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "run_id", _require_text(self.run_id, "run_id"))
         object.__setattr__(self, "status", _status_text(self.status))
-        object.__setattr__(self, "current_bundle", None if self.current_bundle is None else _bundle_text(self.current_bundle, "current_bundle"))
-        object.__setattr__(self, "current_phase", None if self.current_phase is None else _phase_text(self.current_phase, "current_phase"))
+        if self.current_step is not None: _require_instance(self.current_step, StepView, "current_step")
         if self.pending_decision is not None: _require_instance(self.pending_decision, PendingDecisionView, "pending_decision")
 
 

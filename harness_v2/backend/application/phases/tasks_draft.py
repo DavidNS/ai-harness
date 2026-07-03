@@ -3,12 +3,23 @@
 from __future__ import annotations
 
 from harness_v2.backend.application.phase_executor import PhaseExecutionContext, PhaseResult
-from harness_v2.backend.application.phase_artifacts import sdd, shared_inputs
+from harness_v2.backend.application.phase_artifacts import shared_inputs
 from harness_v2.backend.domain.lifecycle import BundleName, PhaseName
-from harness_v2.backend.domain.tasks import TaskStatus, TaskSummary
 
 
 def execute(context: PhaseExecutionContext) -> PhaseResult:
-    document = context.artifacts.ensure_worker_json(context.run, BundleName.TASKS_BUNDLE, PhaseName.TASKS_DRAFT, "tasks", "tasks.json", {"explore_bundle_view": shared_inputs.read_explore_bundle_view(context), "purpose/bundle.json": shared_inputs.read_purpose_bundle(context), "spec.json": shared_inputs.read_required_json(context, "spec.json", "spec_document"), "design.json": shared_inputs.read_required_json(context, "design.json", "design_document"), "explorer_scope": {}}, sdd.validate_tasks_document)
-    tasks = tuple(TaskSummary(str(item["id"]), str(item["title"]), TaskStatus.PENDING) for item in document["tasks"])
-    return PhaseResult(tasks=tasks)
+    context.artifacts.ensure_worker_json_candidate(
+        context.run,
+        BundleName.TASKS_BUNDLE,
+        PhaseName.TASKS_DRAFT,
+        "tasks",
+        "tasks.json",
+        {
+            "explore_bundle_view": shared_inputs.read_explore_bundle_view(context),
+            "purpose/bundle.json": shared_inputs.read_purpose_bundle(context),
+            "spec.json": shared_inputs.read_required_json(context, "spec.json", "spec_document"),
+            "design.json": shared_inputs.read_required_json(context, "design.json", "design_document"),
+            "explorer_scope": {},
+        },
+    )
+    return PhaseResult()

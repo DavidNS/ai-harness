@@ -40,7 +40,7 @@ def explore_bundle():
         "normalized_request": {"summary": "Implement the request."},
         "triage": {"complexity": "local_change", "ambiguity": "clear", "risk": "low", "evidence_depth": "standard"},
         "evidence": [{"id": "E1", "kind": "knowledge", "claim": "The fixture request is bounded.", "status": "supported", "confidence": "high", "severity": "info", "sources": [{"type": "knowledge", "description": "Fixture evidence."}]}],
-        "entries": [{"id": "entry-1", "classification": "improvement", "title": "Implement the request", "problem": "The bounded request should be implemented.", "evidence_refs": ["E1"], "constraints": ["Offline fixture."], "unknowns": []}],
+        "entries": [{"id": "entry-1", "classification": "improvement", "action": "create", "title": "Implement the request", "rationale": "Evidence supports implementing the bounded request.", "behavioral_delta": "The requested behavior is implemented.", "minimum_verification": "Run the focused tests for the requested behavior.", "problem": "The bounded request should be implemented.", "evidence_refs": ["E1"], "constraints": ["Offline fixture."], "unknowns": []}],
     }, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
 
 def explore_synthesis():
@@ -50,7 +50,7 @@ def explore_synthesis():
         "status": "ready_for_purpose",
         "normalized_request": {"summary": "Implement the request."},
         "triage": {"complexity": "local_change", "ambiguity": "clear", "risk": "low", "evidence_depth": "standard"},
-        "entries": [{"id": "entry-1", "classification": "improvement", "title": "Implement the request", "problem": "The bounded request should be implemented.", "evidence_refs": ["E1"], "constraints": ["Offline fixture."], "unknowns": []}],
+        "entries": [{"id": "entry-1", "classification": "improvement", "action": "create", "title": "Implement the request", "rationale": "Evidence supports implementing the bounded request.", "behavioral_delta": "The requested behavior is implemented.", "minimum_verification": "Run the focused tests for the requested behavior.", "problem": "The bounded request should be implemented.", "evidence_refs": ["E1"], "constraints": ["Offline fixture."], "unknowns": []}],
     }, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
 
 stage_outputs = {

@@ -1,6 +1,7 @@
 {
   "commands": [],
   "mcp_tools": [],
+  "output_schema": "evidence_digest",
   "paths": [
     {
       "mode": "read",

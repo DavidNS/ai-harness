@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import codecs
+import json
 import os
 import subprocess
+import tempfile
 import threading
 import time
 from dataclasses import dataclass, field
@@ -35,6 +37,14 @@ DEFAULT_ENV_ALLOWLIST = frozenset(
     }
 )
 _PIPE_DRAIN_TIMEOUT_SECONDS = 1.0
+
+
+@dataclass(frozen=True, slots=True)
+class _ProjectedCommand:
+    argv: list[str]
+    stdin_input: str | None
+    stdin_devnull: bool
+    cleanup_paths: tuple[Path, ...] = ()
 
 
 class _BoundedCapture:
@@ -150,16 +160,36 @@ def _codex_config(request: ModelProviderRequest) -> list[str]:
     return args
 
 
-def _project(command: Sequence[str], request: ModelProviderRequest) -> tuple[list[str], str | None, bool]:
+def _schema_json(request: ModelProviderRequest) -> str | None:
+    if request.output_schema is None:
+        return None
+    return json.dumps(request.output_schema.schema, sort_keys=True, separators=(",", ":"))
+
+
+def _schema_temp_file(request: ModelProviderRequest) -> Path | None:
+    schema_json = _schema_json(request)
+    if schema_json is None:
+        return None
+    safe_name = "".join(char if char.isalnum() or char in "._-" else "_" for char in request.output_schema.name)
+    fd, raw_path = tempfile.mkstemp(prefix=f"ai-harness-{safe_name}-", suffix=".schema.json")
+    path = Path(raw_path)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(schema_json)
+        handle.write("\n")
+    return path
+
+
+def _project(command: Sequence[str], request: ModelProviderRequest) -> _ProjectedCommand:
     provider = _provider_name(command)
     capabilities = request.capabilities
     if provider == "claude":
-        return _project_claude(command, capabilities, request), request.prompt, False
+        return _ProjectedCommand(_project_claude(command, capabilities, request), request.prompt, False)
     if provider == "codex":
-        return _project_codex(command, capabilities, request), None, True
-    if _has_capabilities(capabilities):
-        raise CapabilityProjectionError("custom provider commands cannot enforce worker capabilities")
-    return list(command), request.prompt, False
+        argv, cleanup_paths = _project_codex(command, capabilities, request)
+        return _ProjectedCommand(argv, None, True, cleanup_paths)
+    if _has_capabilities(capabilities) or request.output_schema is not None:
+        raise CapabilityProjectionError("custom provider commands cannot enforce worker capabilities or output schemas")
+    return _ProjectedCommand(list(command), request.prompt, False)
 
 
 def _has_capabilities(capabilities: CapabilityProjection) -> bool:
@@ -188,23 +218,30 @@ def _project_claude(command: Sequence[str], capabilities: CapabilityProjection, 
     tools = "Read,Glob,Grep" if mode == "read" else "Read,Glob,Grep,Edit,Write"
     projected = list(command[:1]) + _model_arg(request.model.model) + list(command[1:])
     projected.extend(("--tools", tools, "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}'))
+    schema_json = _schema_json(request)
+    if schema_json is not None:
+        projected.extend(("--json-schema", schema_json))
     if mode == "write":
         projected.extend(("--permission-mode", "acceptEdits"))
     return projected
 
 
-def _project_codex(command: Sequence[str], capabilities: CapabilityProjection, request: ModelProviderRequest) -> list[str]:
+def _project_codex(command: Sequence[str], capabilities: CapabilityProjection, request: ModelProviderRequest) -> tuple[list[str], tuple[Path, ...]]:
     mode = _mode(capabilities)
-    if mode == "read":
-        raise CapabilityProjectionError("Codex cannot enforce read-only worker filesystem permissions")
     _reject_commands_and_mcp(capabilities, "Codex")
     projected = list(command)
     if projected[-1:] == ["-"]:
         projected = projected[:-1]
     if len(projected) >= 2 and Path(projected[0]).name == "codex" and projected[1] == "exec":
         projected = projected[:2] + _codex_config(request) + projected[2:]
-    projected.extend(("--dangerously-bypass-approvals-and-sandbox", "--dangerously-bypass-hook-trust", request.prompt))
-    return projected
+    cleanup_paths: tuple[Path, ...] = ()
+    schema_path = _schema_temp_file(request)
+    if schema_path is not None:
+        projected.extend(("--output-schema", str(schema_path)))
+        cleanup_paths = (schema_path,)
+    sandbox = "read-only" if mode == "read" else "workspace-write"
+    projected.extend(("--sandbox", sandbox, request.prompt))
+    return projected, cleanup_paths
 
 
 @dataclass(frozen=True, slots=True)
@@ -238,16 +275,20 @@ class CliModelProvider:
         target = request.working_directory.resolve()
         if not target.is_dir():
             raise ModelProviderError(f"provider cwd is not a directory: {target}")
-        command, stdin_input, stdin_devnull = _project(self.command, request)
-        return self._run_process(
-            command,
-            cwd=target,
-            env=_effective_env(os.environ if self.environment is None else self.environment, self.allowed_environment),
-            stdin_input=stdin_input,
-            stdin_devnull=stdin_devnull,
-            timeout_seconds=_effective_timeout(self.timeout_seconds, request.timeout.seconds),
-            output_limit=min(self.output_limit, request.truncation.output_bytes),
-        )
+        projected = _project(self.command, request)
+        try:
+            return self._run_process(
+                projected.argv,
+                cwd=target,
+                env=_effective_env(os.environ if self.environment is None else self.environment, self.allowed_environment),
+                stdin_input=projected.stdin_input,
+                stdin_devnull=projected.stdin_devnull,
+                timeout_seconds=_effective_timeout(self.timeout_seconds, request.timeout.seconds),
+                output_limit=min(self.output_limit, request.truncation.output_bytes),
+            )
+        finally:
+            for path in projected.cleanup_paths:
+                path.unlink(missing_ok=True)
 
     def _run_process(
         self,

@@ -5,7 +5,6 @@ import json
 import os
 import subprocess
 import sys
-import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -18,6 +17,7 @@ from harness_v2.backend.ports.model_provider import (
     ModelProviderError,
     ModelProviderRequest,
     ModelSelection,
+    OutputSchema,
     PathCapability,
     TimeoutPolicy,
     TruncationPolicy,
@@ -72,6 +72,7 @@ def request(
     model: str | None = None,
     reasoning_effort: str | None = "medium",
     capabilities: CapabilityProjection | None = None,
+    output_schema: OutputSchema | None = None,
     timeout: float | None = 17,
     output_bytes: int = 2048,
 ) -> ModelProviderRequest:
@@ -80,6 +81,7 @@ def request(
         working_directory=ROOT,
         model=ModelSelection(provider, model, reasoning_effort),
         capabilities=permissions() if capabilities is None else capabilities,
+        output_schema=output_schema,
         timeout=TimeoutPolicy(timeout),
         truncation=TruncationPolicy(output_bytes),
     )
@@ -116,12 +118,13 @@ class CliModelProviderIntegrationTests(unittest.TestCase):
         self.assertIn("[output truncated]", large.stdout)
 
     @mock.patch("harness_v2.adapters.models.cli.subprocess.Popen")
-    def test_claude_projection_limits_tools_and_uses_shell_false(self, popen) -> None:
+    def test_claude_projection_limits_tools_adds_json_schema_and_uses_shell_false(self, popen) -> None:
         process = CompletedPopen()
         popen.return_value = process
+        schema = OutputSchema("request_profile", {"type": "object", "required": ["schema_version"]})
 
         CliModelProvider(("claude", "--print"), timeout_seconds=30).run(
-            request("inspect", provider="claude", model="sonnet", capabilities=permissions("read"))
+            request("inspect", provider="claude", model="sonnet", capabilities=permissions("read"), output_schema=schema)
         )
 
         argv = popen.call_args.args[0]
@@ -129,17 +132,26 @@ class CliModelProviderIntegrationTests(unittest.TestCase):
         self.assertIn("--model", argv)
         self.assertIn("sonnet", argv)
         self.assertIn("Read,Glob,Grep", argv)
+        self.assertEqual(schema.schema, json.loads(argv[argv.index("--json-schema") + 1]))
         self.assertNotIn("Bash", argv)
         self.assertFalse(popen.call_args.kwargs["shell"])
         self.assertEqual(17, process.wait_timeout)
 
     @mock.patch("harness_v2.adapters.models.cli.subprocess.Popen")
-    def test_codex_projection_passes_prompt_as_argument_and_uses_shell_false(self, popen) -> None:
+    def test_codex_write_projection_passes_workspace_sandbox_prompt_schema_file_and_uses_shell_false(self, popen) -> None:
+        captured_schema = {}
         process = CompletedPopen()
-        popen.return_value = process
+
+        def start(argv, **kwargs):
+            schema_path = Path(argv[argv.index("--output-schema") + 1])
+            captured_schema.update(json.loads(schema_path.read_text(encoding="utf-8")))
+            return process
+
+        popen.side_effect = start
+        schema = OutputSchema("request_profile", {"type": "object", "required": ["schema_version"]})
 
         CliModelProvider.for_name("codex", timeout_seconds=30).run(
-            request("inspect", provider="codex", model="gpt-5", reasoning_effort="low", capabilities=permissions("write"))
+            request("inspect", provider="codex", model="gpt-5", reasoning_effort="low", capabilities=permissions("write"), output_schema=schema)
         )
 
         argv = popen.call_args.args[0]
@@ -147,15 +159,39 @@ class CliModelProviderIntegrationTests(unittest.TestCase):
         self.assertIn("--model", argv)
         self.assertIn("gpt-5", argv)
         self.assertIn('model_reasoning_effort="low"', argv)
+        self.assertEqual("workspace-write", argv[argv.index("--sandbox") + 1])
+        self.assertNotIn("--dangerously-bypass-approvals-and-sandbox", argv)
+        self.assertEqual(schema.schema, captured_schema)
+        self.assertFalse(Path(argv[argv.index("--output-schema") + 1]).exists())
         self.assertEqual("inspect", argv[-1])
         self.assertEqual(subprocess.DEVNULL, popen.call_args.kwargs["stdin"])
         self.assertFalse(popen.call_args.kwargs["shell"])
         self.assertEqual(17, process.wait_timeout)
 
+    @mock.patch("harness_v2.adapters.models.cli.subprocess.Popen")
+    def test_codex_read_projection_passes_read_only_sandbox_and_schema(self, popen) -> None:
+        captured_schema = {}
+        process = CompletedPopen()
 
-    def test_codex_rejects_read_only_projection(self) -> None:
-        with self.assertRaisesRegex(CapabilityProjectionError, "read-only"):
-            CliModelProvider.for_name("codex").run(request(provider="codex", capabilities=permissions("read")))
+        def start(argv, **kwargs):
+            schema_path = Path(argv[argv.index("--output-schema") + 1])
+            captured_schema.update(json.loads(schema_path.read_text(encoding="utf-8")))
+            return process
+
+        popen.side_effect = start
+        schema = OutputSchema("request_profile", {"type": "object", "required": ["schema_version"]})
+
+        CliModelProvider.for_name("codex", timeout_seconds=30).run(
+            request("inspect", provider="codex", model="gpt-5", capabilities=permissions("read"), output_schema=schema)
+        )
+
+        argv = popen.call_args.args[0]
+        self.assertEqual("read-only", argv[argv.index("--sandbox") + 1])
+        self.assertNotIn("--dangerously-bypass-approvals-and-sandbox", argv)
+        self.assertEqual(schema.schema, captured_schema)
+        self.assertEqual("inspect", argv[-1])
+        self.assertEqual(subprocess.DEVNULL, popen.call_args.kwargs["stdin"])
+        self.assertFalse(popen.call_args.kwargs["shell"])
 
     def test_process_start_failures_are_model_provider_errors(self) -> None:
         with self.assertRaises(ModelProviderError):
@@ -187,6 +223,10 @@ class CliModelProviderIntegrationTests(unittest.TestCase):
             )
         with self.assertRaisesRegex(CapabilityProjectionError, "custom provider"):
             CliModelProvider((sys.executable, "-c", "print('ok')")).run(request(provider="custom"))
+        with self.assertRaisesRegex(CapabilityProjectionError, "output schemas"):
+            CliModelProvider((sys.executable, "-c", "print('ok')")).run(
+                request(provider="custom", capabilities=CapabilityProjection(), output_schema=OutputSchema("schema", {"type": "object"}))
+            )
 
 
 if __name__ == "__main__":

@@ -15,7 +15,8 @@ from harness_v2.backend.application.contracts import (
     ListRunsResult,
     QueryResult,
     ResumeRun,
-    RetryPhase,
+    RetryBundle,
+    RetryStep,
     StartRun,
     SubmitUserDecision,
 )
@@ -71,11 +72,17 @@ class UiController:
             return with_error(state, "select a run before cancelling")
         return self._execute_run_command(state, CancelRun(run_id), "cancelled run")
 
-    def retry(self, state: UiState, bundle: str, phase: str) -> UiState:
+    def retry(self, state: UiState, step_id: str) -> UiState:
         run_id = self._selected_run_id(state)
         if run_id is None:
             return with_error(state, "select a run before retrying")
-        return self._execute_run_command(state, RetryPhase(run_id, bundle, phase), "retry started")
+        return self._execute_run_command(state, RetryStep(run_id, step_id), "retry started")
+
+    def retry_bundle(self, state: UiState, bundle: str) -> UiState:
+        run_id = self._selected_run_id(state)
+        if run_id is None:
+            return with_error(state, "select a run before retrying")
+        return self._execute_run_command(state, RetryBundle(run_id, bundle), "retry started")
 
     def submit_decision(self, state: UiState, response: str) -> UiState:
         run = state.selected_run

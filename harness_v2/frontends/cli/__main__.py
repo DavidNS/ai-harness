@@ -29,7 +29,7 @@ from harness_v2.backend.application.contracts import (
     RejectKnowledgePatch,
     RejectKnowledgePatchResult,
     ResumeRun,
-    RetryPhase,
+    RetryStep,
     RunNotFoundError,
     RunView,
     StartRun,
@@ -101,10 +101,9 @@ def _parser() -> argparse.ArgumentParser:
     cancel = subcommands.add_parser("cancel", help="cancel an active run")
     cancel.add_argument("run_id")
 
-    retry = subcommands.add_parser("retry", help="retry the last failed phase")
+    retry = subcommands.add_parser("retry", help="retry the failed step")
     retry.add_argument("run_id")
-    retry.add_argument("bundle")
-    retry.add_argument("phase")
+    retry.add_argument("step_id")
 
     decision = subcommands.add_parser("decision", help="submit a pending user decision")
     decision.add_argument("run_id")
@@ -144,10 +143,11 @@ def _render_run(run: RunView) -> None:
     print(f"Status: {run.status}")
     print(f"Request: {run.request}")
     print(f"Root bundle: {run.root_bundle}")
-    if run.current_phase is not None:
-        print(f"Current phase: {run.current_bundle}/{run.current_phase}")
-    if run.completed_phases:
-        print(f"Completed phases: {', '.join(run.completed_phases)}")
+    if run.current_step is not None:
+        step = run.current_step
+        print(f"Current step: {step.step_id} {step.bundle}/{step.phase}")
+    if run.completed_steps:
+        print("Completed steps: " + ", ".join(step.step_id for step in run.completed_steps))
     if run.pending_decision is not None:
         decision = run.pending_decision
         options = f" options={','.join(decision.options)}" if decision.options else ""
@@ -157,9 +157,12 @@ def _render_run(run: RunView) -> None:
 
 def _render_events(result: CommandResult) -> None:
     for event in result.events:
+        step_id = getattr(event, "step_id", None)
         phase = getattr(event, "phase", None)
         bundle = getattr(event, "bundle", None)
-        if phase and bundle:
+        if step_id and phase and bundle:
+            suffix = f" step={step_id} bundle={bundle} phase={phase}"
+        elif phase and bundle:
             suffix = f" bundle={bundle} phase={phase}"
         elif phase:
             suffix = f" phase={phase}"
@@ -205,15 +208,16 @@ def _render_get(result: GetRunResult) -> None:
 def _render_list(result: ListRunsResult) -> None:
     print(f"Runs: {len(result.runs)}")
     for run in result.runs:
-        phase = f" bundle={run.current_bundle} phase={run.current_phase}" if run.current_phase else ""
+        phase = f" step={run.current_step.step_id} bundle={run.current_step.bundle} phase={run.current_step.phase}" if run.current_step else ""
         print(f"Run: {run.run_id} status={run.status}{phase} request={run.request}")
 
 
 def _render_state(result: GetRunStateResult) -> None:
     print(f"Run: {result.run_id}")
     print(f"Status: {result.status}")
-    if result.current_phase is not None:
-        print(f"Current phase: {result.current_phase}")
+    if result.current_step is not None:
+        step = result.current_step
+        print(f"Current step: {step.step_id} {step.bundle}/{step.phase}")
     if result.pending_decision is not None:
         decision = result.pending_decision
         options = f" options={','.join(decision.options)}" if decision.options else ""
@@ -290,7 +294,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             _render_command_result(host.execute(CancelRun(run_id=args.run_id)))
             return 0
         if args.command == "retry":
-            _render_command_result(host.execute(RetryPhase(run_id=args.run_id, bundle=args.bundle, phase=args.phase)))
+            _render_command_result(host.execute(RetryStep(run_id=args.run_id, step_id=args.step_id)))
             return 0
         if args.command == "decision":
             _render_command_result(

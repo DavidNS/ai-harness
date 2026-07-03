@@ -57,6 +57,9 @@ class ExplorationMapBuilder:
         work_shapes = self._candidate_work_shapes(risks, unknowns, surfaces)
         structural_signals = self._signals_by_kind(risks, "coupling")[:_SIGNAL_LIMIT]
         security_signals = self._signals_by_kind(risks, "security")[:_SIGNAL_LIMIT]
+        existing_functionality = self._existing_functionality()[:8]
+        similar_functionality = self._similar_functionality(existing_functionality)[:8]
+        duplicate_search = self._duplicate_search(existing_functionality, similar_functionality)
         return {
             "schema_version": 1,
             "kind": "exploration_map",
@@ -67,8 +70,9 @@ class ExplorationMapBuilder:
             "unknowns": unknowns,
             "candidate_work_shapes": work_shapes,
             "verification_surfaces": verification,
-            "existing_functionality": [],
-            "similar_functionality": [],
+            "existing_functionality": existing_functionality,
+            "similar_functionality": similar_functionality,
+            "duplicate_search": duplicate_search,
             "structural_signals": structural_signals,
             "security_signals": security_signals,
             "handoff_notes": self._handoff_notes(unknowns, risks, verification),
@@ -127,6 +131,142 @@ class ExplorationMapBuilder:
             "text": _text(item.get("claim")) or "Evidence item did not include a claim.",
             "evidence_refs": [_text(item.get("id"))] if _text(item.get("id")) else [],
         } for index, item in enumerate(evidence, start=1)]
+
+    def _existing_functionality(self) -> list[dict[str, object]]:
+        items: list[dict[str, object]] = []
+        for observation in self._repository_observations:
+            path = _path(observation.get("path"))
+            if not path:
+                continue
+            kind = _text(observation.get("kind")).casefold()
+            score = observation.get("score")
+            score_value = score if isinstance(score, int) and not isinstance(score, bool) else 0
+            matches = _string_items(observation.get("matches"))
+            symbols = _string_items(observation.get("symbols"))
+            if kind not in {"source", "test"} and not symbols:
+                continue
+            if score_value < 10 and not matches:
+                continue
+            item: dict[str, object] = {
+                "id": f"EF{len(items) + 1}",
+                "kind": kind or "repository",
+                "path": path,
+                "summary": matches[0] if matches else _surface_reason(observation),
+                "confidence": "high" if score_value >= 20 or symbols else "medium",
+                "evidence_refs": [],
+            }
+            if score_value:
+                item["score"] = score_value
+            source_id = _text(observation.get("id"))
+            if source_id:
+                item["source_id"] = source_id
+                item["source_kind"] = "repository_observation"
+            if symbols:
+                item["symbols"] = symbols[:8]
+            items.append(item)
+        return items
+
+    def _similar_functionality(self, existing: Sequence[Mapping[str, object]]) -> list[dict[str, object]]:
+        items: list[dict[str, object]] = []
+        existing_paths = {_text(item.get("path")) for item in existing}
+        for related in self._related_improvements:
+            path = _path(related.get("path"))
+            summary = _text(related.get("summary"))
+            if not path and not summary:
+                continue
+            item: dict[str, object] = {
+                "id": f"SF{len(items) + 1}",
+                "kind": "related_improvement",
+                "path": path,
+                "summary": summary or path,
+                "confidence": "high" if _score(related) >= 8 else "medium",
+                "evidence_refs": [],
+            }
+            score = _score(related)
+            if score:
+                item["score"] = score
+            source_id = _text(related.get("id"))
+            if source_id:
+                item["source_id"] = source_id
+                item["source_kind"] = "related_improvement"
+            checksum = _text(related.get("checksum"))
+            if checksum:
+                item["checksum"] = checksum
+            items.append(item)
+        for observation in self._repository_observations:
+            path = _path(observation.get("path"))
+            if not path or path in existing_paths:
+                continue
+            score = _score(observation)
+            if score < 6:
+                continue
+            item = {
+                "id": f"SF{len(items) + 1}",
+                "kind": _text(observation.get("kind")) or "repository",
+                "path": path,
+                "summary": _surface_reason(observation),
+                "confidence": "medium",
+                "evidence_refs": [],
+                "score": score,
+            }
+            source_id = _text(observation.get("id"))
+            if source_id:
+                item["source_id"] = source_id
+                item["source_kind"] = "repository_observation"
+            items.append(item)
+        return items
+
+    def _duplicate_search(
+        self,
+        existing: Sequence[Mapping[str, object]],
+        similar: Sequence[Mapping[str, object]],
+    ) -> dict[str, object]:
+        terms: list[str] = []
+        surfaces: list[str] = []
+        for observation in self._repository_observations:
+            for term in _string_items(observation.get("matched_terms")):
+                if term not in terms:
+                    terms.append(term)
+            kind = _text(observation.get("kind")) or "repository"
+            if kind not in surfaces:
+                surfaces.append(kind)
+        for related in self._related_improvements:
+            if "related_improvements" not in surfaces:
+                surfaces.append("related_improvements")
+            for term in _string_items(related.get("matched_terms")):
+                if term not in terms:
+                    terms.append(term)
+        matches: list[dict[str, object]] = []
+        for item in [*existing, *similar]:
+            path = _text(item.get("path"))
+            if not path:
+                continue
+            match: dict[str, object] = {
+                "path": path,
+                "kind": _text(item.get("kind")) or "repository",
+                "summary": _text(item.get("summary")) or path,
+                "confidence": _text(item.get("confidence")) or "medium",
+            }
+            for key in ("id", "source_id", "source_kind"):
+                value = _text(item.get(key))
+                if value:
+                    match[key] = value
+            score = item.get("score")
+            if isinstance(score, int) and not isinstance(score, bool):
+                match["score"] = score
+            matches.append(match)
+        no_match_claims: list[dict[str, object]] = []
+        if not matches:
+            no_match_claims.append({
+                "searched_for": "Existing or duplicate functionality related to the request",
+                "confidence": "medium" if terms or surfaces else "low",
+            })
+        return {
+            "searched_terms": terms[:12],
+            "searched_surfaces": surfaces[:8],
+            "matches": matches[:8],
+            "no_match_claims": no_match_claims,
+        }
 
     @staticmethod
     def _signals_by_kind(risks: Sequence[Mapping[str, object]], kind: str) -> list[dict[str, object]]:
@@ -250,3 +390,8 @@ class ExplorationMapBuilder:
             "tasks": [_text(item.get("text")) for item in verification][:_HANDOFF_LIMIT],
         }
 
+
+
+def _score(item: Mapping[str, object]) -> int:
+    score = item.get("score")
+    return score if isinstance(score, int) and not isinstance(score, bool) else 0

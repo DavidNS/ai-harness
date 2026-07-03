@@ -9,6 +9,7 @@ from typing import Any
 from harness_v2.backend.ports.model_provider import (
     CapabilityProjection,
     McpToolCapability,
+    OutputSchema,
     PathCapability,
 )
 from harness_v2.backend.ports.worker_resources import (
@@ -39,6 +40,7 @@ class FileWorkerResourceStore:
             playbook_markdown=worker,
             prompt_markdown=prompt,
             capabilities=_capabilities_from_manifest(normalized, manifest),
+            output_schema=self._output_schema_from_manifest(manifest),
         )
 
     def _read_text(self, folder: str, task_id: str, suffix: str) -> str:
@@ -62,6 +64,22 @@ class FileWorkerResourceStore:
         if not isinstance(value, dict):
             raise WorkerResourceValidationError(f"{path} must contain a JSON object")
         return value
+
+    def _output_schema_from_manifest(self, manifest: dict[str, Any]) -> OutputSchema | None:
+        name = manifest.get("output_schema")
+        if name is None:
+            return None
+        schema_name = require_task_id(_text(name, "output_schema"))
+        path = self._root / "backend" / "application" / "json_schemas" / f"{schema_name}.schema.json"
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except FileNotFoundError as exc:
+            raise WorkerResourceNotFoundError(str(path)) from exc
+        except json.JSONDecodeError as exc:
+            raise WorkerResourceValidationError(f"{path} must be valid JSON") from exc
+        if not isinstance(value, dict) or not value:
+            raise WorkerResourceValidationError(f"{path} must contain a nonempty JSON object")
+        return OutputSchema(schema_name, value)
 
 
 def _capabilities_from_manifest(task_id: str, value: dict[str, Any]) -> CapabilityProjection:

@@ -24,25 +24,6 @@ _OBSERVATION_LIMIT = 12
 _SIGNAL_LIMIT = 8
 _HANDOFF_LIMIT = 8
 
-def _validate_unique_evidence_ids(value: object, field: str) -> None:
-    seen: set[str] = set()
-    for item in _object_list(value, field):
-        evidence_id = _text(item.get("id"))
-        if evidence_id in seen:
-            raise BundleValidationError(f"{field} ids must be unique")
-        seen.add(evidence_id)
-
-def _artifact_strings(value: object) -> tuple[str, ...]:
-    return tuple(item.strip() for item in value if isinstance(item, str) and item.strip())
-
-def _evidence_ids(value: dict[str, Any]) -> set[str]:
-    return {str(item["id"]) for item in _object_list(value.get("evidence"), "evidence")}
-
-def _validate_refs(refs: tuple[str, ...], evidence_ids: set[str]) -> None:
-    missing = [ref for ref in refs if ref not in evidence_ids]
-    if missing:
-        raise BundleValidationError("unknown evidence refs: " + ", ".join(missing))
-
 def _safe_artifact_json(artifacts: Any | None, run_id: str, artifact_id: str) -> dict[str, object]:
     if artifacts is None:
         return {}
@@ -263,10 +244,6 @@ def _text(value: object) -> str:
 
 def candidate_paths(*groups: Sequence[Mapping[str, object]]) -> set[str]:
     return _candidate_paths(*groups)
-
-
-def evidence_ids(value: dict[str, Any]) -> set[str]:
-    return _evidence_ids(value)
 
 
 def object_list(value: object, field: str) -> list[dict[str, Any]]:

@@ -5,7 +5,44 @@
       "items": {
         "additionalProperties": true,
         "properties": {
+          "action": {
+            "enum": [
+              "create",
+              "update_existing",
+              "duplicate_noop",
+              "existing_functionality",
+              "document_limitation",
+              "reject",
+              "ask_user",
+              "blocked"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "behavioral_delta": {
+            "minLength": 1,
+            "type": "string"
+          },
           "classification": {
+            "enum": [
+              "improvement",
+              "limitation",
+              "not_worth_it",
+              "decision_needed",
+              "blocked"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "counterevidence": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
+          },
+          "decision_id": {
             "minLength": 1,
             "type": "string"
           },
@@ -21,6 +58,50 @@
             "minLength": 1,
             "type": "string"
           },
+          "minimum_verification": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "options": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
+          },
+          "question": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "rationale": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "rejected_alternatives": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "target": {
+            "additionalProperties": true,
+            "properties": {
+              "checksum": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "path": {
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "path"
+            ],
+            "type": "object"
+          },
           "title": {
             "minLength": 1,
             "type": "string"
@@ -29,7 +110,9 @@
         "required": [
           "id",
           "classification",
+          "action",
           "title",
+          "rationale",
           "evidence_refs"
         ],
         "type": "object"

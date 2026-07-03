@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from harness_v2.backend.application.contracts import Event, RunSummaryView, RunView
+from harness_v2.frontends.ui.messages import Msg
 
 
 @dataclass(frozen=True, slots=True)
@@ -16,6 +17,29 @@ class UiEventView:
 
 
 @dataclass(frozen=True, slots=True)
+class Choice:
+    """A menu item: a label plus the message it dispatches when activated."""
+
+    label: str
+    msg: Msg
+
+
+@dataclass(frozen=True, slots=True)
+class Screen:
+    """A reusable navigable window. Items are NOT stored here; they are derived
+    purely from state by ``screens.build_items`` so the model never caches
+    backend data."""
+
+    screen_id: str
+    kind: str = "menu"  # "menu" | "prompt" | "input"
+    selected: int = 0
+    context: tuple[str, ...] = ()  # accumulated drill-down args (e.g. chosen bundle)
+
+
+HOME = Screen("home", kind="menu")
+
+
+@dataclass(frozen=True, slots=True)
 class UiState:
     runs: tuple[RunSummaryView, ...] = ()
     selected_run: RunView | None = None
@@ -24,69 +48,35 @@ class UiState:
     events: tuple[UiEventView, ...] = ()
     error: str | None = None
     notice: str | None = None
+    nav: tuple[Screen, ...] = (HOME,)
 
 
 def clear_messages(state: UiState) -> UiState:
-    return UiState(
-        runs=state.runs,
-        selected_run=state.selected_run,
-        selected_actions=state.selected_actions,
-        event_cursor=state.event_cursor,
-        events=state.events,
-        error=None,
-        notice=None,
-    )
+    return replace(state, error=None, notice=None)
 
 
 def with_error(state: UiState, message: str) -> UiState:
-    clean = clear_messages(state)
-    return UiState(
-        runs=clean.runs,
-        selected_run=clean.selected_run,
-        selected_actions=clean.selected_actions,
-        event_cursor=clean.event_cursor,
-        events=clean.events,
-        error=message,
-    )
+    return replace(state, error=message, notice=None)
 
 
 def with_notice(state: UiState, message: str) -> UiState:
-    clean = clear_messages(state)
-    return UiState(
-        runs=clean.runs,
-        selected_run=clean.selected_run,
-        selected_actions=clean.selected_actions,
-        event_cursor=clean.event_cursor,
-        events=clean.events,
-        notice=message,
-    )
+    return replace(state, error=None, notice=message)
 
 
 def replace_run_list(state: UiState, runs: tuple[RunSummaryView, ...]) -> UiState:
     selected = state.selected_run
     if selected is not None and all(run.run_id != selected.run_id for run in runs):
         selected = None
-    return UiState(
+    return replace(
+        state,
         runs=runs,
         selected_run=selected,
         selected_actions=state.selected_actions if selected is not None else (),
-        event_cursor=state.event_cursor,
-        events=state.events,
-        error=state.error,
-        notice=state.notice,
     )
 
 
 def select_run(state: UiState, run: RunView, actions: tuple[str, ...] = ()) -> UiState:
-    return UiState(
-        runs=state.runs,
-        selected_run=run,
-        selected_actions=actions,
-        event_cursor=state.event_cursor,
-        events=state.events,
-        error=state.error,
-        notice=state.notice,
-    )
+    return replace(state, selected_run=run, selected_actions=actions)
 
 
 def append_events(state: UiState, events: tuple[UiEventView, ...], *, limit: int = 50) -> UiState:
@@ -94,26 +84,45 @@ def append_events(state: UiState, events: tuple[UiEventView, ...], *, limit: int
     for event in events:
         if event.event_id is not None:
             cursor = max(cursor, event.event_id)
-    return UiState(
-        runs=state.runs,
-        selected_run=state.selected_run,
-        selected_actions=state.selected_actions,
+    return replace(
+        state,
         event_cursor=cursor,
         events=(*state.events, *events)[-limit:],
-        error=state.error,
-        notice=state.notice,
     )
+
+
+def current_screen(state: UiState) -> Screen:
+    return state.nav[-1]
+
+
+def push_screen(state: UiState, screen: Screen) -> UiState:
+    return replace(state, nav=(*state.nav, screen))
+
+
+def pop_screen(state: UiState) -> UiState:
+    if len(state.nav) <= 1:
+        return state
+    return replace(state, nav=state.nav[:-1])
+
+
+def home_screen(state: UiState) -> UiState:
+    return replace(state, nav=(state.nav[0],))
+
+
+def move_selection(state: UiState, selected: int) -> UiState:
+    top = replace(state.nav[-1], selected=selected)
+    return replace(state, nav=(*state.nav[:-1], top))
 
 
 def event_view(event: Event, event_id: int | None = None) -> UiEventView:
     event_type = type(event).__name__
     run_id = getattr(event, "run_id", None)
     parts: list[str] = []
-    for name in ("bundle", "phase", "origin_bundle", "decision_id", "issue_id", "category", "action", "target_bundle"):
+    for name in ("step_id", "bundle", "phase", "origin_bundle", "decision_id", "issue_id", "category", "action", "target_bundle"):
         value = getattr(event, name, None)
         if value is not None:
             parts.append(f"{name}={value}")
-    if event_type == "PhaseFailed":
+    if event_type == "StepFailed":
         parts.append(f"error={event.error}")
     if event_type == "KnowledgePatchCreated":
         parts.append(f"patch={event.patch_id}")

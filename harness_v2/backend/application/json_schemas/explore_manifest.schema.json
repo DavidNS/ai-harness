@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["schema_version", "kind", "source_artifact", "status", "entries"],
+  "properties": {
+    "schema_version": {"type": "integer"},
+    "kind": {"const": "explore_manifest"},
+    "source_artifact": {"type": "string"},
+    "source_artifacts": {"type": "array", "items": {"type": "string"}},
+    "status": {"type": ["string", "null"]},
+    "normalized_request": {"type": ["string", "object", "null"]},
+    "primary_entry_id": {"type": "string"},
+    "actions": {"type": "array", "items": {"type": "string"}},
+    "targets": {"type": "array", "items": {"type": "object"}},
+    "decision_ids": {"type": "array", "items": {"type": "string"}},
+    "entries": {"type": "array", "items": {"type": "object"}}
+  },
+  "additionalProperties": true
+}

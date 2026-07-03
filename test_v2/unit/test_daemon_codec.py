@@ -9,6 +9,7 @@ from harness_v2.backend.application.contracts import (
     ListRuns,
     RunCompleted,
     RunView,
+    StepView,
     StartRun,
 )
 from harness_v2.backend.domain.lifecycle import PhaseName
@@ -26,13 +27,13 @@ class DaemonCodecTests(unittest.TestCase):
 
     def test_result_round_trips_nested_views_and_events(self) -> None:
         result = CommandResult(
-            run=RunView("run-1", "Fix tests", "COMPLETED", "EXPLORE_BUNDLE", completed_phases=tuple(phase.value for phase in _explore_phases())),
+            run=RunView("run-1", "Fix tests", "COMPLETED", "EXPLORE_BUNDLE", completed_steps=tuple(StepView(f"EXPLORE_BUNDLE:{index + 1:03d}", "EXPLORE_BUNDLE", phase.value, index) for index, phase in enumerate(_explore_phases()))),
             events=(RunCompleted("run-1"),),
         )
         self.assertEqual(result, decode_result(encode_envelope(result)))
 
     def test_query_result_round_trip(self) -> None:
-        result = GetRunStateResult("run-1", "RUNNING", "EXPLORE_BUNDLE", "EXPLORE_REQUEST_UNDERSTANDING")
+        result = GetRunStateResult("run-1", "RUNNING", StepView("EXPLORE_BUNDLE:001", "EXPLORE_BUNDLE", "EXPLORE_REQUEST_UNDERSTANDING", 0))
         self.assertEqual(result, decode_result(encode_envelope(result)))
 
     def test_rejects_unknown_type(self) -> None:
@@ -49,7 +50,7 @@ class DaemonCodecTests(unittest.TestCase):
         with self.assertRaises(CodecError):
             decode_result(encode_envelope(StartRun("Fix tests")))
         with self.assertRaises(CodecError):
-            decode_event(encode_envelope(CommandResult(RunView("run-1", "Fix tests", "COMPLETED", "EXPLORE_BUNDLE", completed_phases=tuple(phase.value for phase in _explore_phases())), ())))
+            decode_event(encode_envelope(CommandResult(RunView("run-1", "Fix tests", "COMPLETED", "EXPLORE_BUNDLE", completed_steps=tuple(StepView(f"EXPLORE_BUNDLE:{index + 1:03d}", "EXPLORE_BUNDLE", phase.value, index) for index, phase in enumerate(_explore_phases()))), ())))
 
 
 def _explore_phases() -> tuple[PhaseName, ...]:

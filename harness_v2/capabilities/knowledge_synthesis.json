@@ -1,13 +1,14 @@
 {
-  "schema_version": 1,
-  "phase": "knowledge_synthesis",
+  "commands": [],
+  "mcp_tools": [],
+  "output_schema": "knowledge_synthesis",
   "paths": [
     {
-      "pattern": ".",
-      "mode": "read"
+      "mode": "read",
+      "pattern": "**"
     }
   ],
-  "commands": [],
-  "skills": [],
-  "mcp_tools": []
+  "phase": "knowledge_synthesis",
+  "schema_version": 1,
+  "skills": []
 }

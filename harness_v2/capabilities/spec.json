@@ -1,6 +1,7 @@
 {
   "commands": [],
   "mcp_tools": [],
+  "output_schema": "spec_document",
   "paths": [
     {
       "mode": "read",

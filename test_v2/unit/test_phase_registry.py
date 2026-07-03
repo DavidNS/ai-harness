@@ -22,16 +22,18 @@ class PhaseFunctionRegistryTests(unittest.TestCase):
         registry = PhaseFunctionRegistry({})
 
         with self.assertRaises(InvalidRunStateError):
-            registry.get(PhaseName.PROPOSAL_PURPOSE)
+            registry.get(PhaseName.PROPOSAL_HANDOFF)
 
     def test_invalidation_rules_are_phase_scoped(self) -> None:
         rules = default_phase_function_registry().invalidation_rules()
 
+        self.assertIn("explore/manifest.json", rules[PhaseName.EXPLORE_HANDOFF].artifacts)
         self.assertIn("published/explore-handoff.json", rules[PhaseName.EXPLORE_HANDOFF].artifacts)
         self.assertIn("workers/EXPLORE_BUNDLE/EXPLORE_REQUEST_UNDERSTANDING/", rules[PhaseName.EXPLORE_REQUEST_UNDERSTANDING].prefixes)
         self.assertIn("design.json", rules[PhaseName.DESIGN_DRAFT].artifacts)
         self.assertIn("tasks.json", rules[PhaseName.TASKS_DRAFT].artifacts)
-        self.assertIn("published/tdd-results.json", rules[PhaseName.TDD_HANDOFF].artifacts)
+        self.assertIn("published/tdd-results.json", rules[PhaseName.TDD_EXECUTE].artifacts)
+        self.assertIn("published/tdd-handoff.json", rules[PhaseName.TDD_HANDOFF].artifacts)
 
 
 

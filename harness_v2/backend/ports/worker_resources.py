@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
-from harness_v2.backend.ports.model_provider import CapabilityProjection
+from harness_v2.backend.ports.model_provider import CapabilityProjection, OutputSchema
 
 
 class WorkerResourceError(RuntimeError):
@@ -41,6 +41,7 @@ class WorkerResourceSpec:
     playbook_markdown: str
     prompt_markdown: str
     capabilities: CapabilityProjection
+    output_schema: OutputSchema | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "task_id", require_task_id(self.task_id))
@@ -48,6 +49,8 @@ class WorkerResourceSpec:
         object.__setattr__(self, "prompt_markdown", require_markdown(self.prompt_markdown, "prompt_markdown"))
         if not isinstance(self.capabilities, CapabilityProjection):
             raise TypeError("capabilities must be CapabilityProjection")
+        if self.output_schema is not None and not isinstance(self.output_schema, OutputSchema):
+            raise TypeError("output_schema must be OutputSchema or None")
 
 
 class WorkerResourcePort(Protocol):

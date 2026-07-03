@@ -10,6 +10,7 @@ from harness_v2.backend.application.contracts import (
     PendingDecisionView,
     RunNotFoundError,
     RunView,
+    StepView,
     TaskSummaryView,
     ErrorView,
     UserDecisionRequested,
@@ -113,8 +114,20 @@ def task_view(task: object) -> TaskSummaryView:
     return TaskSummaryView(task_id=task.task_id, title=task.title, status=task.status.value, attempts=task.attempts, last_failure=task.last_failure)
 
 
+def step_view(run: RunRecord, step_id: str | None) -> StepView | None:
+    if step_id is None:
+        return None
+    step = bundle_catalog.step_for_step_id(run.root_bundle, step_id)
+    return StepView(
+        step_id=step.step_id,
+        bundle=step.bundle_name.value,
+        phase=step.phase_name.value,
+        step_index=step.step_index,
+    )
+
+
 def error_view(error: object) -> ErrorView:
-    return ErrorView(code=error.code, message=error.message, bundle=error.bundle, phase=error.phase, timestamp=error.timestamp)
+    return ErrorView(code=error.code, message=error.message, step_id=error.step_id, bundle=error.bundle, phase=error.phase, timestamp=error.timestamp)
 
 
 def run_to_view(run: RunRecord) -> RunView:
@@ -123,10 +136,9 @@ def run_to_view(run: RunRecord) -> RunView:
         request=run.request,
         status=run.status.value,
         root_bundle=run.root_bundle.value,
-        current_bundle=run.current_bundle.value if run.current_bundle else None,
-        current_phase=run.current_phase.value if run.current_phase else None,
-        completed_phases=tuple(phase.value for phase in run.completed_phases),
-        completed_bundles=tuple(bundle.value for bundle in bundle_catalog.completed_bundles(run.root_bundle, run.completed_phases)),
+        current_step=step_view(run, run.current_step_id),
+        completed_steps=tuple(view for step_id in run.completed_step_ids if (view := step_view(run, step_id)) is not None),
+        completed_bundles=tuple(bundle.value for bundle in bundle_catalog.completed_bundles(run.root_bundle, run.completed_step_ids)),
         pending_decision=pending_decision_view(run),
         tasks=tuple(task_view(task) for task in run.tasks),
         errors=tuple(error_view(error) for error in run.errors),

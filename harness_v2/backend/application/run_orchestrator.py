@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from harness_v2.backend.application.artifact_invalidation import ArtifactInvalidationRule, invalidate_phase_artifacts, restore_invalidated_artifacts
+from harness_v2.backend.application.artifact_invalidation import ArtifactInvalidationRule, invalidate_step_artifacts, restore_invalidated_artifacts
 from harness_v2.backend.application.contracts import (
     BundleCompleted,
     BundleFailed,
@@ -32,16 +32,16 @@ from harness_v2.backend.application.contracts import (
     ListKnowledgePatchesResult,
     ListRuns,
     ListRunsResult,
-    PhaseCompleted,
-    PhaseFailed,
-    PhaseStarted,
+    StepCompleted,
+    StepFailed,
+    StepStarted,
     Query,
     QueryResult,
     RejectKnowledgePatch,
     RejectKnowledgePatchResult,
     ResumeRun,
     RetryBundle,
-    RetryPhase,
+    RetryStep,
     RunCancelled,
     RunCompleted,
     RunNotFoundError,
@@ -52,7 +52,7 @@ from harness_v2.backend.application.contracts import (
     SubmitUserDecision,
     UserDecisionReceived,
 )
-from harness_v2.backend.application.decision_service import DecisionRequest, RequestUserDecisionService, pending_decision_view, run_to_view
+from harness_v2.backend.application.decision_service import DecisionRequest, RequestUserDecisionService, pending_decision_view, run_to_view, step_view
 from harness_v2.backend.application.escalation_service import EscalationPolicyService
 from harness_v2.backend.application.phase_executor import PhaseExecutor
 from harness_v2.backend.application.release_context import ReleaseContextService
@@ -71,19 +71,21 @@ from harness_v2.backend.ports.knowledge_patch_store import KnowledgePatchNotFoun
 from harness_v2.backend.ports.state_store import StateNotFoundError, StateStorePort
 
 
+def _safe_step_id(step_id: str) -> str:
+    return step_id.replace(":", "_")
+
+
 class _UnknownClock:
     def now_iso(self) -> str:
         return "unknown"
 
 
 def run_to_summary(run: RunRecord) -> RunSummaryView:
-    current_bundle = run.current_bundle
     return RunSummaryView(
         run_id=run.run_id,
         request=run.request,
         status=run.status.value,
-        current_bundle=current_bundle.value if current_bundle else None,
-        current_phase=run.current_phase.value if run.current_phase else None,
+        current_step=step_view(run, run.current_step_id),
     )
 
 
@@ -108,8 +110,8 @@ def available_actions(run: RunRecord) -> tuple[str, ...]:
         return ("resume", "cancel")
     if run.status == RunStatus.WAITING_FOR_USER:
         return ("submit-user-decision", "cancel")
-    if run.status == RunStatus.FAILED and run.errors and run.errors[-1].phase is not None:
-        return ("retry-phase", "retry-bundle")
+    if run.status == RunStatus.FAILED and run.current_step_id is not None:
+        return ("retry-step", "retry-bundle")
     return ()
 
 
@@ -149,8 +151,8 @@ class RunOrchestrator:
             result = self._start(command)
         elif isinstance(command, ResumeRun):
             result = self._resume(command)
-        elif isinstance(command, RetryPhase):
-            result = self._retry_phase(command)
+        elif isinstance(command, RetryStep):
+            result = self._retry_step(command)
         elif isinstance(command, RetryBundle):
             result = self._retry_bundle(command)
         elif isinstance(command, CancelRun):
@@ -170,12 +172,10 @@ class RunOrchestrator:
             return ListRunsResult(runs=tuple(run_to_summary(run) for run in self._state_store.list_all()))
         if isinstance(query, GetRunState):
             run = self._get(query.run_id)
-            current_bundle = run.current_bundle
             return GetRunStateResult(
                 run_id=run.run_id,
                 status=run.status.value,
-                current_bundle=current_bundle.value if current_bundle else None,
-                current_phase=run.current_phase.value if run.current_phase else None,
+                current_step=step_view(run, run.current_step_id),
                 pending_decision=pending_decision_view(run),
             )
         if isinstance(query, GetAvailableActions):
@@ -202,7 +202,7 @@ class RunOrchestrator:
             first = bundle_catalog.start_step(run.root_bundle)
             updated = run.replace(status=RunStatus.RUNNING, current_step_id=first.step_id)
             self._state_store.save(updated)
-            start_events = (RunResumed(run.run_id), *(BundleStarted(run.run_id, bundle.value) for bundle in dict.fromkeys(first.bundle_path)), PhaseStarted(run.run_id, first.bundle_name.value, first.phase_name.value))
+            start_events = (RunResumed(run.run_id), *(BundleStarted(run.run_id, bundle.value) for bundle in dict.fromkeys(first.bundle_path)), StepStarted(run.run_id, first.step_id, first.bundle_name.value, first.phase_name.value))
             phase_result = self._execute_current_phase(updated)
             if phase_result is None:
                 return CommandResult(run=run_to_view(updated), events=start_events)
@@ -245,7 +245,7 @@ class RunOrchestrator:
             raise InvalidRunStateError(f"run {run.run_id} is not running {bundle.value}/{current_step.phase_name.value}")
         next_step = bundle_catalog.next_after(run.root_bundle, step_id)
         completed = (*run.completed_step_ids, step_id)
-        events: list[object] = [*extra_events, PhaseCompleted(run.run_id, bundle.value, current_step.phase_name.value)]
+        events: list[object] = [*extra_events, StepCompleted(run.run_id, current_step.step_id, bundle.value, current_step.phase_name.value)]
         before = bundle_catalog.completed_bundles(run.root_bundle, run.completed_step_ids)
         after = bundle_catalog.completed_bundles(run.root_bundle, completed)
         for completed_bundle in after:
@@ -258,7 +258,7 @@ class RunOrchestrator:
             updated = run.replace(current_step_id=next_step.step_id, completed_step_ids=completed)
             if next_step.bundle_name not in after and next_step.bundle_name != bundle:
                 events.append(BundleStarted(run.run_id, next_step.bundle_name.value))
-            events.append(PhaseStarted(run.run_id, next_step.bundle_name.value, next_step.phase_name.value))
+            events.append(StepStarted(run.run_id, next_step.step_id, next_step.bundle_name.value, next_step.phase_name.value))
         self._state_store.save(updated)
         return CommandResult(run=run_to_view(updated), events=tuple(events))
 
@@ -267,25 +267,27 @@ class RunOrchestrator:
         message = str(exc) or type(exc).__name__
         current_step = bundle_catalog.step_for_step_id(run.root_bundle, step_id)
         if self._artifact_store is not None:
-            payload = {"schema_version": 1, "bundle": bundle.value, "phase": current_step.phase_name.value, "error": message, "error_type": type(exc).__name__}
-            self._artifact_store.write(run_id, f"validation/{bundle.value}-{current_step.phase_name.value}-failure.json", (json.dumps(payload, sort_keys=True, indent=2) + "\n").encode("utf-8"))
-        error = ErrorRecord(f"{current_step.phase_name.value}_FAILED", message, bundle=bundle.value, phase=current_step.phase_name.value, timestamp=self._clock.now_iso())
+            payload = {"schema_version": 1, "step_id": current_step.step_id, "bundle": bundle.value, "phase": current_step.phase_name.value, "error": message, "error_type": type(exc).__name__}
+            self._artifact_store.write(run_id, f"validation/{_safe_step_id(current_step.step_id)}-failure.json", (json.dumps(payload, sort_keys=True, indent=2) + "\n").encode("utf-8"))
+        error = ErrorRecord(f"{current_step.phase_name.value}_FAILED", message, step_id=current_step.step_id, bundle=bundle.value, phase=current_step.phase_name.value, timestamp=self._clock.now_iso())
         updated = run.replace(status=RunStatus.FAILED, pending_decision=None, errors=(*run.errors, error))
         self._state_store.save(updated)
-        return CommandResult(run=run_to_view(updated), events=(PhaseFailed(run_id, bundle.value, current_step.phase_name.value, message), BundleFailed(run_id, bundle.value, message)))
+        return CommandResult(run=run_to_view(updated), events=(StepFailed(run_id, current_step.step_id, bundle.value, current_step.phase_name.value, message), BundleFailed(run_id, bundle.value, message)))
 
-    def _retry_phase(self, command: RetryPhase) -> CommandResult:
+    def _retry_step(self, command: RetryStep) -> CommandResult:
         run = self._get(command.run_id)
-        target_bundle = BundleName(command.bundle)
-        target_phase = PhaseName(command.phase)
         if run.status is not RunStatus.FAILED:
             raise InvalidRunStateError(f"run {run.run_id} cannot retry from {run.status.value}")
         if run.current_step_id is None:
             raise InvalidRunStateError(f"run {run.run_id} has no failed step to retry")
-        current_step = bundle_catalog.step_for_step_id(run.root_bundle, run.current_step_id)
-        if current_step.bundle_name is not target_bundle or current_step.phase_name is not target_phase:
-            raise InvalidRunStateError(f"run {run.run_id} last failed step is {current_step.bundle_name.value}/{current_step.phase_name.value}")
-        return self._retry_at_step(run, current_step, retry_bundle=None)
+        try:
+            target_step = bundle_catalog.step_for_step_id(run.root_bundle, command.step_id)
+        except DomainValidationError as exc:
+            raise InvalidRunStateError(str(exc)) from exc
+        if target_step.step_id != run.current_step_id:
+            current_step = bundle_catalog.step_for_step_id(run.root_bundle, run.current_step_id)
+            raise InvalidRunStateError(f"run {run.run_id} last failed step is {current_step.step_id}, not {target_step.step_id}")
+        return self._retry_at_step(run, target_step, retry_bundle=None)
 
     def _retry_bundle(self, command: RetryBundle) -> CommandResult:
         run = self._get(command.run_id)
@@ -308,8 +310,7 @@ class RunOrchestrator:
             invalidated_step_ids = bundle_catalog.step_ids_from(run.root_bundle, target_step.step_id)
         except DomainValidationError as exc:
             raise InvalidRunStateError(str(exc)) from exc
-        invalidated_phases = tuple(bundle_catalog.step_for_step_id(run.root_bundle, step_id).phase_name for step_id in invalidated_step_ids)
-        invalidated = invalidate_phase_artifacts(self._artifact_store, run.run_id, invalidated_phases, self._invalidation_rules)
+        invalidated = invalidate_step_artifacts(self._artifact_store, run.run_id, run.root_bundle, invalidated_step_ids, self._invalidation_rules)
         invalidated_bundles = set(bundle_catalog.parent_bundle(run.root_bundle, step_id) for step_id in invalidated_step_ids)
         tasks = () if BundleName.TASKS_BUNDLE in invalidated_bundles else run.tasks
         updated = run.replace(status=RunStatus.RUNNING, current_step_id=target_step.step_id, completed_step_ids=expected_completed, pending_decision=None, tasks=tasks)
@@ -320,9 +321,9 @@ class RunOrchestrator:
             raise
         events: tuple[object, ...]
         if retry_bundle is None:
-            events = (PhaseStarted(run.run_id, target_bundle.value, target_step.phase_name.value),)
+            events = (StepStarted(run.run_id, target_step.step_id, target_bundle.value, target_step.phase_name.value),)
         else:
-            events = (BundleRetryStarted(run.run_id, retry_bundle.value), PhaseStarted(run.run_id, target_bundle.value, target_step.phase_name.value))
+            events = (BundleRetryStarted(run.run_id, retry_bundle.value), StepStarted(run.run_id, target_step.step_id, target_bundle.value, target_step.phase_name.value))
         return CommandResult(run=run_to_view(updated), events=events)
 
     def _cancel(self, command: CancelRun) -> CommandResult:

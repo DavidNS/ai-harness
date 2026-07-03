@@ -7,15 +7,15 @@ from harness_v2.backend.domain.lifecycle import BundleName, BundleSpec, PhaseNam
 KNOWLEDGE_EXTRACT_EXPLORE = BundleSpec(
     BundleName.KNOWLEDGE_EXTRACT_EXPLORE,
     children=(
-        PhaseRef(PhaseName.KNOWLEDGE_EXTRACT_EXPLORE_SYNTHESIS),
-        PhaseRef(PhaseName.KNOWLEDGE_EXTRACT_EXPLORE_PATCH),
+        PhaseRef(PhaseName.KNOWLEDGE_EXTRACT_SYNTHESIS),
+        PhaseRef(PhaseName.KNOWLEDGE_EXTRACT_PATCH),
     ),
 )
 
 KNOWLEDGE_EXTRACT_TDD = BundleSpec(
     BundleName.KNOWLEDGE_EXTRACT_TDD,
     children=(
-        PhaseRef(PhaseName.KNOWLEDGE_EXTRACT_TDD_SYNTHESIS),
-        PhaseRef(PhaseName.KNOWLEDGE_EXTRACT_TDD_PATCH),
+        PhaseRef(PhaseName.KNOWLEDGE_EXTRACT_SYNTHESIS),
+        PhaseRef(PhaseName.KNOWLEDGE_EXTRACT_PATCH),
     ),
 )

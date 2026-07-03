@@ -1,0 +1,339 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "phase": {
+      "const": "learning"
+    },
+    "proposal_manifest": {
+      "additionalProperties": false,
+      "properties": {
+        "claims_file": {
+          "const": "proposed_claims.jsonl"
+        },
+        "proposal_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "relations_file": {
+          "const": "proposed_relations.jsonl"
+        },
+        "schema_version": {
+          "const": 1
+        },
+        "source_artifacts": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "summary": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema_version",
+        "proposal_id",
+        "summary",
+        "source_artifacts"
+      ],
+      "type": "object"
+    },
+    "proposed_claims": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "claim_type": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "domain": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "evidence": {
+            "items": {
+              "additionalProperties": false,
+              "anyOf": [
+                {
+                  "required": [
+                    "file"
+                  ]
+                },
+                {
+                  "required": [
+                    "artifact"
+                  ]
+                },
+                {
+                  "required": [
+                    "url"
+                  ]
+                }
+              ],
+              "properties": {
+                "artifact": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "commit": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "excerpt": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "file": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "line_end": {
+                  "type": "integer"
+                },
+                "line_start": {
+                  "type": "integer"
+                },
+                "symbol": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": {
+                  "enum": [
+                    "code",
+                    "run_artifact",
+                    "test",
+                    "documentation",
+                    "decision",
+                    "manual"
+                  ]
+                },
+                "url": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "files": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
+          },
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "last_verified": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "metadata": {
+            "type": "object"
+          },
+          "status": {
+            "enum": [
+              "active",
+              "deprecated",
+              "superseded",
+              "conflicted",
+              "unverified",
+              "stale"
+            ]
+          },
+          "subjects": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
+          },
+          "symbols": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
+          },
+          "text": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "valid_from": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "valid_until": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "domain",
+          "subjects",
+          "files",
+          "symbols",
+          "claim_type",
+          "text",
+          "status",
+          "evidence",
+          "valid_from",
+          "valid_until",
+          "last_verified"
+        ],
+        "type": "object"
+      },
+      "minItems": 1,
+      "type": "array"
+    },
+    "proposed_relations": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "domain": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "evidence": {
+            "items": {
+              "additionalProperties": false,
+              "anyOf": [
+                {
+                  "required": [
+                    "file"
+                  ]
+                },
+                {
+                  "required": [
+                    "artifact"
+                  ]
+                },
+                {
+                  "required": [
+                    "url"
+                  ]
+                }
+              ],
+              "properties": {
+                "artifact": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "commit": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "excerpt": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "file": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "line_end": {
+                  "type": "integer"
+                },
+                "line_start": {
+                  "type": "integer"
+                },
+                "symbol": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": {
+                  "enum": [
+                    "code",
+                    "run_artifact",
+                    "test",
+                    "documentation",
+                    "decision",
+                    "manual"
+                  ]
+                },
+                "url": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "metadata": {
+            "type": "object"
+          },
+          "relation_type": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "source": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "active",
+              "deprecated",
+              "superseded",
+              "conflicted",
+              "unverified",
+              "stale"
+            ]
+          },
+          "target": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "domain",
+          "source",
+          "target",
+          "relation_type",
+          "status",
+          "evidence"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "schema_version": {
+      "const": 1
+    }
+  },
+  "required": [
+    "schema_version",
+    "phase",
+    "proposal_manifest",
+    "proposed_claims"
+  ],
+  "type": "object"
+}

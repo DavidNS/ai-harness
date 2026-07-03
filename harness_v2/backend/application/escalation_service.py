@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
-from harness_v2.backend.application.artifact_invalidation import ArtifactInvalidationRule, InvalidatedArtifact, invalidate_phase_artifacts, restore_invalidated_artifacts
-from harness_v2.backend.application.contracts import BundleStarted, CommandResult, EscalationRaised, EscalationResolved, InvalidRunStateError, PhaseFailed, PhaseStarted
+from harness_v2.backend.application.artifact_invalidation import ArtifactInvalidationRule, InvalidatedArtifact, invalidate_step_artifacts, restore_invalidated_artifacts
+from harness_v2.backend.application.contracts import BundleStarted, CommandResult, EscalationRaised, EscalationResolved, InvalidRunStateError, StepFailed, StepStarted
 from harness_v2.backend.application.decision_service import run_to_view
 from harness_v2.backend.domain import bundle_catalog
 from harness_v2.backend.domain.errors import DomainValidationError, ErrorRecord
@@ -70,12 +70,12 @@ class EscalationPolicyService:
                 restore_invalidated_artifacts(self._artifact_store, run.run_id, invalidated)
                 raise
             assert updated.current_bundle is not None and updated.current_step_id is not None
-            return CommandResult(run=run_to_view(updated), events=(raised, resolved, BundleStarted(run.run_id, updated.current_bundle.value), PhaseStarted(run.run_id, updated.current_bundle.value, updated.current_phase.value)))
+            return CommandResult(run=run_to_view(updated), events=(raised, resolved, BundleStarted(run.run_id, updated.current_bundle.value), StepStarted(run.run_id, updated.current_step_id, updated.current_bundle.value, updated.current_phase.value)))
         if resolution.action is EscalationAction.FAIL:
             updated = self._failed(run, issue)
             self._state_store.save(updated)
             assert run.current_bundle is not None and run.current_phase is not None
-            return CommandResult(run=run_to_view(updated), events=(raised, resolved, PhaseFailed(run.run_id, run.current_bundle.value, run.current_phase.value, issue.reason)))
+            return CommandResult(run=run_to_view(updated), events=(raised, resolved, StepFailed(run.run_id, run.current_step_id, run.current_bundle.value, run.current_phase.value, issue.reason)))
         raise InvalidRunStateError("ASK_USER escalation resolution must be represented by a decision request")
 
     def resolve(self, run: RunRecord, issue: EscalationIssue) -> EscalationResolution:
@@ -110,13 +110,12 @@ class EscalationPolicyService:
             completed_prefix = bundle_catalog.completed_prefix_before(run.root_bundle, target_step.step_id)
         except DomainValidationError as exc:
             raise InvalidRunStateError(str(exc)) from exc
-        invalidated_phases = tuple(bundle_catalog.step_for_step_id(run.root_bundle, step_id).phase_name for step_id in invalidated_step_ids)
-        invalidated = invalidate_phase_artifacts(self._artifact_store, run.run_id, invalidated_phases, self._invalidation_rules)
+        invalidated = invalidate_step_artifacts(self._artifact_store, run.run_id, run.root_bundle, invalidated_step_ids, self._invalidation_rules)
         invalidated_bundles = set(bundle_catalog.parent_bundle(run.root_bundle, step_id) for step_id in invalidated_step_ids)
         tasks = () if BundleName.TASKS_BUNDLE in invalidated_bundles else run.tasks
         return (run.replace(status=RunStatus.RUNNING, current_step_id=target_step.step_id, completed_step_ids=completed_prefix, pending_decision=None, tasks=tasks), invalidated)
 
     def _failed(self, run: RunRecord, issue: EscalationIssue) -> RunRecord:
         phase = run.current_phase.value if run.current_phase is not None else None
-        error = ErrorRecord(f"{issue.origin_bundle.value}_ESCALATION_FAILED", issue.reason, bundle=issue.origin_bundle.value, phase=phase, timestamp=self._clock.now_iso())
+        error = ErrorRecord(f"{issue.origin_bundle.value}_ESCALATION_FAILED", issue.reason, step_id=run.current_step_id, bundle=issue.origin_bundle.value, phase=phase, timestamp=self._clock.now_iso())
         return run.replace(status=RunStatus.FAILED, pending_decision=None, errors=(*run.errors, error))

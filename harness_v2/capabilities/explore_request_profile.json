@@ -1,6 +1,7 @@
 {
   "commands": [],
   "mcp_tools": [],
+  "output_schema": "request_profile",
   "paths": [
     {
       "mode": "read",

@@ -15,8 +15,8 @@ class RuntimeLifecycleIntegrationTests(unittest.TestCase):
         fetched = service.query(GetRun(started.run.run_id))
 
         self.assertEqual("EXPLORE_BUNDLE", resumed.run.root_bundle)
-        self.assertEqual("EXPLORE_BUNDLE", resumed.run.current_bundle)
-        self.assertEqual("EXPLORE_REQUEST_UNDERSTANDING", resumed.run.current_phase)
+        self.assertEqual("EXPLORE_BUNDLE", resumed.run.current_step.bundle)
+        self.assertEqual("EXPLORE_REQUEST_UNDERSTANDING", resumed.run.current_step.phase)
         self.assertEqual(resumed.run, fetched.run)
 
 

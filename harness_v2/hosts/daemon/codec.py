@@ -37,16 +37,16 @@ from harness_v2.backend.application.contracts import (
     BundleFailed,
     BundleRetryStarted,
     BundleStarted,
-    PhaseCompleted,
-    PhaseFailed,
-    PhaseStarted,
+    StepCompleted,
+    StepFailed,
+    StepStarted,
     Query,
     QueryResult,
     RejectKnowledgePatch,
     RejectKnowledgePatchResult,
     ResumeRun,
     RetryBundle,
-    RetryPhase,
+    RetryStep,
     RunCancelled,
     RunCompleted,
     RunResumed,
@@ -56,13 +56,14 @@ from harness_v2.backend.application.contracts import (
     StartRun,
     SubmitUserDecision,
     TaskSummaryView,
+    StepView,
     TestsFinished,
     TestsStarted,
     UserDecisionReceived,
     UserDecisionRequested,
 )
 
-_COMMAND_CLASSES = (StartRun, ResumeRun, RetryPhase, RetryBundle, CancelRun, InstallCiTemplates, SubmitUserDecision, RejectKnowledgePatch)
+_COMMAND_CLASSES = (StartRun, ResumeRun, RetryStep, RetryBundle, CancelRun, InstallCiTemplates, SubmitUserDecision, RejectKnowledgePatch)
 _QUERY_CLASSES = (GetRun, ListRuns, GetRunState, GetAvailableActions, ListKnowledgePatches, GetKnowledgePatch)
 _EVENT_CLASSES = (
     RunStarted,
@@ -70,9 +71,9 @@ _EVENT_CLASSES = (
     BundleCompleted,
     BundleFailed,
     BundleRetryStarted,
-    PhaseStarted,
-    PhaseCompleted,
-    PhaseFailed,
+    StepStarted,
+    StepCompleted,
+    StepFailed,
     KnowledgePatchCreated,
     KnowledgePatchRejected,
     TestsStarted,
@@ -97,7 +98,7 @@ _RESULT_CLASSES = (
     RejectKnowledgePatchResult,
     InstallCiTemplatesResult,
 )
-_VIEW_CLASSES = (PendingDecisionView, TaskSummaryView, ErrorView, RunView, RunSummaryView, KnowledgePatchView)
+_VIEW_CLASSES = (PendingDecisionView, TaskSummaryView, StepView, ErrorView, RunView, RunSummaryView, KnowledgePatchView)
 
 _TYPES = {cls.__name__: cls for cls in (*_COMMAND_CLASSES, *_QUERY_CLASSES, *_EVENT_CLASSES, *_RESULT_CLASSES, *_VIEW_CLASSES)}
 _COMMAND_TYPES = {cls.__name__: cls for cls in _COMMAND_CLASSES}

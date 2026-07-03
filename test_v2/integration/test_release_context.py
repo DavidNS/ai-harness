@@ -20,8 +20,8 @@ class ReleaseContextIntegrationTests(unittest.TestCase):
             started = host.execute(StartRun("Fix tests", root_bundle="EXPLORE_BUNDLE"))
             resumed = host.execute(ResumeRun(started.run.run_id))
 
-            self.assertEqual("EXPLORE_BUNDLE", resumed.run.current_bundle)
-            self.assertEqual("EXPLORE_CONTEXT_PACK", resumed.run.current_phase)
+            self.assertEqual("EXPLORE_BUNDLE", resumed.run.current_step.bundle)
+            self.assertEqual("EXPLORE_CONTEXT_PACK", resumed.run.current_step.phase)
 
     def test_install_ci_command_delegates_through_host(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

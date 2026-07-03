@@ -66,11 +66,18 @@ def step_for_step_id(root_bundle: BundleName | str, step_id: str) -> ExecutableS
     raise InvalidTransitionError(f"{normalized} is not in {BundleName(root_bundle).value} bundle")
 
 
-def step_for_phase(root_bundle: BundleName | str, phase: PhaseName | str, *, occurrence: int = 0) -> ExecutableStep:
+def step_for_phase(root_bundle: BundleName | str, phase: PhaseName | str, *, occurrence: int | None = None) -> ExecutableStep:
     normalized = PhaseName(phase)
-    matches = [step for step in linearize_bundle(root_bundle) if step.phase_name is normalized]
+    root = BundleName(root_bundle)
+    matches = [step for step in linearize_bundle(root) if step.phase_name is normalized]
+    if not matches:
+        raise InvalidTransitionError(f"{normalized.value} is not in {root.value} bundle")
+    if occurrence is None:
+        if len(matches) > 1:
+            raise InvalidTransitionError(f"{normalized.value} is ambiguous in {root.value}; use step_id")
+        return matches[0]
     if occurrence < 0 or occurrence >= len(matches):
-        raise InvalidTransitionError(f"{normalized.value} is not in {BundleName(root_bundle).value} bundle")
+        raise InvalidTransitionError(f"{normalized.value} occurrence {occurrence} is not in {root.value} bundle")
     return matches[occurrence]
 
 

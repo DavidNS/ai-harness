@@ -43,7 +43,7 @@ class ScriptedModelProvider:
         if prompt.startswith("LARGE"):
             stdout, truncated = _truncate("x" * (limit + 100), limit)
             return ModelProviderResult(stdout, "", 0, monotonic() - started, truncated=truncated)
-        scripted = _scripted_output(prompt)
+        scripted = _scripted_output(request)
         stdout, truncated = _truncate(scripted if scripted is not None else prompt, limit)
         return ModelProviderResult(stdout, "", 0, monotonic() - started, truncated=truncated)
 
@@ -55,8 +55,8 @@ def _truncate(text: str, limit: int) -> tuple[str, bool]:
     return encoded.decode("utf-8", "ignore") + "\n[output truncated]", True
 
 
-def _scripted_output(prompt: str) -> str | None:
-    payload = _prompt_payload(prompt)
+def _scripted_output(request: ModelProviderRequest) -> str | None:
+    payload = _prompt_payload(request.prompt)
     if payload is None:
         return None
     if not isinstance(payload, dict):
@@ -110,7 +110,11 @@ def _scripted_output(prompt: str) -> str | None:
             "entries": [{
                 "id": "entry-1",
                 "classification": "improvement",
+                "action": "create",
                 "title": "Implement the request",
+                "rationale": "Evidence supports implementing the bounded request.",
+                "behavioral_delta": "The requested behavior is implemented.",
+                "minimum_verification": "Run the focused tests for the requested behavior.",
                 "problem": "The requested bounded change should be implemented.",
                 "evidence_refs": ["E1"],
                 "constraints": [],
@@ -194,12 +198,26 @@ def _scripted_output(prompt: str) -> str | None:
                 "id": "T1",
                 "title": "Implement the bounded change",
                 "depends_on": [],
-                "acceptance_criteria": ["The SDD flow completes."],
-                "touched_paths": ["."],
-                "focused_tests": [["python3", "-B", "-m", "unittest", "discover", "test_v2"]],
+                "acceptance_criteria": ["feature.py contains ready"],
+                "touched_paths": ["feature.py"],
+                "focused_tests": [["python3", "-c", "from pathlib import Path; assert Path('feature.py').read_text() == 'ready\\n'"]],
                 "broader_tests": [],
                 "status": "pending",
             }],
+        })
+    if task_id == "tdd_create_test":
+        return "focused test prepared\n"
+    if task_id == "tdd_implement":
+        request.working_directory.joinpath("feature.py").write_text("ready\n", encoding="utf-8")
+        return "implemented feature.py\n"
+    if task_id == "tdd_review":
+        return _json({
+            "schema_version": 1,
+            "kind": "tdd_review",
+            "verdict": "APPROVE",
+            "findings": ["implementation satisfies the task"],
+            "acceptance_criteria": ["feature.py contains ready"],
+            "test_evidence": {"focused": "passed"},
         })
     return None
 

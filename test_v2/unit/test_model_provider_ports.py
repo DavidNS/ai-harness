@@ -10,6 +10,7 @@ from harness_v2.backend.ports.model_provider import (
     ModelProviderRequest,
     ModelProviderResult,
     ModelSelection,
+    OutputSchema,
     PathCapability,
     TimeoutPolicy,
     TruncationPolicy,
@@ -23,6 +24,7 @@ class ModelProviderPortTests(unittest.TestCase):
             working_directory=Path.cwd(),
             model=ModelSelection("fake", "test-model"),
             capabilities=CapabilityProjection(paths=(PathCapability("**", "read"),), skills=("skill-a",)),
+            output_schema=OutputSchema("test_schema", {"type": "object"}),
             timeout=TimeoutPolicy(17),
             truncation=TruncationPolicy(64),
         )
@@ -33,7 +35,22 @@ class ModelProviderPortTests(unittest.TestCase):
 
         self.assertEqual("inspect", request.prompt)
         self.assertEqual("fake", request.model.provider)
+        self.assertEqual("test_schema", request.output_schema.name if request.output_schema else None)
         self.assertTrue(result.succeeded)
+
+    def test_output_schema_fails_closed_for_invalid_data(self) -> None:
+        with self.assertRaises(ValueError):
+            OutputSchema("", {"type": "object"})
+        with self.assertRaises(ValueError):
+            OutputSchema("schema", {})
+        with self.assertRaises(TypeError):
+            ModelProviderRequest(
+                prompt="inspect",
+                working_directory=Path.cwd(),
+                model=ModelSelection("fake"),
+                capabilities=CapabilityProjection(),
+                output_schema={"type": "object"},  # type: ignore[arg-type]
+            )
 
     def test_capabilities_validate_modes_and_duplicates(self) -> None:
         with self.assertRaises(ValueError):

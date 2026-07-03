@@ -47,7 +47,7 @@ class RunDomainTests(unittest.TestCase):
 
         invalid_cases = (
             lambda: RunRecord("run-1", "Fix tests", RunStatus.RUNNING),
-            lambda: RunRecord("run-1", "Fix tests", RunStatus.RUNNING, current_phase=PhaseName.PROPOSAL_PURPOSE),
+            lambda: RunRecord("run-1", "Fix tests", RunStatus.RUNNING, current_phase=PhaseName.PROPOSAL_DRAFT),
             lambda: RunRecord("run-1", "Fix tests", RunStatus.RUNNING, current_phase=PhaseName.EXPLORE_REQUEST_UNDERSTANDING, completed_phases=(PhaseName.EXPLORE_REQUEST_UNDERSTANDING,)),
         )
         for create in invalid_cases:

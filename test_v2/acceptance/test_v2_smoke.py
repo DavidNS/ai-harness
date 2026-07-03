@@ -58,8 +58,8 @@ class V2AcceptanceSmokeTests(unittest.TestCase):
             events = daemon.client.events_after(0)
 
             self.assertEqual([started.run.run_id], [run.run_id for run in listed.runs])
-            self.assertEqual("EXPLORE_BUNDLE", resumed.run.current_bundle)
-            self.assertIn(resumed.run.current_phase, {"EXPLORE_REQUEST_UNDERSTANDING", "EXPLORE_CONTEXT_PACK"})
+            self.assertEqual("EXPLORE_BUNDLE", resumed.run.current_step.bundle)
+            self.assertIn(resumed.run.current_step.phase, {"EXPLORE_REQUEST_UNDERSTANDING", "EXPLORE_CONTEXT_PACK"})
             self.assertIn("RunStarted", [type(event).__name__ for _event_id, event in events])
 
     def test_decision_answer_smoke(self) -> None:

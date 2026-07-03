@@ -72,10 +72,10 @@ class BundlePhaseSchemaTests(unittest.TestCase):
         steps = bundle_catalog.linearize_bundle(BundleName.SDD_BUNDLE)
         phase_names = tuple(step.phase_name for step in steps)
 
-        self.assertEqual(25, len(phase_names))
-        self.assertEqual(3, phase_names.count(PhaseName.VALIDATE_JSON))
+        self.assertEqual(24, len(phase_names))
+        self.assertEqual(4, phase_names.count(PhaseName.VALIDATE_JSON))
         self.assertEqual(PhaseName.EXPLORE_REQUEST_UNDERSTANDING, phase_names[0])
-        self.assertEqual(PhaseName.KNOWLEDGE_EXTRACT_TDD_PATCH, phase_names[-1])
+        self.assertEqual(PhaseName.KNOWLEDGE_EXTRACT_PATCH, phase_names[-1])
         self.assertEqual(BundleName.EXPLORE_BUNDLE, steps[0].bundle_name)
         self.assertEqual(BundleName.SDD_BUNDLE, steps[0].root_bundle)
 
@@ -90,12 +90,28 @@ class BundlePhaseSchemaTests(unittest.TestCase):
         self.assertIn(BundleName.EXPLORE_BUNDLE, completed)
         self.assertNotIn(BundleName.PROPOSAL_BUNDLE, completed)
 
+    def test_tdd_bundle_exposes_execute_then_handoff(self) -> None:
+        self.assertEqual(
+            (PhaseName.TDD_EXECUTE, PhaseName.TDD_HANDOFF),
+            tuple(bundle_catalog.phases(BundleName.TDD_BUNDLE)),
+        )
+
+    def test_phase_lookup_requires_step_id_when_phase_name_is_reused(self) -> None:
+        steps = bundle_catalog.linearize_bundle(BundleName.SDD_BUNDLE)
+        validate_steps = tuple(step for step in steps if step.phase_name is PhaseName.VALIDATE_JSON)
+
+        self.assertEqual(4, len(validate_steps))
+        with self.assertRaises(DomainValidationError):
+            bundle_catalog.step_for_phase(BundleName.SDD_BUNDLE, PhaseName.VALIDATE_JSON)
+        self.assertEqual(validate_steps[1], bundle_catalog.step_for_phase(BundleName.SDD_BUNDLE, PhaseName.VALIDATE_JSON, occurrence=1))
+        self.assertEqual(validate_steps[1], bundle_catalog.step_for_step_id(BundleName.SDD_BUNDLE, validate_steps[1].step_id))
+
     def test_completed_prefix_must_be_ordered_and_unique(self) -> None:
         prefix = tuple(bundle_catalog.phases(BundleName.SDD_BUNDLE))[:2]
         bundle_catalog.validate_completed_prefix(BundleName.SDD_BUNDLE, prefix)
 
         with self.assertRaises(DomainValidationError):
-            bundle_catalog.validate_completed_prefix(BundleName.SDD_BUNDLE, (PhaseName.PROPOSAL_PURPOSE,))
+            bundle_catalog.validate_completed_prefix(BundleName.SDD_BUNDLE, (PhaseName.PROPOSAL_HANDOFF,))
         with self.assertRaises(DomainValidationError):
             bundle_catalog.validate_completed_prefix(BundleName.SDD_BUNDLE, (prefix[0], prefix[0]))
 

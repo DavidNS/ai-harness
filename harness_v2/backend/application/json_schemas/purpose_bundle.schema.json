@@ -64,6 +64,16 @@
       "uniqueItems": true
     },
     "implementation_mode": {
+      "enum": [
+        "direct_patch",
+        "patch_with_local_refactor",
+        "refactor_first_then_patch",
+        "security_patch",
+        "documentation_only",
+        "existing_functionality",
+        "update_existing",
+        "blocked"
+      ],
       "minLength": 1,
       "type": "string"
     },

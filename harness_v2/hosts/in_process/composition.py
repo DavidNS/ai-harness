@@ -7,8 +7,10 @@ from pathlib import Path
 from harness_v2.adapters.clock import SystemClock
 from harness_v2.adapters.id_generator import UuidIdGenerator
 from harness_v2.adapters.git.release import GitCommandAdapter
+from harness_v2.adapters.git.repository import FilesystemRepositoryAdapter
 from harness_v2.adapters.ci.local import LocalCIAdapter
 from harness_v2.adapters.models import CliModelProvider
+from harness_v2.adapters.tools.subprocess_runner import SubprocessToolRunner
 from harness_v2.adapters.storage import (
     FileArtifactStore,
     FileKnowledgePatchStore,
@@ -112,6 +114,7 @@ def _build_service(
         LocalCIAdapter(),
         ReleaseRuntimeConfig(working_directory=working_path, branch_mode=branch_mode, ci_mode=github_ci_mode),
     )
+    repository = FilesystemRepositoryAdapter()
     phase_executor = PhaseExecutor(
         artifacts,
         worker,
@@ -120,6 +123,9 @@ def _build_service(
         BundleRuntimeConfig(
             working_directory=working_path,
             allow_repository_mutation=allow_repository_mutation,
+            repository=repository,
+            rollback=repository,
+            tool_runner=SubprocessToolRunner(),
         ),
         knowledge_patches=knowledge_patches,
         release_context=release_context,
